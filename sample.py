@@ -103,4 +103,46 @@ def sample(identity, ns, length=1000, error_mean=5, shuffle=True):
         ps = ps[indices]
         reads = list(reads[i] for i in indices)
         template_indices = list(template_indices[i] for i in indices)
-    return templates, phred(ps), reads, template_indices
+    return seqws_to_array(templates), ps, seqs_to_array(reads), np.array(template_indices)
+
+
+def seqs_to_array(reads):
+    convert = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+    return np.vstack(list(convert[base] for base in read) for read in reads)
+
+
+def array_to_seq(a):
+    convert = 'ACGT'
+    return ''.join(convert[i] for i in a)
+
+
+def lognormalize(x):
+    """normalize log values so they are log probabilities
+    
+    >>> np.all(lognormalize([np.log(.2), np.log(.2)]) == np.array([np.log(.5), np.log(.5)]))
+    True
+
+    """
+    a = np.logaddexp.reduce(x)
+    return x - a
+
+
+def column_distribution(bases, ps):
+    result = np.zeros(4)
+    for base, p in zip(bases, ps):
+        for cand in range(len(result)):
+            if base == cand:
+                result[cand] += np.log1p(-p)
+            else:
+                result[cand] += np.log(p)
+    return lognormalize(result)
+
+
+def estimate_template(read_array, ps):
+    # TODO: do in terms of log-sum-exp
+    dists = np.vstack(list(column_distribution(read_array[:, j], ps[:, j]) for j in range(read_array.shape[1])))
+    return dists
+
+
+def template_entropy(dists):
+    return -(dists * np.exp(dists)).sum(axis=1)
