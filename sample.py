@@ -35,7 +35,7 @@ def mutate_base(base):
 def mutate_template(template, identity):
     max_errors = np.floor(len(template) * (1 - identity) / 2)
     if max_errors < 1:
-        raise Exception('identity is too small: {}'.format(identity))
+        raise Exception('identity is too stringent: {}'.format(identity))
     n_errs = random.randint(1, max_errors)
     positions = list(sorted(random.sample(range(len(template)), n_errs)))
     mutations = list(mutate_base(template[p]) for p in positions)
@@ -103,7 +103,7 @@ def sample(identity, ns, length=1000, error_mean=5, shuffle=True):
         ps = ps[indices]
         reads = list(reads[i] for i in indices)
         template_indices = list(template_indices[i] for i in indices)
-    return seqws_to_array(templates), ps, seqs_to_array(reads), np.array(template_indices)
+    return seqs_to_array(templates), ps, seqs_to_array(reads), np.array(template_indices)
 
 
 def seqs_to_array(reads):
