@@ -36,11 +36,11 @@ def sample_from_template(template, point_rate, insertion_rate, deletion_rate):
     while coinflip(insertion_rate):
         result.append(random.choice('ACGT'))
     return ''.join(result)
-        
+
 
 def repeat_and_chain(items, ns):
     """
-    
+
     >>> list(repeat_and_chain([3, 5], [2, 2]))
     [3, 3, 5, 5]
 
@@ -48,7 +48,7 @@ def repeat_and_chain(items, ns):
     return chain.from_iterable(repeat(item, n) for item, n in zip(items, ns))
 
 
-def sample(n, length, mean_error_rate, insertion_rate, deletion_rate):
+def sample(n, length, error_rate, insertion_rate, deletion_rate):
     """Generate a template, and sample from it.
 
     Paramters
@@ -59,18 +59,22 @@ def sample(n, length, mean_error_rate, insertion_rate, deletion_rate):
     length : integer
         Length of sequences
 
-    mean_error_rate : float
-        Mean number of expected point errors per sequence.
+    error_rate : float
 
     """
     reads = []
-    ps = []
+    phreds = []
     template = sample_template(length)
     for i in range(n):
-        point_rate = poisson(mean_error_rate)
-        reads.append(sample_from_template(template,
-                                          point_rate / length,
-                                          insertion_rate / length,
-                                          deletion_rate / length))
-        ps.append(list(repeat(point_rate / length, length)))
-    return template, reads, ps
+        point_rate = poisson(error_rate) / length
+        read = sample_from_template(template, point_rate,
+                                    insertion_rate, deletion_rate)
+        reads.append(read)
+        # TODO:
+        # - vary quality scores
+        # - make varied scores actually reflect chance of mutation
+        # - include insertion/deletion scores
+        if point_rate == 0:
+            point_rate = 1 / 1e6
+        phreds.append(phred(list(repeat(point_rate, len(read)))))
+    return template, reads, phreds
