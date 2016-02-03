@@ -52,7 +52,9 @@ def mutate(template):
 
 def substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     mtype, pos, base = mutation
-    Acols = np.copy(A[:, pos:pos+3])
+    Acols = np.zeros((A.shape[0], 3))
+    Acols[:, 0] = A[:, pos]
+    Acols[0, :] = A[0, pos] + np.arange(3) * log_del
     for i in range(1, A.shape[0]):
         for j in (1, 2):
             # only need to update last two columns
@@ -65,10 +67,30 @@ def substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del):
 
 def deletion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     _, pos, _ = mutation
+    Acols = np.zeros((A.shape[0], 2))
+    Acols[:, 0] = A[:, pos]
+    Acols[0, 1] = Acols[0, 0] + log_del
+    mybase = template[pos + 1]
+    for i in range(1, A.shape[0]):
+        Acols[i, 1] = max([Acols[i - 1, 1] + log_ins,  # insertion
+                           Acols[i, 0] + log_del,  # deletion
+                           Acols[i - 1, 0] + (0 if seq_array[i - 1] == mybase else -phred[i - 1])])
+    return Acols, B[:, pos + 2]
 
 
 def insertion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     _, pos, base = mutation
+    Acols = np.zeros((A.shape[0], 3))
+    Acols[:, 0] = A[:, pos]
+    Acols[0, :] = A[0, pos] + np.arange(3) * log_del
+    for i in range(1, A.shape[0]):
+        for j in (1, 2):
+            # only need to update last two columns
+            mybase = base if j == 1 else template[pos]
+            Acols[i, j] = max([Acols[i - 1, j] + log_ins,  # insertion
+                               Acols[i, j - 1] + log_del,  # deletion
+                               Acols[i - 1, j - 1] + (0 if seq_array[i - 1] == mybase else -phred[i - 1])])
+    return Acols[:, 1:], B[:, pos + 1]
 
 
 def score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del):
