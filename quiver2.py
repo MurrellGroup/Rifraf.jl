@@ -60,7 +60,7 @@ def substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del):
             Acols[i, j] = max([Acols[i - 1, j] + log_ins,  # insertion
                                Acols[i, j - 1] + log_del,  # deletion
                                Acols[i - 1, j - 1] + (0 if seq_array[i - 1] == mybase else -phred[i - 1])])
-    return Acols, B[:, pos + 2]
+    return Acols[:, 1:], B[:, pos + 2]
 
 
 def deletion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
@@ -77,7 +77,7 @@ def score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
     if mtype == 'substitution':
         if pos == A.shape[1] - 2:
             raise Exception('not implemented yet')
-        # Acols contains columns for pos - 1, pos, and pos + 1
+        # Acols contains columns for pos, and pos + 1
         Acols, Bcol = substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del)
     elif mtype == 'insertion':
         pass
@@ -90,9 +90,9 @@ def score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
     for i in range(1, A.shape[0]):
         # all possible ways of combining alignments subalignments
         result = max([result,
-                      Acols[i - 1, 2] + Bcol[i],  # insertion
-                      Acols[i, 1] + Bcol[i],  # deletion
-                      Acols[i - 1, 1] + Bcol[i]])  # match
+                      Acols[i - 1, 1] + Bcol[i],  # insertion
+                      Acols[i, 0] + Bcol[i],  # deletion
+                      Acols[i - 1, 0] + Bcol[i]])  # match
     return result
 
 

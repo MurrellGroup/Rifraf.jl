@@ -47,7 +47,7 @@ class TestQuiver2(unittest.TestCase):
         A = forward(seq_array, phreds, template, log_ins, log_del)
         B = backward(seq_array, phreds, template, log_ins, log_del)
         Acols, Bcol = substitution(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
-        expected = forward(seq_array, phreds, seq_array, log_ins, log_del)[:, 1:4]
+        expected = forward(seq_array, phreds, seq_array, log_ins, log_del)[:, 2:4]
         self.assertTrue(np.all(Acols == expected))
         self.assertTrue(np.all(Bcol == B[3]))
 
