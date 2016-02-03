@@ -77,7 +77,7 @@ class TestQuiver2(unittest.TestCase):
         A = forward(seq_array, phreds, template, log_ins, log_del)
         B = backward(seq_array, phreds, template, log_ins, log_del)
         Acols, Bcol = deletion(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
-        expected = forward(seq_array, phreds, seq_array, log_ins, log_del)[:, [2, 3]]
+        expected = forward(seq_array, phreds, seq_array, log_ins, log_del)[:, [1, 2]]
         assert_array_equal(Acols, expected)
         assert_array_equal(Bcol, B[:, 3])
 
