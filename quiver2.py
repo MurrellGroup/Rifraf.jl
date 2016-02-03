@@ -64,7 +64,7 @@ def substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del):
         j = 1
         for i in range(1, A.shape[0]):
             Acols[i, j] = update(Acols, i, j, seq_array[i-1], base, phred[i-1], log_ins, log_del)
-        return Acols, B[:, -1]
+        return Acols, None
     Acols = np.zeros((A.shape[0], 3))
     Acols[:, 0] = A[:, pos]
     Acols[0, :] = A[0, pos] + np.arange(3) * log_del
@@ -73,21 +73,21 @@ def substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del):
             # only need to update last two columns
             mybase = base if j == 1 else template[pos + 1]
             Acols[i, j] = update(Acols, i, j, seq_array[i-1], mybase, phred[i-1], log_ins, log_del)
-    return Acols[:, 1:], B[:, pos + 2]
+    return Acols[:, 1:], B[:, pos + 1]
 
 
 def deletion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     _, pos, _ = mutation
     if pos == len(template) - 1:
-        return A[:, -3:-1], B[:, -1]
+        return A[:, -3:-1], None
     Acols = np.zeros((A.shape[0], 2))
     Acols[:, 0] = A[:, pos]
     Acols[0, 1] = Acols[0, 0] + log_del
     mybase = template[pos + 1]
     j = 1
     for i in range(1, A.shape[0]):
-        Acols[i, j] = Acols[i, j] = update(Acols, i, j, seq_array[i-1], mybase, phred[i-1], log_ins, log_del)
-    return Acols, B[:, pos + 2]
+        Acols[i, j] = update(Acols, i, j, seq_array[i-1], mybase, phred[i-1], log_ins, log_del)
+    return Acols, B[:, pos + 1]
 
 
 def insertion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
@@ -99,25 +99,25 @@ def insertion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
         Acols[0, 1] = Acols[0, 0] + log_del
         j = 1
         for i in range(1, A.shape[0]):
-            Acols[i, j] = Acols[i, j] = update(Acols, i, j, seq_array[i-1], base, phred[i-1], log_ins, log_del)
-        return Acols, B[:, -1]
+            Acols[i, j] = update(Acols, i, j, seq_array[i-1], base, phred[i-1], log_ins, log_del)
+        return Acols, None
 
     Acols = np.zeros((A.shape[0], 3))
     Acols[:, 0] = A[:, pos]
-    Acols[0, :] = A[0, pos] + np.arange(3) * log_del
+    Acols[0, :] = Acols[0, 0] + np.arange(3) * log_del
     for i in range(1, A.shape[0]):
-        for j in (1, 2):
-            # only need to update last two columns
-            mybase = base if j == 1 else template[pos]
-            Acols[i, j] = Acols[i, j] = update(Acols, i, j, seq_array[i-1], mybase, phred[i-1], log_ins, log_del)
-    return Acols[:, 1:], B[:, pos + 1]
+        for j, mybase in ((1, base), (2, template[pos])):
+            Acols[i, j] = update(Acols, i, j, seq_array[i-1], mybase, phred[i-1], log_ins, log_del)
+    return Acols[:, 1:], B[:, pos]
 
 
 def score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     """Score a mutation using the forward-backward trick."""
     f, _, _ = mutation
     Acols, Bcol = f(mutation, template, seq_array, phred, A, B, log_ins, log_del)
-    # start with deletion
+    if Bcol is None:
+        return Acols[-1, -1]
+    # first row: only deletion possible
     result = Acols[0, 1] + Bcol[0]
     for i in range(1, A.shape[0]):
         # all possible ways of combining alignments subalignments
@@ -126,6 +126,11 @@ def score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
                       Acols[i, 0] + Bcol[i],  # deletion
                       Acols[i - 1, 0] + Bcol[i]])  # match
     return result
+
+
+def scores_slow(template, sequences, phreds, log_ins, log_del):
+    return list(forward(s, phred, template, log_ins, log_del)[-1, -1]
+                for s, phred in zip(sequences, phreds))
 
 
 def update_template(template, mutation):
@@ -163,8 +168,10 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
     for i in range(maxiter):
         best_mutation = None
         for mutation in mutations(template):
-            score = sum(score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
-                             for seq_array, phred, A, B in zip(seq_arrays, phreds, As, Bs))
+            scores = list(score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
+                          for seq_array, phred, A, B in zip(seq_arrays, phreds, As, Bs))
+            scores2 = scores_slow(update_template(template, mutation), seq_arrays, phreds, log_ins, log_del)
+            assert np.all(np.array(scores) == np.array(scores2))
             if score > best_score:
                 best_mutation = mutation
                 best_score = score
