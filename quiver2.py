@@ -11,7 +11,7 @@ def array_to_seq(a):
     return ''.join(convert[i] for i in a)
 
 
-def forward(s, qv, t, log_ins, log_del):
+def forward(s, phred, t, log_ins, log_del):
     result = np.zeros((len(s) + 1, len(t) + 1))
     # invariant: result[i, j] is prob of aligning s[:i] to t[:j]
     result[:, 0] = log_ins * np.arange(len(s) + 1)
@@ -21,64 +21,80 @@ def forward(s, qv, t, log_ins, log_del):
             result[i, j] = max([result[i - 1, j] + log_ins,  # insertion
                                 result[i, j - 1] + log_del,  # deletion
                                 # TODO: phred(1-p) may not be negligible
-                                result[i - 1, j - 1] + (0 if s[i - 1] == t[j - 1] else qv[i - 1])])
+                                result[i - 1, j - 1] + (0 if s[i - 1] == t[j - 1] else -phred[i - 1])])
     return result
 
 
-def score(template, sequences, phreds, log_ins, log_del):
-    return sum(forward(s, qv, template, log_ins, log_del)[-1, -1]
-               for s, qv in zip(sequences, phreds))
+def backward(s, phred, t, log_ins, log_del):
+    s = list(reversed(s))
+    phred = list(reversed(phred))
+    t = list(reversed(t))
+    return np.flipud(np.fliplr(forward(s, phred, t, log_ins, log_del)))
 
-
-# def backward(s, qv, t, log_ins, log_del):
-#     return np.flipud(np.fliplr(forward(s[:,:,-1], qv[:,:,-1], t[:,:,-1], log_ins, log_del)))
-
-
-# def _mutation_score(j, val, s, t, A, B):
-#     if val == t[j]:
-#         # no need to update
-#         return B[0, 0]
-#     if j == 0:
-#         # update B[:, 0] and use it
-#         for i in reversed(range(len(A))):
-#             B[i, j] = max([result[i - 1, j] + log_ins,  # insertion
-#                            result[i, j - 1] + log_del,  # deletion
-#                            # TODO: phred(1-p) may not be negligible
-#                            result[i - 1, j - 1] + (0 if s[i] == t[j] else qv[i])])
-#         return B[0, 0]
-
-#     if j == len(A) - 1:
-#         # update A[:, j] and use it
-#         for i in range(len(A)):
-#             A[i, j] = max([result[i - 1, j] + log_ins,  # insertion
-#                            result[i, j - 1] + log_del,  # deletion
-#                            # TODO: phred(1-p) may not be negligible
-#                            result[i - 1, j - 1] + (0 if s[i] == val else qv[i])])
-#         x, y = A.shape
-#         return A[x - 1, y - 1]
-#     # need updated A[:, j]
-#     # need un-updated B[:, j+1]
 
 def mutate(template):
-    # yield all single indel variants of a sequences
+    """Returns (type, position, base)"""
     for j in range(len(template)):
         # mutation
-        for val in range(4):
-            result = np.copy(template)
-            result[j] = val
-            yield result
+        for base in range(4):
+            if template[j] == base:
+                continue
+            yield ('substitution', j, base)
         # deletion
-        result = np.copy(template)
-        yield np.delete(result, j)
+        yield ('deletion', j, None)
         # insertion
-        for val in range(4):
-            result = np.copy(template)
-            result = np.insert(result, j, val)
-            yield result
+        for base in range(4):
+            yield ('insertion', j, base)
     # insertion after last
-    result = np.copy(template)
-    result = np.insert(result, len(result), val)
-    yield result
+    for base in range(4):
+        yield ('insertion', len(template), base)
+
+
+def substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del):
+    mtype, pos, base = mutation
+    Acols = np.copy(A[:, pos:pos+3])
+    for i in range(1, A.shape[0]):
+        for j in (1, 2):
+            # only need to update last two columns
+            mybase = base if j == 1 else template[pos + 1]
+            Acols[i, j] = max([Acols[i - 1, j] + log_ins,  # insertion
+                               Acols[i, j - 1] + log_del,  # deletion
+                               Acols[i - 1, j - 1] + (0 if seq_array[i - 1] == mybase else -phred[i - 1])])
+    return Acols, B[:, pos + 2]
+
+
+def deletion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
+    _, pos, _ = mutation
+
+
+def insertion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
+    _, pos, base = mutation
+
+
+def score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del):
+    """Score a mutation using the forward-backward trick."""
+    mtype, pos, base = mutation
+    if mtype == 'substitution':
+        if pos == A.shape[1] - 2:
+            raise Exception('not implemented yet')
+        # Acols contains columns for pos - 1, pos, and pos + 1
+        Acols, Bcol = substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del)
+    elif mtype == 'insertion':
+        pass
+    elif mtype == 'deletion':
+        pass
+    else:
+        raise Exception('unknown mutation type: {}'.format(mutation))
+    # start with deletion
+    result = Acols[0, 1] + Bcol[0]
+    for i in range(1, A.shape[0]):
+        # all possible ways of combining alignments subalignments
+        result = max([result,
+                      Acols[i - 1, 2] + Bcol[i],  # insertion
+                      Acols[i, 1] + Bcol[i],  # deletion
+                      Acols[i - 1, 1] + Bcol[i]])  # match
+    return result
+
 
 
 def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
@@ -89,27 +105,28 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
 
     """
     seq_arrays = list(seq_to_array(s) for s in sequences)
-    log_ps = list(-p for p in phreds)
     # choose first sequence as initial template
     # TODO: choose highest quality sequence as a template
     template = np.copy(seq_arrays[0])
 
-    # # compute forward matrices A and backward matrices B
-    # As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
-    # Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
+    As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
+    Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
+    best_score = sum(A[-1, -1] for A in As)
 
     # iterate: consider all changes and choose best until convergence
     for i in range(maxiter):
-        old = template
-        best = template
-        best_score = score(template, seq_arrays, log_ps, log_ins, log_del)
-        # TODO: score candidates with column trick
-        for cand in mutate(template):
-            cand_score = score(cand, seq_arrays, log_ps, log_ins, log_del)
+        best_mutation = None
+        for mutation in mutations(template):
+            cand_score = sum(score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
+                             for seq_array, phred, A, B in zip(seq_arrays, phreds, As, Bs))
             if cand_score > best_score:
-                best = cand
+                best_mutation = mutation
                 best_score = cand_score
-        template = best
-        if np.all(old == template):
+        if best_mutation is None:
+            # no better template found
             break
+        template = update_template(template, best_mutation)
+        As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
+        Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
+        best_score = sum(A[-1, -1] for A in As)
     return array_to_seq(template)
