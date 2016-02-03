@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 
 
@@ -148,14 +150,15 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
 
     """
     seq_arrays = list(seq_to_array(s) for s in sequences)
-    # choose first sequence as initial template
+    # choose random sequence as initial template
     # TODO: use pbdagcon for initial template
-    template = np.copy(seq_arrays[0])
+    template = np.copy(random.choice(seq_arrays))
 
     As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
     Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
     best_score = sum(A[-1, -1] for A in As)
-
+    orig_best_score = sum(A[-1, -1] for A in As)
+    print(array_to_seq(template))
     # iterate: consider all changes and choose best until convergence
     for i in range(maxiter):
         best_mutation = None
@@ -171,9 +174,13 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
         new_template = update_template(template, best_mutation)
         new_As = list(forward(s, p, new_template, log_ins, log_del) for s, p in zip(sequences, phreds))
         new_Bs = list(backward(s, p, new_template, log_ins, log_del) for s, p in zip(sequences, phreds))
-        new_score = sum(A[-1, -1] for A in new_As)
-        assert(new_score == best_score)
+        new_score = sum(a[-1, -1] for a in new_As)
+        assert(np.any(list(o[-1, -1] != n[-1, -1] for o, n in zip(As, new_As))))
+        assert(np.any(list(o[0, 0] != n[0, 0] for o, n in zip(Bs, new_Bs))))
+        assert new_score == best_score
+        assert new_score > orig_best_score
         template = new_template
         As = new_As
         Bs = new_Bs
+        print(array_to_seq(template))
     return array_to_seq(template)
