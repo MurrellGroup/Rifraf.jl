@@ -74,7 +74,6 @@ def sample(n, length, error_rate, insertion_rate, deletion_rate):
         # - vary quality scores
         # - make varied scores actually reflect chance of mutation
         # - include insertion/deletion scores
-        if point_rate == 0:
-            point_rate = 1 / 1e6
-        phreds.append(phred(list(repeat(point_rate, len(read)))))
+        error_rate = point_rate + insertion_rate + deletion_rate
+        phreds.append(phred(list(repeat(error_rate, len(read)))))
     return template, reads, phreds
