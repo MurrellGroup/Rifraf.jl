@@ -9,9 +9,6 @@ from sample import sample_from_template
 from quiver2 import update_template
 from quiver2 import forward
 from quiver2 import backward
-from quiver2 import substitution
-from quiver2 import insertion
-from quiver2 import deletion
 from quiver2 import score_mutation
 
 
@@ -73,8 +70,8 @@ class TestQuiver2(unittest.TestCase):
             template = template_seq
             seq = sample_from_template(template_seq, point_rate, insertion_rate, deletion_rate)
             seq = seq
-            f = random.choice([substitution, insertion, deletion])
-            maxpos = len(template) if f == insertion else len(template) - 1
+            f = random.choice(['substitution', 'insertion', 'deletion'])
+            maxpos = len(template) if f == 'insertion' else len(template) - 1
             mutation = (f,
                         random.randint(0, maxpos),
                         random.choice('ACGT'))
