@@ -64,20 +64,20 @@ def substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del):
         j = 1
         for i in range(1, A.shape[0]):
             Acols[i, j] = update(Acols, i, j, seq_array[i-1], base, phred[i-1], log_ins, log_del)
-        return Acols, None
+        return Acols[:, 1], None
     Acols = np.copy(A[:, pos:pos+3])
     for i in range(1, A.shape[0]):
         for j in (1, 2):
             # only need to update last two columns
             mybase = base if j == 1 else template[pos + 1]
             Acols[i, j] = update(Acols, i, j, seq_array[i-1], mybase, phred[i-1], log_ins, log_del)
-    return Acols[:, 1:], B[:, pos + 1]
+    return Acols[:, 1], B[:, pos + 1]
 
 
 def deletion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     _, pos, _ = mutation
     if pos == len(template) - 1:
-        return A[:, -3:-1], None
+        return A[:, -2], None
     Acols = np.zeros((A.shape[0], 2))
     Acols[:, 0] = A[:, pos]
     Acols[0, 1] = Acols[0, 0] + log_del
@@ -85,7 +85,7 @@ def deletion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     j = 1
     for i in range(1, A.shape[0]):
         Acols[i, j] = update(Acols, i, j, seq_array[i-1], mybase, phred[i-1], log_ins, log_del)
-    return Acols, B[:, pos + 1]
+    return Acols[:, 0], B[:, pos + 1]
 
 
 def insertion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
@@ -98,7 +98,7 @@ def insertion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
         j = 1
         for i in range(1, A.shape[0]):
             Acols[i, j] = update(Acols, i, j, seq_array[i-1], base, phred[i-1], log_ins, log_del)
-        return Acols, None
+        return Acols[:, -1], None
 
     Acols = np.zeros((A.shape[0], 3))
     Acols[:, 0] = A[:, pos]
@@ -106,16 +106,16 @@ def insertion(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     for i in range(1, A.shape[0]):
         for j, mybase in ((1, base), (2, template[pos])):
             Acols[i, j] = update(Acols, i, j, seq_array[i-1], mybase, phred[i-1], log_ins, log_del)
-    return Acols[:, 1:], B[:, pos]
+    return Acols[:, 1], B[:, pos]
 
 
 def score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del):
     """Score a mutation using the forward-backward trick."""
     f, _, _ = mutation
-    Acols, Bcol = f(mutation, template, seq_array, phred, A, B, log_ins, log_del)
+    Acol, Bcol = f(mutation, template, seq_array, phred, A, B, log_ins, log_del)
     if Bcol is None:
-        return Acols[-1, -1]
-    return (Acols[:, 0] + Bcol).max()
+        return Acol[-1]
+    return (Acol + Bcol).max()
 
 
 def score_slow(template, sequence, phred, log_ins, log_del):
