@@ -65,9 +65,7 @@ def substitution(mutation, template, seq_array, phred, A, B, log_ins, log_del):
         for i in range(1, A.shape[0]):
             Acols[i, j] = update(Acols, i, j, seq_array[i-1], base, phred[i-1], log_ins, log_del)
         return Acols, None
-    Acols = np.zeros((A.shape[0], 3))
-    Acols[:, 0] = A[:, pos]
-    Acols[0, :] = A[0, pos] + np.arange(3) * log_del
+    Acols = np.copy(A[:, pos:pos+3])
     for i in range(1, A.shape[0]):
         for j in (1, 2):
             # only need to update last two columns
@@ -117,20 +115,11 @@ def score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
     Acols, Bcol = f(mutation, template, seq_array, phred, A, B, log_ins, log_del)
     if Bcol is None:
         return Acols[-1, -1]
-    # first row: only deletion possible
-    result = Acols[0, 1] + Bcol[0]
-    for i in range(1, A.shape[0]):
-        # all possible ways of combining alignments subalignments
-        result = max([result,
-                      Acols[i - 1, 1] + Bcol[i],  # insertion
-                      Acols[i, 0] + Bcol[i],  # deletion
-                      Acols[i - 1, 0] + Bcol[i]])  # match
-    return result
+    return (Acols[:, 0] + Bcol).max()
 
 
-def scores_slow(template, sequences, phreds, log_ins, log_del):
-    return list(forward(s, phred, template, log_ins, log_del)[-1, -1]
-                for s, phred in zip(sequences, phreds))
+def score_slow(template, sequence, phred, log_ins, log_del):
+    return forward(sequence, phred, template, log_ins, log_del)[-1, -1]
 
 
 def update_template(template, mutation):
@@ -155,23 +144,25 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
 
     """
     seq_arrays = list(seq_to_array(s) for s in sequences)
+    del sequences
     # choose random sequence as initial template
     # TODO: use pbdagcon for initial template
     template = np.copy(random.choice(seq_arrays))
 
-    As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
-    Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, phreds))
+    As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
+    Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
     best_score = sum(A[-1, -1] for A in As)
     orig_best_score = sum(A[-1, -1] for A in As)
-    print(array_to_seq(template))
     # iterate: consider all changes and choose best until convergence
     for i in range(maxiter):
         best_mutation = None
         for mutation in mutations(template):
             scores = list(score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
                           for seq_array, phred, A, B in zip(seq_arrays, phreds, As, Bs))
-            scores2 = scores_slow(update_template(template, mutation), seq_arrays, phreds, log_ins, log_del)
+            cand_template = update_template(template, mutation)
+            scores2 = list(score_slow(cand_template, s, p, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
             assert np.all(np.array(scores) == np.array(scores2))
+            score = sum(scores)
             if score > best_score:
                 best_mutation = mutation
                 best_score = score
@@ -179,8 +170,8 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
             # no better template found
             break
         new_template = update_template(template, best_mutation)
-        new_As = list(forward(s, p, new_template, log_ins, log_del) for s, p in zip(sequences, phreds))
-        new_Bs = list(backward(s, p, new_template, log_ins, log_del) for s, p in zip(sequences, phreds))
+        new_As = list(forward(s, p, new_template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
+        new_Bs = list(backward(s, p, new_template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
         new_score = sum(a[-1, -1] for a in new_As)
         assert(np.any(list(o[-1, -1] != n[-1, -1] for o, n in zip(As, new_As))))
         assert(np.any(list(o[0, 0] != n[0, 0] for o, n in zip(Bs, new_Bs))))
@@ -189,5 +180,4 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
         template = new_template
         As = new_As
         Bs = new_Bs
-        print(array_to_seq(template))
     return array_to_seq(template)

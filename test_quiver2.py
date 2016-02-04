@@ -1,9 +1,11 @@
+import random
 import unittest
 
 import numpy as np
 from numpy.testing import assert_array_equal
 
 from sample import phred
+from sample import sample_from_template
 from quiver2 import seq_to_array
 from quiver2 import update_template
 from quiver2 import forward
@@ -12,7 +14,11 @@ from quiver2 import substitution
 from quiver2 import insertion
 from quiver2 import deletion
 from quiver2 import score_mutation
-from quiver2 import scores_slow
+from quiver2 import score_slow
+
+
+def random_seq(length):
+    return ''.join(random.choice('ACGT') for _ in range(length))
 
 
 class TestQuiver2(unittest.TestCase):
@@ -69,8 +75,8 @@ class TestQuiver2(unittest.TestCase):
         assert_array_equal(Acols, Aup[:, [2, 3]])
         assert_array_equal(Bcol, B[:, 2])
         score = score_mutation(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
-        score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
-        self.assertEqual(score, score2)
+        # score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
+        # self.assertEqual(score, score2)
         self.assertEqual(score, Aup[-1, -1])
 
     def test_substitution_last(self):
@@ -88,8 +94,8 @@ class TestQuiver2(unittest.TestCase):
         Aup = forward(seq_array, phreds, new_template, log_ins, log_del)[:, [2, 3]]
         assert_array_equal(Acols, Aup[:, -2:])
         score = score_mutation(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
-        score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
-        self.assertEqual(score, score2)
+        # score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
+        # self.assertEqual(score, score2)
         self.assertEqual(score, Aup[-1, -1])
 
     def test_insertion(self):
@@ -108,8 +114,8 @@ class TestQuiver2(unittest.TestCase):
         assert_array_equal(Acols, Aup[:, [2, 3]])
         assert_array_equal(Bcol, B[:, 1])
         score = score_mutation(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
-        score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
-        self.assertEqual(score, score2)
+        # score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
+        # self.assertEqual(score, score2)
         self.assertEqual(score, Aup[-1, -1])
 
     def test_insertion_last(self):
@@ -128,8 +134,8 @@ class TestQuiver2(unittest.TestCase):
         Bup = backward(seq_array, phreds, new_template, log_ins, log_del)
         assert_array_equal(Acols, Aup[:, -2:])
         score = score_mutation(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
-        score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
-        self.assertEqual(score, score2)
+        # score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
+        # self.assertEqual(score, score2)
         self.assertEqual(score, Aup[-1, -1])
 
     def test_deletion(self):
@@ -148,8 +154,8 @@ class TestQuiver2(unittest.TestCase):
         assert_array_equal(Acols, Aup[:, [1, 2]])
         assert_array_equal(Bcol, B[:, 2])
         score = score_mutation(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
-        score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
-        self.assertEqual(score, score2)
+        # score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
+        # self.assertEqual(score, score2)
         self.assertEqual(score, Aup[-1, -1])
 
     def test_deletion_last(self):
@@ -167,9 +173,35 @@ class TestQuiver2(unittest.TestCase):
         Aup = forward(seq_array, phreds, new_template, log_ins, log_del)
         assert_array_equal(Acols, Aup[:, -2:])
         score = score_mutation(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
-        score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
-        self.assertEqual(score, score2)
+        # score2 = sum(scores_slow(new_template, [seq_array], [phreds], log_ins, log_del))
+        # self.assertEqual(score, score2)
         self.assertEqual(score, Aup[-1, -1])
+
+    def test_random_mutations(self):
+        point_rate = 0.1
+        insertion_rate = 0.01
+        deletion_rate = 0.01
+        log_ins = np.log10(insertion_rate)
+        log_del = np.log10(deletion_rate)
+        for _ in range(10000):
+            template_len = random.randint(3, 20)
+            template_seq = random_seq(template_len)
+            template = seq_to_array(template_seq)
+            seq = sample_from_template(template_seq, point_rate, insertion_rate, deletion_rate)
+            seq_array = seq_to_array(seq)
+            f = random.choice([substitution, insertion, deletion])
+            mutation = (f,
+                        random.randint(0, len(template) - 2),
+                        random.choice([0, 1, 2, 3]))
+            new_template = update_template(template, mutation)
+            phreds = phred(np.repeat(point_rate + insertion_rate + deletion_rate, len(seq_array)))
+            A = forward(seq_array, phreds, template, log_ins, log_del)
+            B = backward(seq_array, phreds, template, log_ins, log_del)
+            score = score_mutation(mutation, template, seq_array, phreds, A, B, log_ins, log_del)
+            score2 = score_slow(new_template, seq_array, phreds, log_ins, log_del)
+            score3 = forward(seq_array, phreds, new_template, log_ins, log_del)[-1, -1]
+            self.assertAlmostEqual(score, score2)
+            self.assertAlmostEqual(score, score3)
 
 
 if __name__ == '__main__':
