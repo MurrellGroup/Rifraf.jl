@@ -2,6 +2,7 @@ import random
 
 import numpy as np
 
+# TODO: do not completely recompute As and Bs each iteration. Only recompute from (first) Acol on.
 # TODO: implement banding.
 # TODO: either write slow code in Cython, or rewrite in Julia
 
@@ -38,15 +39,15 @@ def mutations(template):
         for base in 'ACGT':
             if template[j] == base:
                 continue
-            yield (substitution, j, base)
+            yield [substitution, j, base]
         # deletion
-        yield (deletion, j, None)
+        yield [deletion, j, None]
         # insertion
         for base in 'ACGT':
-            yield (insertion, j, base)
+            yield [insertion, j, base]
     # insertion after last
     for base in 'ACGT':
-        yield (insertion, len(template), base)
+        yield [insertion, len(template), base]
 
 
 def substitution(mutation, template, seq, log_p, A, B, log_ins, log_del):
@@ -108,7 +109,23 @@ def update_template(template, mutation):
         raise Exception('unknown mutation: {}'.format(mtype))
 
 
-def quiver2(sequences, phreds, log_ins, log_del, maxiter=100, seed=None, verbose=False):
+def apply_mutations(template, mutations):
+    for i in range(len(mutations)):
+        score, mutation = mutations[i]
+        template = update_template(template, mutation)
+        f, pos, _ = mutation
+        if f == insertion:
+            for ii in range(i + 1, len(mutations)):
+                if mutations[ii][1][1] > pos:
+                    mutations[ii][1][1] += 1
+        elif f == deletion:
+            for ii in range(i + 1, len(mutations)):
+                if mutations[ii][1][1] > pos:
+                    mutations[ii][1][1] -= 1
+    return template
+
+
+def quiver2(sequences, phreds, log_ins, log_del, maxiter=100, mindist=9, seed=None, verbose=False):
     """
     sequences: list of dna sequences
 
@@ -122,23 +139,32 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100, seed=None, verbose
 
     As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
     Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
-    best_score = sum(A[-1, -1] for A in As)
-    orig_best_score = sum(A[-1, -1] for A in As)
+    cur_score = sum(A[-1, -1] for A in As)
     for i in range(maxiter):
         if verbose:
             print("iteration {}".format(i))
-        best_mutation = None
+        candidates = []
         for mutation in mutations(template):
             score = sum(score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del)
                         for seq, log_p, A, B in zip(sequences, log_ps, As, Bs))
-            if score > best_score:
-                best_mutation = mutation
-                best_score = score
-        if best_mutation is None:
+            if score > cur_score:
+                candidates.append([score, mutation])
+        if not candidates:
             break
-        if verbose:
-            print('score: {}'.format(best_score))
-        template = update_template(template, best_mutation)
+
+        final_cands = []
+        posns = set()
+        for c in reversed(sorted(candidates, key=lambda c: c[0])):
+            _, (_, posn, _) = c
+            if any(abs(posn - p) < mindist for p in posns):
+                continue
+            posns.add(posn)
+            final_cands.append(c)
+        template = apply_mutations(template, final_cands)
         As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
         Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
+        cur_score = sum(A[-1, -1] for A in As)
+        if verbose:
+            print('  kept {} mutations'.format(len(final_cands)))
+            print('  score: {}'.format(cur_score))
     return template
