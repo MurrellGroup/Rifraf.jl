@@ -96,10 +96,6 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del):
     return (Acol + Bcol).max()
 
 
-def score_slow(template, sequence, log_p, log_ins, log_del):
-    return forward(sequence, log_p, template, log_ins, log_del)[-1, -1]
-
-
 def update_template(template, mutation):
     f, pos, base = mutation
     if f == substitution:
