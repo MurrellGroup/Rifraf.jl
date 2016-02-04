@@ -16,8 +16,8 @@ def random_seq(length):
     return ''.join(random.choice('ACGT') for _ in range(length))
 
 
-def score_slow(template, sequence, log_p, log_ins, log_del):
-    return forward(sequence, log_p, template, log_ins, log_del)[-1, -1]
+def score_slow(template, sequence, log_p, log_ins, log_del, bandwidth):
+    return forward(sequence, log_p, template, log_ins, log_del, bandwidth)[-1, -1]
 
 
 class TestQuiver2(unittest.TestCase):
@@ -28,10 +28,10 @@ class TestQuiver2(unittest.TestCase):
         template = 'AA'
         seq = 'AA'
         log_p = np.repeat(-3, len(seq))
-        A = forward(seq, log_p, template, log_ins, log_del)
-        expected = np.array([[  0, -10, -20],
+        A = forward(seq, log_p, template, log_ins, log_del, bandwidth=1)
+        expected = np.array([[  0, -10, 0],
                              [ -5,   0, -10],
-                             [-10,  -5,   0]])
+                             [0,  -5,   0]])
         assert_array_equal(A, expected)
 
     def test_backward(self):
@@ -40,10 +40,10 @@ class TestQuiver2(unittest.TestCase):
         template = 'AA'
         seq = 'AT'
         log_p = np.repeat(-3, len(seq))
-        B = backward(seq, log_p, template, log_ins, log_del)
-        expected = np.array([[-3, -5, -10],
+        B = backward(seq, log_p, template, log_ins, log_del, bandwidth=1)
+        expected = np.array([[-3, -5, 0],
                              [-13, -3, -5],
-                             [-20, -10, 0]])
+                             [0, -10, 0]])
         assert_array_equal(B, expected)
 
     def test_imperfect_forward(self):
@@ -52,10 +52,10 @@ class TestQuiver2(unittest.TestCase):
         template = 'AA'
         seq = 'AT'
         log_p = np.repeat(-3, len(seq))
-        A = forward(seq, log_p, template, log_ins, log_del)
-        expected = np.array([[  0, -10, -20],
+        A = forward(seq, log_p, template, log_ins, log_del, bandwidth=1)
+        expected = np.array([[  0, -10, 0],
                              [ -5,  0,  -10],
-                             [-10, -5,  -3]])
+                             [0, -5,  -3]])
         assert_array_equal(A, expected)
 
     def test_random_mutations(self):
@@ -65,11 +65,11 @@ class TestQuiver2(unittest.TestCase):
         log_ins = np.log10(insertion_rate)
         log_del = np.log10(deletion_rate)
         for _ in range(1000):
-            template_len = random.randint(3, 20)
+            template_len = random.randint(5, 20)
             template_seq = random_seq(template_len)
             template = template_seq
             seq = sample_from_template(template_seq, point_rate, insertion_rate, deletion_rate)
-            seq = seq
+            bandwidth = max(2 * np.abs(len(template) - len(seq)), 5)
             f = random.choice(['substitution', 'insertion', 'deletion'])
             maxpos = len(template) if f == 'insertion' else len(template) - 1
             mutation = (f,
@@ -78,11 +78,11 @@ class TestQuiver2(unittest.TestCase):
             new_template = update_template(template, mutation)
             phreds = phred(np.repeat(point_rate + insertion_rate + deletion_rate, len(seq)))
             log_p = -phreds / 10
-            A = forward(seq, log_p, template, log_ins, log_del)
-            B = backward(seq, log_p, template, log_ins, log_del)
-            score = score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del)
-            score2 = score_slow(new_template, seq, log_p, log_ins, log_del)
-            score3 = forward(seq, log_p, new_template, log_ins, log_del)[-1, -1]
+            A = forward(seq, log_p, template, log_ins, log_del, bandwidth)
+            B = backward(seq, log_p, template, log_ins, log_del, bandwidth)
+            score = score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
+            score2 = score_slow(new_template, seq, log_p, log_ins, log_del, bandwidth)
+            score3 = forward(seq, log_p, new_template, log_ins, log_del, bandwidth)[-1, -1]
             self.assertAlmostEqual(score, score2)
             self.assertAlmostEqual(score, score3)
 
