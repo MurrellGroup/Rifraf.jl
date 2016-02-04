@@ -121,7 +121,7 @@ def update_template(template, mutation):
         raise Exception('unknown mutation: {}'.format(mtype))
 
 
-def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
+def quiver2(sequences, phreds, log_ins, log_del, maxiter=100, seed=None):
     """
     sequences: list of dna sequences
 
@@ -132,7 +132,8 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
     del sequences
     # choose random sequence as initial template
     # TODO: use pbdagcon for initial template
-    template = np.copy(random.choice(seq_arrays))
+    state = np.random.RandomState(seed)
+    template = np.copy(state.choice(seq_arrays))
 
     As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
     Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
@@ -142,27 +143,14 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100):
     for i in range(maxiter):
         best_mutation = None
         for mutation in mutations(template):
-            scores = list(score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
-                          for seq_array, phred, A, B in zip(seq_arrays, phreds, As, Bs))
-            cand_template = update_template(template, mutation)
-            scores2 = list(score_slow(cand_template, s, p, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
-            assert np.all(np.array(scores) == np.array(scores2))
-            score = sum(scores)
+            score = sum(score_mutation(mutation, template, seq_array, phred, A, B, log_ins, log_del)
+                        for seq_array, phred, A, B in zip(seq_arrays, phreds, As, Bs))
             if score > best_score:
                 best_mutation = mutation
                 best_score = score
         if best_mutation is None:
-            # no better template found
             break
-        new_template = update_template(template, best_mutation)
-        new_As = list(forward(s, p, new_template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
-        new_Bs = list(backward(s, p, new_template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
-        new_score = sum(a[-1, -1] for a in new_As)
-        assert(np.any(list(o[-1, -1] != n[-1, -1] for o, n in zip(As, new_As))))
-        assert(np.any(list(o[0, 0] != n[0, 0] for o, n in zip(Bs, new_Bs))))
-        assert new_score == best_score
-        assert new_score > orig_best_score
-        template = new_template
-        As = new_As
-        Bs = new_Bs
+        template = update_template(template, best_mutation)
+        As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
+        Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(seq_arrays, phreds))
     return array_to_seq(template)
