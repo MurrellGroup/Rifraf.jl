@@ -176,7 +176,7 @@ class TestQuiver2(unittest.TestCase):
         deletion_rate = 0.01
         log_ins = np.log10(insertion_rate)
         log_del = np.log10(deletion_rate)
-        for _ in range(10000):
+        for _ in range(1000):
             template_len = random.randint(3, 20)
             template_seq = random_seq(template_len)
             template = seq_to_array(template_seq)
