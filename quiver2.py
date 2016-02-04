@@ -121,7 +121,9 @@ def apply_mutations(template, mutations):
     return template
 
 
-def quiver2(sequences, phreds, log_ins, log_del, maxiter=100, mindist=9, seed=None, verbose=False):
+def quiver2(sequences, phreds, log_ins, log_del, mindist=9,
+            max_iters=100, max_multi_iters=50, seed=None,
+            verbose=False):
     """
     sequences: list of dna sequences
 
@@ -136,7 +138,7 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100, mindist=9, seed=No
     As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
     Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
     cur_score = sum(A[-1, -1] for A in As)
-    for i in range(maxiter):
+    for i in range(max_iters):
         if verbose:
             print("iteration {}".format(i))
         candidates = []
@@ -148,14 +150,17 @@ def quiver2(sequences, phreds, log_ins, log_del, maxiter=100, mindist=9, seed=No
         if not candidates:
             break
 
-        final_cands = []
-        posns = set()
-        for c in reversed(sorted(candidates, key=lambda c: c[0])):
-            _, (_, posn, _) = c
-            if any(abs(posn - p) < mindist for p in posns):
-                continue
-            posns.add(posn)
-            final_cands.append(c)
+        if i < max_multi_iters:
+            final_cands = []
+            posns = set()
+            for c in reversed(sorted(candidates, key=lambda c: c[0])):
+                _, (_, posn, _) = c
+                if any(abs(posn - p) < mindist for p in posns):
+                    continue
+                posns.add(posn)
+                final_cands.append(c)
+        else:
+            final_cands = [list(sorted(candidates, key=lambda c: c[0]))[-1]]
         template = apply_mutations(template, final_cands)
         As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
         Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
