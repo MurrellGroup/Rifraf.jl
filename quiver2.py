@@ -5,6 +5,7 @@ import numpy as np
 # TODO: do not completely recompute As and Bs each iteration. Only recompute from (first) Acol on.
 # TODO: implement banding.
 # TODO: either write slow code in Cython, or rewrite in Julia
+# TODO: compress duplicate reads and account for their scores
 
 
 def update(arr, i, j, s_base, t_base, log_p, log_ins, log_del):
@@ -121,7 +122,22 @@ def apply_mutations(template, mutations):
     return template
 
 
-def quiver2(sequences, phreds, log_ins, log_del, mindist=9,
+def choose_candidates(candidates, min_dist, i, max_multi_iters):
+    final_cands = []
+    if i < max_multi_iters:
+        posns = set()
+        for c in reversed(sorted(candidates, key=lambda c: c[0])):
+            _, (_, posn, _) = c
+            if any(abs(posn - p) < min_dist for p in posns):
+                continue
+            posns.add(posn)
+            final_cands.append(c)
+    else:
+        final_cands = [list(sorted(candidates, key=lambda c: c[0]))[-1]]
+    return final_cands
+
+
+def quiver2(sequences, phreds, log_ins, log_del, min_dist=9,
             max_iters=100, max_multi_iters=50, seed=None,
             verbose=False):
     """
@@ -149,23 +165,12 @@ def quiver2(sequences, phreds, log_ins, log_del, mindist=9,
                 candidates.append([score, mutation])
         if not candidates:
             break
-
-        if i < max_multi_iters:
-            final_cands = []
-            posns = set()
-            for c in reversed(sorted(candidates, key=lambda c: c[0])):
-                _, (_, posn, _) = c
-                if any(abs(posn - p) < mindist for p in posns):
-                    continue
-                posns.add(posn)
-                final_cands.append(c)
-        else:
-            final_cands = [list(sorted(candidates, key=lambda c: c[0]))[-1]]
-        template = apply_mutations(template, final_cands)
+        chosen_cands = choose_candidates(candidates, min_dist, i, max_multi_iters)
+        template = apply_mutations(template, chosen_cands)
         As = list(forward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
         Bs = list(backward(s, p, template, log_ins, log_del) for s, p in zip(sequences, log_ps))
         cur_score = sum(A[-1, -1] for A in As)
         if verbose:
-            print('  kept {} mutations'.format(len(final_cands)))
+            print('  kept {} mutations'.format(len(chosen_cands)))
             print('  score: {}'.format(cur_score))
     return template
