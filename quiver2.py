@@ -16,7 +16,6 @@ def update(arr, i, j, s_base, t_base, log_p, log_ins, log_del):
 
 def forward(s, log_p, t, log_ins, log_del):
     result = np.zeros((len(s) + 1, len(t) + 1))
-    # invariant: result[i, j] is prob of aligning s[:i] to t[:j]
     result[:, 0] = log_ins * np.arange(len(s) + 1)
     result[0, :] = log_del * np.arange(len(t) + 1)
     for i in range(1, len(s) + 1):
@@ -35,14 +34,11 @@ def backward(s, log_p, t, log_ins, log_del):
 def mutations(template):
     """Returns (function, position, base)"""
     for j in range(len(template)):
-        # mutation
         for base in 'ACGT':
             if template[j] == base:
                 continue
             yield [substitution, j, base]
-        # deletion
         yield [deletion, j, None]
-        # insertion
         for base in 'ACGT':
             yield [insertion, j, base]
     # insertion after last
