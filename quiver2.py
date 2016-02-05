@@ -244,7 +244,9 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
     template = ''.join(bases).upper()
 
     lens = list(len(s) for s in sequences)
-    min_bandwidth = max(1, int(1.5 * (max(lens) - min(lens))))
+    maxlen = max(max(lens), len(template))
+    minlen = min(min(lens), len(template))
+    min_bandwidth = max(1, 2 * (maxlen - minlen))
     if bandwidth is None:
         bandwidth = min_bandwidth
     bandwidth = max(min_bandwidth, bandwidth)
