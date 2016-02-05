@@ -1,6 +1,6 @@
 import random
-
 import numpy as np
+import scipy.sparse as sp
 
 # TODO: sparse matrices for banding
 # TODO: either write slow code in Cython, or rewrite in Julia
@@ -25,23 +25,33 @@ def update(arr, i, j, actual_j, s_base, t_base, log_p, log_ins, log_del, bandwid
         raise Exception('update called outside bandwidth')
 
 
-def forward(s, log_p, t, log_ins, log_del, bandwidth):
-    result = np.zeros((len(s) + 1, len(t) + 1))
-    nrows = min(bandwidth + 1, len(s) + 1)
-    ncols = min(bandwidth + 1, len(t) + 1)
-    result[:nrows, 0] = log_ins * np.arange(nrows)
-    result[0, :ncols] = log_del * np.arange(ncols)
+def _forward(s, log_p, t, log_ins, log_del, bandwidth):
+    result = sp.dok_matrix((len(s) + 1, len(t) + 1))
+    for i in range(min(bandwidth + 1, len(s) + 1)):
+        result[i, 0] = log_ins * i
+    for j in range(min(bandwidth + 1, len(t) + 1)):
+        result[0, j] = log_del * j
     for i in range(1, len(s) + 1):
         for j in range(max(1, i - bandwidth), min(len(t) + 1, i + bandwidth + 1)):
             result[i, j] = update(result, i, j, j, s[i-1], t[j-1], log_p[i-1], log_ins, log_del, bandwidth)
     return result
 
 
+def forward(s, log_p, t, log_ins, log_del, bandwidth):
+    return _forward(s, log_p, t, log_ins, log_del, bandwidth)
+
+
 def backward(s, log_p, t, log_ins, log_del, bandwidth):
     s = list(reversed(s))
     log_p = list(reversed(log_p))
     t = list(reversed(t))
-    return np.flipud(np.fliplr(forward(s, log_p, t, log_ins, log_del, bandwidth)))
+    A = _forward(s, log_p, t, log_ins, log_del, bandwidth)
+    nrows = len(s) + 1
+    ncols = len(t) + 1
+    result = sp.dok_matrix((nrows, ncols))
+    for (i, j), v in A.items():
+        result[nrows - i - 1, ncols - j - 1] = v
+    return result
 
 
 def mutations(template):
@@ -60,7 +70,7 @@ def mutations(template):
 
 
 def updated_col(pos, base, template, seq, log_p, A, B, log_ins, log_del, bandwidth):
-    Acols = np.zeros((A.shape[0], 2))
+    Acols = sp.dok_matrix((A.shape[0], 2))
     Acols[:, 0] = A[:, pos]
     Acols[0, 1] = Acols[0, 0] + log_del
     j = pos + 1
@@ -89,8 +99,8 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
     bcenter = bj - (A.shape[1] - A.shape[0])
     bmin, bmax = bcenter - bandwidth, bcenter + bandwidth + 1
     # need to only consider positions within bandwidth of both columns
-    index = range(max(0, amin, bmin), min(A.shape[0], amax, bmax))
-    return (Acol + Bcol)[index].max()
+    index = slice(max(0, amin, bmin), min(A.shape[0], amax, bmax))
+    return (Acol[index] + Bcol[index]).toarray().max()
 
 
 def update_template(template, mutation):

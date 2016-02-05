@@ -28,7 +28,7 @@ class TestQuiver2(unittest.TestCase):
         template = 'AA'
         seq = 'AA'
         log_p = np.repeat(-3, len(seq))
-        A = forward(seq, log_p, template, log_ins, log_del, bandwidth=1)
+        A = forward(seq, log_p, template, log_ins, log_del, bandwidth=1).todense()
         expected = np.array([[  0, -10, 0],
                              [ -5,   0, -10],
                              [0,  -5,   0]])
@@ -40,7 +40,7 @@ class TestQuiver2(unittest.TestCase):
         template = 'AA'
         seq = 'AT'
         log_p = np.repeat(-3, len(seq))
-        B = backward(seq, log_p, template, log_ins, log_del, bandwidth=1)
+        B = backward(seq, log_p, template, log_ins, log_del, bandwidth=1).todense()
         expected = np.array([[-3, -5, 0],
                              [-13, -3, -5],
                              [0, -10, 0]])
@@ -52,7 +52,7 @@ class TestQuiver2(unittest.TestCase):
         template = 'AA'
         seq = 'AT'
         log_p = np.repeat(-3, len(seq))
-        A = forward(seq, log_p, template, log_ins, log_del, bandwidth=1)
+        A = forward(seq, log_p, template, log_ins, log_del, bandwidth=1).todense()
         expected = np.array([[  0, -10, 0],
                              [ -5,  0,  -10],
                              [0, -5,  -3]])
