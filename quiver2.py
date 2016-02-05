@@ -54,44 +54,51 @@ class BandedMatrix(object):
         """if newcol is true, allow j=ncols, for inserting a new column"""
         if j < 0:
             j = self.ncols + j
-        if j >= self.ncols + (1 if newcol else 0):
+        if not j < self.ncols + (1 if newcol else 0):
             raise OutOfBoundsError()
         return j
 
-    def _convert_row(self, i, j, extend=False):
-        """convert array row to data row"""
-        o = 1 if extend else 0
-        if i < max(j - self.bandwidth - self.offset, 0):
-            raise OutsideBandError()
-        if i > min(j + self.bandwidth - self.offset + o, self.nrows - (1 - o)):
-            raise OutsideBandError()
-        result = i - (j - self.bandwidth - self.offset)
-        if result < 0 or result - o >= self.data.shape[0]:
-            raise OutOfBoundsError()
-        return result
+    def square_range(self, j, newcol=False):
+        """array-indexed theoretical row range of band in column j, assuming
+        square matrix and band extending above first row and below
+        last.
+
+        """
+        j = self.check_col(j, newcol)
+        start = j - self.bandwidth - self.offset
+        stop = j - self.offset + self.bandwidth + 1
+        return start, stop
 
     def range(self, j, newcol=False):
-        """array-indexed row range of band in column j"""
-        j = self.check_col(j, newcol)
-        start = max(j - self.bandwidth - self.offset, 0)
-        stop = min(j - self.offset + self.bandwidth + 1, self.nrows)
+        """array-indexed real row range of band in column j"""
+        # FIXME: assumes every column contains nonzero entries
+        start, stop = self.square_range(j, newcol)
+        start = max(0, start)
+        stop = min(stop, self.nrows)
         assert start < stop
-        if start == stop:
-            raise OutOfBoundsError()
         return start, stop
+
+    def inband(self, i, j):
+        start, stop = self.range(j)
+        return start <= i < stop
+
+    def _convert_row(self, i, j):
+        """convert array row to data row"""
+        if not self.inband(i, j):
+            raise OutsideBandError()
+        start, stop = self.range(j)
+        result = i - (j - self.bandwidth - self.offset)
+        assert 0 <= result < self.data.shape[0]
+        return result
 
     def data_range(self, j):
         """row range for column j in self.data"""
         j = self.check_col(j)
         start, stop = self.range(j)
         dstart = self._convert_row(start, j)
-        dstop = self._convert_row(stop, j, extend=True)
+        dstop = self._convert_row(stop - 1, j) + 1
         assert dstart < dstop
         return dstart, dstop
-
-    def inband(self, i, j):
-        start, stop = self.range(j)
-        return i >= start and i < stop
 
     def get_elt(self, i, j):
         i = self.check_row(i)
