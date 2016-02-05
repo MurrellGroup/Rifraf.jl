@@ -4,6 +4,8 @@ import scipy.sparse as sp
 from poapy.poagraph import POAGraph
 from poapy.seqgraphalignment import SeqGraphAlignment
 
+# FIXME: asymmetrical bandwidth is wrong
+
 # TODO: use faster version of partial order aligner
 # TODO: try column-major order
 # TODO: rewrite BandedMatrix as Cython extension type
@@ -44,6 +46,7 @@ class BandedMatrix(object):
     def range(self, j):
         start = max(j - self.bandwidth - self.offset, 0)
         stop = min(j - self.offset + self.bandwidth + 1, self.shape[0])
+        assert start < stop
         return start, stop
 
     def data_range(self, j):
@@ -243,25 +246,30 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
     _, bases, _ = graph.consensus()
     template = ''.join(bases).upper()
 
-    lens = list(len(s) for s in sequences)
-    maxlen = max(max(lens), len(template))
-    minlen = min(min(lens), len(template))
-    min_bandwidth = max(1, 2 * (maxlen - minlen))
-    if bandwidth is None:
-        bandwidth = min_bandwidth
-    bandwidth = max(min_bandwidth, bandwidth)
-    if verbose:
-        print("bandwidth: {}".format(bandwidth))
+    _bandwidth = bandwidth
+    if _bandwidth is None:
+        lens = list(len(s) for s in sequences)
+        maxlen = max(lens)
+        minlen = min(lens)
+        upper = max(maxlen, len(template))
+        lower = min(minlen, len(template))
+        min_bandwidth = max(1, 2 * (upper - lower))
+        _bandwidth = min_bandwidth
+        _bandwidth = max(min_bandwidth, _bandwidth)
+    if _bandwidth < 1:
+        raise Exception('bandwidth of {} is too small'.format(_bandwidth))
 
-    As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-    Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+    As = list(forward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
+    Bs = list(backward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
     cur_score = sum(A[-1, -1] for A in As)
     for i in range(max_iters):
         if verbose:
             print("iteration {}".format(i))
+            if bandwidth is None:
+                print("  bandwidth: {}".format(_bandwidth))
         candidates = []
         for mutation in mutations(template):
-            score = sum(score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
+            score = sum(score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, _bandwidth)
                         for seq, log_p, A, B in zip(sequences, log_ps, As, Bs))
             if score > cur_score:
                 candidates.append([score, mutation])
@@ -269,9 +277,15 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
             break
         chosen_cands = choose_candidates(candidates, min_dist, i, max_multi_iters)
         template = apply_mutations(template, chosen_cands)
-        As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-        Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+        As = list(forward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
+        Bs = list(backward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
         cur_score = sum(A[-1, -1] for A in As)
+
+        if bandwidth is None:
+            upper = max(maxlen, len(template))
+            lower = min(minlen, len(template))
+            _bandwidth = max(min_bandwidth, upper - lower)
+
         if verbose:
             print('  kept {} mutations'.format(len(chosen_cands)))
             print('  score: {}'.format(cur_score))
