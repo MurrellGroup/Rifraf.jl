@@ -2,11 +2,90 @@ import random
 import numpy as np
 import scipy.sparse as sp
 
-# TODO: sparse matrices for banding
+# TODO: try column-major order
+# TODO: rewrite BandedMatrix as Cython extension type
 # TODO: either write slow code in Cython, or rewrite in Julia
 # TODO: use pbdagcon for initial template
 # TODO: do not completely recompute As and Bs each iteration. Only recompute from (first) Acol on.
 # TODO: compress duplicate reads and account for their scores
+
+
+class OutsideBandException(Exception):
+    pass
+
+
+class BandedMatrix(object):
+    """A sparse banded matrix.
+
+    Currently only supports limited slicing and no arithmetic
+    operations.
+
+    """
+
+    def __init__(self, shape, bandwidth, offset=0):
+        nrows, ncols = shape
+        if not nrows > 0 and ncols > 0:
+            raise Exception()
+        self.shape = shape
+        self.bandwidth = bandwidth
+        self.data = np.zeros((2 * bandwidth + 1, ncols))
+        self.offset = offset
+
+    def _convert_row(self, i, j, open=False):
+        x = 1 if open else 0
+        y = 0 if open else 1
+        if i < max(j - self.bandwidth - self.offset, 0):
+            raise OutsideBandException()
+        if i > min(j + self.bandwidth - self.offset + x, self.shape[0] - y):
+            raise OutsideBandException()
+        return i - (j - self.bandwidth - self.offset)
+
+    def range(self, j):
+        start = max(j - self.bandwidth - self.offset, 0)
+        stop = min(j - self.offset + self.bandwidth + 1, self.shape[0])
+        return start, stop
+
+    def data_range(self, j):
+        start, stop = self.range(j)
+        dstart = self._convert_row(start, j)
+        dstop = self._convert_row(stop, j, open=True)
+        return dstart, dstop
+
+    def __getitem__(self, key):
+        # TODO: only supports limited slicing
+        i, j = key
+        if not isinstance(j, int):
+            raise Exception()
+        if j < 0:
+            j = self.shape[1] + j
+        if isinstance(i, int):
+            if i < 0:
+                i = self.shape[0] + i
+            try:
+                row = self._convert_row(i, j)
+                return self.data[row, j]
+            except OutsideBandException:
+                return 0
+        elif i == slice(None, None, None):
+            start, stop = self.data_range(j)
+            # TODO: return BandedMatrix
+            return self.data[start:stop, j]
+        else:
+            raise Exception()
+
+    def __setitem__(self, key, val):
+        # TODO: implement multidim slicing and negative indices
+        i, j = key
+        row = self._convert_row(i, j)
+        self.data[row, j] = val
+
+    def todense(self):
+        result = np.zeros(self.shape)
+        for j in range(self.shape[1]):
+            start, stop = self.range(j)
+            dstart, dstop = self.data_range(j)
+            result[start:stop, j] = self.data[dstart:dstop, j]
+        return result
 
 
 def update(arr, i, j, actual_j, s_base, t_base, log_p, log_ins, log_del, bandwidth):
@@ -25,8 +104,8 @@ def update(arr, i, j, actual_j, s_base, t_base, log_p, log_ins, log_del, bandwid
         raise Exception('update called outside bandwidth')
 
 
-def _forward(s, log_p, t, log_ins, log_del, bandwidth):
-    result = sp.dok_matrix((len(s) + 1, len(t) + 1))
+def forward(s, log_p, t, log_ins, log_del, bandwidth):
+    result = BandedMatrix((len(s) + 1, len(t) + 1), bandwidth)
     for i in range(min(bandwidth + 1, len(s) + 1)):
         result[i, 0] = log_ins * i
     for j in range(min(bandwidth + 1, len(t) + 1)):
@@ -37,20 +116,13 @@ def _forward(s, log_p, t, log_ins, log_del, bandwidth):
     return result
 
 
-def forward(s, log_p, t, log_ins, log_del, bandwidth):
-    return _forward(s, log_p, t, log_ins, log_del, bandwidth)
-
-
 def backward(s, log_p, t, log_ins, log_del, bandwidth):
     s = list(reversed(s))
     log_p = list(reversed(log_p))
     t = list(reversed(t))
-    A = _forward(s, log_p, t, log_ins, log_del, bandwidth)
-    nrows = len(s) + 1
-    ncols = len(t) + 1
-    result = sp.dok_matrix((nrows, ncols))
-    for (i, j), v in A.items():
-        result[nrows - i - 1, ncols - j - 1] = v
+    result = forward(s, log_p, t, log_ins, log_del, bandwidth)
+    result.data = np.flipud(np.fliplr(result.data))
+    result.offset = len(t) - len(s)
     return result
 
 
@@ -70,9 +142,10 @@ def mutations(template):
 
 
 def updated_col(pos, base, template, seq, log_p, A, B, log_ins, log_del, bandwidth):
-    Acols = sp.dok_matrix((A.shape[0], 2))
-    Acols[:, 0] = A[:, pos]
-    Acols[0, 1] = Acols[0, 0] + log_del
+    Acols = BandedMatrix((A.shape[0], 2), bandwidth, offset=-pos)
+    Acols.data[:, 0] = A.data[:, pos]
+    if pos < bandwidth:
+        Acols[0, 1] = Acols[0, 0] + log_del
     j = pos + 1
     for i in range(max(1, j - bandwidth), min(A.shape[0], j + bandwidth + 1)):
         Acols[i, 1] = update(Acols, i, 1, j, seq[i-1], base, log_p[i-1], log_ins, log_del, bandwidth)
@@ -95,12 +168,21 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
         Acol = updated_col(pos, base, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
     bj = pos + b_offset[f]
     Bcol = B[:, bj]
-    amin, amax = aj - bandwidth, aj + bandwidth + 1
-    bcenter = bj - (A.shape[1] - A.shape[0])
-    bmin, bmax = bcenter - bandwidth, bcenter + bandwidth + 1
-    # need to only consider positions within bandwidth of both columns
-    index = slice(max(0, amin, bmin), min(A.shape[0], amax, bmax))
-    return (Acol[index] + Bcol[index]).toarray().max()
+
+    # need to chop off beginning of Acol and end of Bcol and align
+    a_start, a_stop = A.range(aj)
+    b_start, b_stop = B.range(bj)
+
+    amin = max(b_start - a_start, 0)
+    amax = len(Acol) - max(a_stop - b_stop, 0)
+
+    bmin = max(a_start - b_start, 0)
+    bmax = len(Bcol) - max(b_stop - a_stop, 0)
+
+    assert amax - amin == bmax - bmin
+    assert Acol[amin:amax].shape == Bcol[bmin:bmax].shape
+
+    return (Acol[amin:amax] + Bcol[bmin:bmax]).max()
 
 
 def update_template(template, mutation):
