@@ -4,21 +4,158 @@ import scipy.sparse as sp
 from poapy.poagraph import POAGraph
 from poapy.seqgraphalignment import SeqGraphAlignment
 
-from _quiver2 import BandedMatrix
-from _quiver2 import update
-from _quiver2 import forward
+# FIXME: asymmetrical bandwidth is wrong thing to do. offset so it is symmetric.
+# FIXME: BandedMatrix is wrong when bandwidth too small for rectangular shape
 
-# FIXME: asymmetrical bandwidth is wrong
+# TODO: port to Julia and compare speed
+
 # TODO: use faster version of partial order aligner
 # TODO: try column-major order
-# TODO: rewrite BandedMatrix as Cython extension type
-# TODO: either write slow code in Cython, or rewrite in Julia
-# TODO: use pbdagcon for initial template
+# TODO: detect when overflow possible
+# TODO: unsigned ints where possible
+# TODO: benchmark against actual quiver implementation
+
+
+class OutsideBandException(Exception):
+    pass
+
+
+class BandedMatrix(object):
+    """A sparse banded matrix.
+
+    Currently only supports limited slicing and no arithmetic
+    operations.
+
+    """
+
+    def __init__(self, shape, bandwidth, offset=0):
+        nrows, ncols = shape
+        if not nrows > 0 and ncols > 0:
+            raise Exception()
+        self.shape = shape
+        self.bandwidth = bandwidth
+        self.data = np.zeros((2 * bandwidth + 1, ncols))
+        self.offset = offset
+
+    @property
+    def nrows(self):
+        return self.shape[0]
+
+    @property
+    def ncols(self):
+        return self.shape[1]
+
+    def _convert_row(self, i, j, o=0):
+        if i < max(j - self.bandwidth - self.offset, 0):
+            raise OutsideBandException()
+        if i > min(j + self.bandwidth - self.offset + o, self.nrows - (1 - o)):
+            raise OutsideBandException()
+        return i - (j - self.bandwidth - self.offset)
+
+    def range(self, j):
+        start = max(j - self.bandwidth - self.offset, 0)
+        stop = min(j - self.offset + self.bandwidth + 1, self.nrows)
+        assert start < stop
+        return start, stop
+
+    def data_range(self, j):
+        start, stop = self.range(j)
+        dstart = self._convert_row(start, j)
+        dstop = self._convert_row(stop, j, o=1)
+        assert dstart < dstop
+        return dstart, dstop
+
+    def inband(self, i, j):
+        start, stop = self.range(j)
+        return i >= start and i < stop
+
+    def get_elt(self, i, j):
+        if i < 0:
+            i = self.nrows + i
+        if j < 0:
+            j = self.ncols + j
+        if self.inband(i, j):
+            row = self._convert_row(i, j)
+            return self.data[row, j]
+        return 0
+
+    def get_col(self, j):
+        start, stop = self.data_range(j)
+        return self.data[start:stop, j]
+
+    def __getitem__(self, key):
+        # TODO: only supports limited slicing
+        # TODO: return BandedMatrix
+        i, j = key
+        if not isinstance(j, int):
+            raise Exception()
+        if isinstance(i, int):
+            return self.get_elt(i, j)
+        elif i == slice(None, None, None):
+            return self.get_col(j)
+        else:
+            raise Exception()
+
+    def __setitem__(self, key, val):
+        # TODO: implement multidim slicing and negative indices
+        i, j = key
+        row = self._convert_row(i, j)
+        self.data[row, j] = val
+
+    def todense(self):
+        result = np.zeros((self.nrows, self.ncols))
+        for j in range(self.ncols):
+            start, stop = self.range(j)
+            dstart, dstop = self.data_range(j)
+            result[start:stop, j] = self.data[dstart:dstop, j]
+        return result
+
+
+def update(arr, i, j, actual_j, s_base, t_base,
+           log_p, log_ins, log_del, bandwidth):
+    # TODO: log(1-p) may not be negligible
+    sub = (0 if s_base == t_base else log_p)
+    if i == actual_j - bandwidth:
+        return max(arr.get_elt(i, j - 1) + log_del,  # deletion
+                   arr.get_elt(i - 1, j - 1) + sub)
+    elif i == actual_j + bandwidth:
+        return max(arr.get_elt(i - 1, j) + log_ins,  # insertion
+                   arr.get_elt(i - 1, j - 1) + sub)
+    elif actual_j - bandwidth < i < actual_j + bandwidth:
+        return max(max(arr.get_elt(i - 1, j) + log_ins,  # insertion
+                       arr.get_elt(i, j - 1) + log_del),  # deletion
+                   arr.get_elt(i - 1, j - 1) + sub)
+    else:
+        raise Exception('update called outside bandwidth')
+
+
+def forward(s, log_p, t, log_ins, log_del, bandwidth):
+    result = BandedMatrix((len(s) + 1, len(t) + 1), bandwidth)
+    for i in range(min(bandwidth + 1, len(s) + 1)):
+        result[i, 0] = log_ins * i
+    for j in range(min(bandwidth + 1, len(t) + 1)):
+        result[0, j] = log_del * j
+    for i in range(1, len(s) + 1):
+        for j in range(max(1, i - bandwidth), min(len(t) + 1, i + bandwidth + 1)):
+            result[i, j] = update(result, i, j, j, s[i-1], t[j-1], log_p[i-1], log_ins, log_del, bandwidth)
+    return result
+
+
+def updated_col(pos, base, template, seq, log_p,
+                A, B, log_ins, log_del, bandwidth):
+    Acols = BandedMatrix((A.nrows, 2), bandwidth, offset=-pos)
+    Acols.data[:, 0] = A.data[:, pos]
+    if pos < bandwidth:
+        Acols[0, 1] = Acols[0, 0] + log_del
+    j = pos + 1
+    for i in range(max(1, j - bandwidth), min(A.nrows, j + bandwidth + 1)):
+        Acols[i, 1] = update(Acols, i, 1, j, seq[i-1], base, log_p[i-1], log_ins, log_del, bandwidth)
+    return Acols[:, 1]
 
 
 def backward(s, log_p, t, log_ins, log_del, bandwidth):
     s = ''.join(reversed(s))
-    log_p = np.array(list(reversed(log_p)), dtype=np.float32)
+    log_p = np.array(list(reversed(log_p)))
     t = ''.join(reversed(t))
     result = forward(s, log_p, t, log_ins, log_del, bandwidth)
     result.data = np.flipud(np.fliplr(result.data))
@@ -39,17 +176,6 @@ def mutations(template):
     # insertion after last
     for base in 'ACGT':
         yield ['insertion', len(template), base]
-
-
-def updated_col(pos, base, template, seq, log_p, A, B, log_ins, log_del, bandwidth):
-    Acols = BandedMatrix((A.shape[0], 2), bandwidth, offset=-pos)
-    Acols.data[:, 0] = A.data[:, pos]
-    if pos < bandwidth:
-        Acols[0, 1] = Acols[0, 0] + log_del
-    j = pos + 1
-    for i in range(max(1, j - bandwidth), min(A.shape[0], j + bandwidth + 1)):
-        Acols[i, 1] = update(Acols, i, 1, j, seq[i-1], base, log_p[i-1], log_ins, log_del, bandwidth)
-    return Acols[:, 1]
 
 
 def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth):
@@ -74,7 +200,8 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
     bmin = max(a_start - b_start, 0)
     bmax = len(Bcol) - max(b_stop - a_stop, 0)
 
-    return (np.asarray(Acol[amin:amax]) + np.asarray(Bcol[bmin:bmax])).max()
+    # TODO: do this in cython
+    return (Acol[amin:amax] + Bcol[bmin:bmax]).max()
 
 
 def update_template(template, mutation):
@@ -120,7 +247,7 @@ def choose_candidates(candidates, min_dist, i, max_multi_iters):
     return final_cands
 
 
-def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
+def quiver2(sequences, phreds, log_ins, log_del, bandwidth=None,
             min_dist=9, max_iters=100, max_multi_iters=50, seed=None,
             verbose=False):
     """Generate an alignment-free consensus.
@@ -130,8 +257,10 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
     phreds: list of arrays of phred scores
 
     """
-    log_ps = list((-phred / 10).astype(np.float32) for phred in phreds)
+    log_ps = list((-phred / 10) for phred in phreds)
 
+    if verbose:
+        print("building partial order alignment")
     graph = POAGraph(sequences[0])
     for sequence in sequences[1:]:
         alignment = SeqGraphAlignment(sequence, graph, globalAlign=True)
@@ -150,8 +279,10 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
         _bandwidth = min_bandwidth
         _bandwidth = max(min_bandwidth, _bandwidth)
     if _bandwidth < min_bandwidth:
-        raise Exception('minimum bandwidth is {}, but given {} '.format(_bandwidth))
+        raise Exception('minimum bandwidth is {}, but given {} '.format(min_bandwidth, _bandwidth))
 
+    if verbose:
+        print("computing initial alignments")
     As = list(forward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
     Bs = list(backward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
     cur_score = sum(A[-1, -1] for A in As)
@@ -168,6 +299,8 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
                 candidates.append([score, mutation])
         if not candidates:
             break
+        if verbose:
+            print("  found {} candidate mutations".format(len(candidates)))
         chosen_cands = choose_candidates(candidates, min_dist, i, max_multi_iters)
         template = apply_mutations(template, chosen_cands)
         As = list(forward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
