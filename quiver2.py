@@ -1,13 +1,14 @@
-import random
 import numpy as np
 import scipy.sparse as sp
 
+from poapy.poagraph import POAGraph
+from poapy.seqgraphalignment import SeqGraphAlignment
+
+# TODO: use faster version of partial order aligner
 # TODO: try column-major order
 # TODO: rewrite BandedMatrix as Cython extension type
 # TODO: either write slow code in Cython, or rewrite in Julia
 # TODO: use pbdagcon for initial template
-# TODO: do not completely recompute As and Bs each iteration. Only recompute from (first) Acol on.
-# TODO: compress duplicate reads and account for their scores
 
 
 class OutsideBandException(Exception):
@@ -234,8 +235,13 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
 
     """
     log_ps = list(-phred / 10 for phred in phreds)
-    state = np.random.RandomState(seed)
-    template = state.choice(sequences)
+
+    graph = POAGraph(sequences[0])
+    for sequence in sequences[1:]:
+        alignment = SeqGraphAlignment(sequence, graph, globalAlign=True)
+        graph.incorporateSeqAlignment(alignment, sequence)
+    _, bases, _ = graph.consensus()
+    template = ''.join(bases).upper()
 
     lens = list(len(s) for s in sequences)
     min_bandwidth = max(1, int(1.5 * (max(lens) - min(lens))))
