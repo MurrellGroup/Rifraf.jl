@@ -242,10 +242,12 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
     template = state.choice(sequences)
 
     lens = list(len(s) for s in sequences)
-    min_bandwidth = 2 * (max(lens) - min(lens))
+    min_bandwidth = max(1, int(1.5 * (max(lens) - min(lens))))
+    if bandwidth is None:
+        bandwidth = min_bandwidth
     bandwidth = max(min_bandwidth, bandwidth)
-    if bandwidth < 1:
-        raise Exception('{} bandwidth is too small'.format(bandwidth))
+    if verbose:
+        print("bandwidth: {}".format(bandwidth))
 
     As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
     Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
