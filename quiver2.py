@@ -152,21 +152,16 @@ def updated_col(pos, base, template, seq, log_p, A, B, log_ins, log_del, bandwid
     return Acols[:, 1]
 
 
-b_offset = {'substitution': 1,
-            'insertion': 0,
-            'deletion': 1}
-
-
 def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth):
     """Score a mutation using the forward-backward trick."""
-    f, pos, base = mutation
-    if f == 'deletion':
+    mtype, pos, base = mutation
+    if mtype == 'deletion':
         aj = pos
         Acol = A[:, aj]
     else:
         aj = pos + 1
         Acol = updated_col(pos, base, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
-    bj = pos + b_offset[f]
+    bj = pos + (0 if mtype == 'insertion' else 1)
     Bcol = B[:, bj]
 
     # need to chop off beginning of Acol and end of Bcol and align
@@ -186,12 +181,12 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
 
 
 def update_template(template, mutation):
-    f, pos, base = mutation
-    if f == 'substitution':
+    mtype, pos, base = mutation
+    if mtype == 'substitution':
         return ''.join([template[:pos], base, template[pos + 1:]])
-    elif f == 'insertion':
+    elif mtype == 'insertion':
         return ''.join([template[:pos], base, template[pos:]])
-    elif f == 'deletion':
+    elif mtype == 'deletion':
         return ''.join([template[:pos], template[pos + 1:]])
     else:
         raise Exception('unknown mutation: {}'.format(mtype))
@@ -231,10 +226,11 @@ def choose_candidates(candidates, min_dist, i, max_multi_iters):
 def quiver2(sequences, phreds, log_ins, log_del, bandwidth=10,
             min_dist=9, max_iters=100, max_multi_iters=50, seed=None,
             verbose=False):
-    """
+    """Generate an alignment-free consensus.
+
     sequences: list of dna sequences
 
-    phreds: list of numpy array
+    phreds: list of arrays of phred scores
 
     """
     log_ps = list(-phred / 10 for phred in phreds)
