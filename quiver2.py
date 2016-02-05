@@ -1,9 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
 
-from poapy.poagraph import POAGraph
-from poapy.seqgraphalignment import SeqGraphAlignment
-
 # FIXME: asymmetrical bandwidth is wrong thing to do. offset so it is symmetric.
 # TODO: test BandedMatrix
 # TODO: improve slicing and arithmetic operations of BandedMatrix
@@ -275,7 +272,7 @@ def choose_candidates(candidates, min_dist, i, max_multi_iters):
     return final_cands
 
 
-def quiver2(sequences, phreds, log_ins, log_del, bandwidth=None,
+def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=None,
             min_dist=9, max_iters=100, max_multi_iters=50, seed=None,
             verbose=False):
     """Generate an alignment-free consensus.
@@ -286,15 +283,6 @@ def quiver2(sequences, phreds, log_ins, log_del, bandwidth=None,
 
     """
     log_ps = list((-phred / 10) for phred in phreds)
-
-    if verbose:
-        print("building partial order alignment")
-    graph = POAGraph(sequences[0])
-    for sequence in sequences[1:]:
-        alignment = SeqGraphAlignment(sequence, graph, globalAlign=True)
-        graph.incorporateSeqAlignment(alignment, sequence)
-    _, bases, _ = graph.consensus()
-    template = ''.join(bases).upper()
 
     _bandwidth = bandwidth
     lens = list(len(s) for s in sequences)
