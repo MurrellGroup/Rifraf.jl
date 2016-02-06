@@ -22,6 +22,7 @@ def score_slow(template, sequence, log_p, log_ins, log_del, bandwidth):
 
 class TestQuiver2(unittest.TestCase):
 
+    # TODO: test asymmetric matrices
     def test_perfect_forward(self):
         log_del = -10
         log_ins = -5
@@ -83,8 +84,10 @@ class TestQuiver2(unittest.TestCase):
             score = score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
             score2 = score_slow(new_template, seq, log_p, log_ins, log_del, bandwidth)
             score3 = forward(seq, log_p, new_template, log_ins, log_del, bandwidth)[-1, -1]
+            score4 = backward(seq, log_p, new_template, log_ins, log_del, bandwidth)[0, 0]
             self.assertAlmostEqual(score, score2)
             self.assertAlmostEqual(score, score3)
+            self.assertAlmostEqual(score, score4)
 
 
 if __name__ == '__main__':

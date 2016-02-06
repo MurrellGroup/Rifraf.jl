@@ -18,7 +18,7 @@ class OutOfBoundsError(Exception):
     pass
 
 
-class BandedMatrix(object):
+class BandedMatrix:
     """A sparse banded matrix.
 
     Currently only supports limited slicing and no arithmetic
@@ -58,7 +58,7 @@ class BandedMatrix(object):
             raise OutOfBoundsError()
         return j
 
-    def square_range(self, j, newcol=False):
+    def square_row_range(self, j, newcol=False):
         """array-indexed theoretical row range of band in column j, assuming
         square matrix and band extending above first row and below
         last.
@@ -69,32 +69,32 @@ class BandedMatrix(object):
         stop = j - self.offset + self.bandwidth + 1
         return start, stop
 
-    def range(self, j, newcol=False):
+    def row_range(self, j, newcol=False):
         """array-indexed real row range of band in column j"""
         # FIXME: assumes every column contains nonzero entries
-        start, stop = self.square_range(j, newcol)
+        start, stop = self.square_row_range(j, newcol)
         start = max(0, start)
         stop = min(stop, self.nrows)
         assert start < stop
         return start, stop
 
     def inband(self, i, j):
-        start, stop = self.range(j)
+        start, stop = self.row_range(j)
         return start <= i < stop
 
     def _convert_row(self, i, j):
         """convert array row to data row"""
         if not self.inband(i, j):
             raise OutsideBandError()
-        start, stop = self.range(j)
+        start, stop = self.row_range(j)
         result = i - (j - self.bandwidth - self.offset)
         assert 0 <= result < self.data.shape[0]
         return result
 
-    def data_range(self, j):
+    def data_row_range(self, j):
         """row range for column j in self.data"""
         j = self.check_col(j)
-        start, stop = self.range(j)
+        start, stop = self.row_range(j)
         dstart = self._convert_row(start, j)
         dstop = self._convert_row(stop - 1, j) + 1
         assert dstart < dstop
@@ -110,7 +110,7 @@ class BandedMatrix(object):
 
     def get_col(self, j):
         j = self.check_col(j)
-        start, stop = self.data_range(j)
+        start, stop = self.data_row_range(j)
         return self.data[start:stop, j]
 
     def __getitem__(self, key):
@@ -124,7 +124,7 @@ class BandedMatrix(object):
         elif i == slice(None, None, None):
             return self.get_col(j)
         else:
-            raise Exception()
+            raise Exception('given slicing not recognized: {}'.format(key))
 
     def __setitem__(self, key, val):
         # TODO: implement multidim slicing and negative indices
@@ -137,51 +137,95 @@ class BandedMatrix(object):
     def todense(self):
         result = np.zeros((self.nrows, self.ncols))
         for j in range(self.ncols):
-            start, stop = self.range(j)
-            dstart, dstop = self.data_range(j)
+            start, stop = self.row_range(j)
+            dstart, dstop = self.data_row_range(j)
             result[start:stop, j] = self.data[dstart:dstop, j]
         return result
 
+    def col_indices(self, i):
+        """Generate all band indices"""
+        i = self.check_row(i)
+        # FIXME: this is inefficient
+        for j in range(self.ncols):
+            if self.inband(i, j):
+                yield j
 
-def update(arr, i, j, actual_j, s_base, t_base,
-           log_p, log_ins, log_del, bandwidth):
+    def row_indices(self, j):
+        """Generate all band indices"""
+        j = self.check_col(j)
+        start, stop = self.row_range(j)
+        return range(start, stop)
+
+    def indices(self):
+        """Generate all band indices in [1:, 1:]"""
+        for j in range(1, self.ncols):
+            for i in range(*self.row_range(j)):
+                if i > 0:
+                    yield i, j
+
+    def predecessors(self, i, j):
+        """Generate all left, up, and left-up band indices"""
+        mods = ((-1, 0), (0, -1), (-1, -1))
+        for imod, jmod in mods:
+            ii = i + imod
+            jj = j + jmod
+            if ii < 0 or jj < 0:
+                continue
+            if self.inband(ii, jj):
+                yield ii, jj
+
+    def reverse(self):
+        # FIXME: this needs to be symmetric, but it is not!!!
+        self.data = np.flipud(np.fliplr(self.data))
+        self.offset += divmod(self.nrows - self.ncols, 2)[1]
+
+
+class CenteredBandedMatrix(BandedMatrix):
+    """A banded matrix guaranteed to have the band touch elements [0, 0] and [-1, -1], plus some optional extra."""
+    def __init__(self, shape, bandwidth):
+        self.given_bandwidth = bandwidth
+        nrows, ncols = shape
+        diff = ncols - nrows
+        offset, r = divmod(diff, 2)
+        self.extra_bandwidth = max(bandwidth, r)
+        bandwidth = self.extra_bandwidth + np.abs(offset)
+        super().__init__(shape, bandwidth, offset=offset)
+
+
+def update(arr, i, j, s_base, t_base, log_p, log_ins, log_del):
     # TODO: log(1-p) may not be negligible
     sub = (0 if s_base == t_base else log_p)
-    if i == actual_j - bandwidth:
-        return max(arr[i, j - 1] + log_del,  # deletion
-                   arr[i - 1, j - 1] + sub)
-    elif i == actual_j + bandwidth:
-        return max(arr[i - 1, j] + log_ins,  # insertion
-                   arr[i - 1, j - 1] + sub)
-    elif actual_j - bandwidth < i < actual_j + bandwidth:
-        return max(max(arr[i - 1, j] + log_ins,  # insertion
-                       arr[i, j - 1] + log_del),  # deletion
-                   arr[i - 1, j - 1] + sub)
-    else:
-        raise Exception('update called outside bandwidth')
+    scores = []
+    if arr.inband(i - 1, j):
+        # insertion
+        scores.append(arr[i - 1, j] + log_ins)
+    if arr.inband(i, j - 1):
+        # deletion
+        scores.append(arr[i, j - 1] + log_del)
+    if arr.inband(i - 1, j - 1):
+        scores.append(arr[i - 1, j - 1] + sub)
+    return max(scores)
 
 
 def forward(s, log_p, t, log_ins, log_del, bandwidth):
-    result = BandedMatrix((len(s) + 1, len(t) + 1), bandwidth)
-    for i in range(min(bandwidth + 1, len(s) + 1)):
+    result = CenteredBandedMatrix((len(s) + 1, len(t) + 1), bandwidth)
+    for i in result.row_indices(0):
         result[i, 0] = log_ins * i
-    for j in range(min(bandwidth + 1, len(t) + 1)):
+    for j in result.col_indices(0):
         result[0, j] = log_del * j
-    for i in range(1, len(s) + 1):
-        for j in range(max(1, i - bandwidth), min(len(t) + 1, i + bandwidth + 1)):
-            result[i, j] = update(result, i, j, j, s[i-1], t[j-1], log_p[i-1], log_ins, log_del, bandwidth)
+    for i, j in result.indices():
+        result[i, j] = update(result, i, j, s[i-1], t[j-1], log_p[i-1], log_ins, log_del)
     return result
 
 
 def updated_col(pos, base, template, seq, log_p,
                 A, B, log_ins, log_del, bandwidth):
-    Acols = BandedMatrix((A.nrows, 2), bandwidth, offset=-pos)
+    Acols = BandedMatrix((A.nrows, 2), A.bandwidth, offset=A.offset - pos)
     Acols.data[:, 0] = A.data[:, pos]
-    if pos < bandwidth:
+    if Acols.inband(0, 0) and Acols.inband(0, 1):
         Acols[0, 1] = Acols[0, 0] + log_del
-    j = pos + 1
-    for i in range(max(1, j - bandwidth), min(A.nrows, j + bandwidth + 1)):
-        Acols[i, 1] = update(Acols, i, 1, j, seq[i-1], base, log_p[i-1], log_ins, log_del, bandwidth)
+    for i in Acols.row_indices(1):
+        Acols[i, 1] = update(Acols, i, 1, seq[i-1], base, log_p[i-1], log_ins, log_del)
     return Acols[:, 1]
 
 
@@ -190,8 +234,7 @@ def backward(s, log_p, t, log_ins, log_del, bandwidth):
     log_p = np.array(list(reversed(log_p)))
     t = ''.join(reversed(t))
     result = forward(s, log_p, t, log_ins, log_del, bandwidth)
-    result.data = np.flipud(np.fliplr(result.data))
-    result.offset = len(t) - len(s)
+    result.reverse()
     return result
 
 
@@ -223,8 +266,8 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
     Bcol = B[:, bj]
 
     # need to chop off beginning of Acol and end of Bcol and align
-    a_start, a_stop = A.range(aj, newcol=(mtype == "insertion" and aj == A.shape[1]))
-    b_start, b_stop = B.range(bj)
+    a_start, a_stop = A.row_range(aj, newcol=(mtype == "insertion" and aj == A.shape[1]))
+    b_start, b_stop = B.row_range(bj)
 
     amin = max(b_start - a_start, 0)
     amax = len(Acol) - max(a_stop - b_stop, 0)
@@ -232,7 +275,6 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
     bmin = max(a_start - b_start, 0)
     bmax = len(Bcol) - max(b_stop - a_stop, 0)
 
-    # TODO: do this in cython
     return (Acol[amin:amax] + Bcol[bmin:bmax]).max()
 
 
@@ -279,7 +321,7 @@ def choose_candidates(candidates, min_dist, i, max_multi_iters):
     return final_cands
 
 
-def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=None,
+def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
             min_dist=9, max_iters=100, max_multi_iters=50, seed=None,
             verbose=False):
     """Generate an alignment-free consensus.
@@ -291,32 +333,20 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=None,
     """
     log_ps = list((-phred / 10) for phred in phreds)
 
-    _bandwidth = bandwidth
-    lens = list(len(s) for s in sequences)
-    maxlen = max(lens)
-    minlen = min(lens)
-    upper = max(maxlen, len(template))
-    lower = min(minlen, len(template))
-    min_bandwidth = max(1, 2 * (upper - lower))
-    if _bandwidth is None:
-        _bandwidth = min_bandwidth
-        _bandwidth = max(min_bandwidth, _bandwidth)
-    if _bandwidth < min_bandwidth:
-        raise Exception('minimum bandwidth is {}, but given {} '.format(min_bandwidth, _bandwidth))
+    if bandwidth < 0:
+        raise Exception('bandwidth cannot be negative: {} '.format(bandwidth))
 
     if verbose:
         print("computing initial alignments")
-    As = list(forward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
-    Bs = list(backward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
+    As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+    Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
     cur_score = sum(A[-1, -1] for A in As)
     for i in range(max_iters):
         if verbose:
             print("iteration {}".format(i))
-            if bandwidth is None:
-                print("  bandwidth: {}".format(_bandwidth))
         candidates = []
         for mutation in mutations(template):
-            score = sum(score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, _bandwidth)
+            score = sum(score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
                         for seq, log_p, A, B in zip(sequences, log_ps, As, Bs))
             if score > cur_score:
                 candidates.append([score, mutation])
@@ -326,14 +356,9 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=None,
             print("  found {} candidate mutations".format(len(candidates)))
         chosen_cands = choose_candidates(candidates, min_dist, i, max_multi_iters)
         template = apply_mutations(template, chosen_cands)
-        As = list(forward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
-        Bs = list(backward(s, p, template, log_ins, log_del, _bandwidth) for s, p in zip(sequences, log_ps))
+        As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+        Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
         cur_score = sum(A[-1, -1] for A in As)
-
-        if bandwidth is None:
-            upper = max(maxlen, len(template))
-            lower = min(minlen, len(template))
-            _bandwidth = max(min_bandwidth, upper - lower)
 
         if verbose:
             print('  kept {} mutations'.format(len(chosen_cands)))
