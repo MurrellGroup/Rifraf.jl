@@ -1,7 +1,6 @@
 import numpy as np
-import scipy.sparse as sp
 
-# FIXME: asymmetrical bandwidth is wrong thing to do. offset so it is symmetric.
+# TODO: cache BandedMatrix calls
 # TODO: test BandedMatrix
 # TODO: improve slicing and arithmetic operations of BandedMatrix
 # TODO: port to Julia and compare speed
@@ -174,8 +173,8 @@ class BandedMatrix:
             if self.inband(ii, jj):
                 yield ii, jj
 
-    def reverse(self):
-        # FIXME: this needs to be symmetric, but it is not!!!
+    def flip(self):
+        # FIXME: not symmetric
         self.data = np.flipud(np.fliplr(self.data))
         self.offset += divmod(self.nrows - self.ncols, 2)[1]
 
@@ -234,7 +233,7 @@ def backward(s, log_p, t, log_ins, log_del, bandwidth):
     log_p = np.array(list(reversed(log_p)))
     t = ''.join(reversed(t))
     result = forward(s, log_p, t, log_ins, log_del, bandwidth)
-    result.reverse()
+    result.flip()
     return result
 
 
@@ -306,24 +305,20 @@ def apply_mutations(template, mutations):
     return template
 
 
-def choose_candidates(candidates, min_dist, i, max_multi_iters):
+def choose_candidates(candidates, min_dist)
     final_cands = []
-    if i < max_multi_iters:
-        posns = set()
-        for c in reversed(sorted(candidates, key=lambda c: c[0])):
-            _, (_, posn, _) = c
-            if any(abs(posn - p) < min_dist for p in posns):
-                continue
-            posns.add(posn)
-            final_cands.append(c)
-    else:
-        final_cands = [list(sorted(candidates, key=lambda c: c[0]))[-1]]
+    posns = set()
+    for c in reversed(sorted(candidates, key=lambda c: c[0])):
+        _, (_, posn, _) = c
+        if any(abs(posn - p) < min_dist for p in posns):
+            continue
+        posns.add(posn)
+        final_cands.append(c)
     return final_cands
 
 
 def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
-            min_dist=9, max_iters=100, max_multi_iters=50, seed=None,
-            verbose=False):
+            min_dist=9, max_iters=100, verbose=False):
     """Generate an alignment-free consensus.
 
     sequences: list of dna sequences
@@ -340,27 +335,40 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
         print("computing initial alignments")
     As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
     Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-    cur_score = sum(A[-1, -1] for A in As)
+    best_score = sum(A[-1, -1] for A in As)
     for i in range(max_iters):
+        old_score = best_score
         if verbose:
             print("iteration {}".format(i))
         candidates = []
         for mutation in mutations(template):
             score = sum(score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
                         for seq, log_p, A, B in zip(sequences, log_ps, As, Bs))
-            if score > cur_score:
+            if score > best_score:
                 candidates.append([score, mutation])
         if not candidates:
             break
         if verbose:
             print("  found {} candidate mutations".format(len(candidates)))
-        chosen_cands = choose_candidates(candidates, min_dist, i, max_multi_iters)
+        chosen_cands = choose_candidates(candidates, min_dist)
         template = apply_mutations(template, chosen_cands)
         As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
         Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-        cur_score = sum(A[-1, -1] for A in As)
+        best_score = sum(A[-1, -1] for A in As)
 
+        # detect if a single mutation is better
+        # FIXME: code duplication
+        if best_score < chosen_cands[0][0]:
+            if verbose:
+                print('  rejecting multiple candidates in favor of best')
+            chosen_cands = [chosen_cands[0]]
+            template = apply_mutations(template, chosen_cands)
+            As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+            Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+            best_score = sum(A[-1, -1] for A in As)
+            assert best_score == chosen_cands[0][0]
         if verbose:
             print('  kept {} mutations'.format(len(chosen_cands)))
-            print('  score: {}'.format(cur_score))
+            print('  score: {:.4f}'.format(best_score))
+        assert best_score > old_score
     return template
