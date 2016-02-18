@@ -1,5 +1,12 @@
 import numpy as np
 
+# FIXME: insertions can cause wrong answers in `updated_col()` and
+# functions that rely on it, because they change the shape of the
+# matrix.
+
+# FIXME: subsitutions also sometimes cause wrong answers, but it must
+# be for some other reason.
+
 # TODO: cache BandedMatrix calls
 # TODO: test BandedMatrix
 # TODO: improve slicing and arithmetic operations of BandedMatrix
@@ -53,7 +60,7 @@ class BandedMatrix:
         di = self.data_row(i, j)
         return self.data[di, j]
 
-    def row_range(self, j)
+    def row_range(self, j):
         start = max(0, j - self.h_offset - self.bandwidth)
         stop = min(j + self.v_offset + self.bandwidth + 1, self.nrows)
         return start, stop
@@ -275,6 +282,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
 
         # detect if a single mutation is better
         # FIXME: code duplication
+        # FIXME: this may not actually work, because score_mutation() is not exact
         if best_score < chosen_cands[0][0]:
             if verbose:
                 print('  rejecting multiple candidates in favor of best')
@@ -283,7 +291,8 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
             As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
             Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
             best_score = sum(A.last_elt() for A in As)
-            assert best_score == chosen_cands[0][0]
+            # cannot assert this because score_mutation() does not return exact same results
+            # assert new_best_score == chosen_cands[0][0]
         if verbose:
             print('  kept {} mutations'.format(len(chosen_cands)))
             print('  score: {:.4f}'.format(best_score))

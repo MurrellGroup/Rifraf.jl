@@ -124,7 +124,5 @@ class TestQuiver2(unittest.TestCase):
             self.assertAlmostEqual(score, score4)
 
 
-
-
 if __name__ == '__main__':
     unittest.main()
