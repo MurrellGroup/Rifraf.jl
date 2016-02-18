@@ -48,7 +48,12 @@ class BandedMatrix:
         row = self.data_row(i, j)
         return self.data[row, j]
 
-    def row_range(self, j):
+    def last_elt(self):
+        i, j = self.nrows -1, self.ncols - 1
+        di = self.data_row(i, j)
+        return self.data[di, j]
+
+    def row_range(self, j)
         start = max(0, j - self.h_offset - self.bandwidth)
         stop = min(j + self.v_offset + self.bandwidth + 1, self.nrows)
         return start, stop
@@ -247,7 +252,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
         print("computing initial alignments")
     As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
     Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-    best_score = sum(A[-1, -1] for A in As)
+    best_score = sum(A.last_elt() for A in As)
     for i in range(max_iters):
         old_score = best_score
         if verbose:
@@ -266,7 +271,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
         template = apply_mutations(template, chosen_cands)
         As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
         Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-        best_score = sum(A[-1, -1] for A in As)
+        best_score = sum(A.last_elt() for A in As)
 
         # detect if a single mutation is better
         # FIXME: code duplication
@@ -277,7 +282,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
             template = apply_mutations(template, chosen_cands)
             As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
             Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-            best_score = sum(A[-1, -1] for A in As)
+            best_score = sum(A.last_elt() for A in As)
             assert best_score == chosen_cands[0][0]
         if verbose:
             print('  kept {} mutations'.format(len(chosen_cands)))
