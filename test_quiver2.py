@@ -70,19 +70,8 @@ class TestQuiver2(unittest.TestCase):
         pos = 1
         log_p = np.repeat(-3, len(seq))
         A = forward(seq, log_p, template, log_ins, log_del, bandwidth=1)
-        result = updated_col(pos, 'T', template, seq, log_p, A, log_ins, log_del)
+        result = updated_col(pos, pos + 1, 'T', template, seq, log_p, A, log_ins, log_del)
         expected = forward(seq, log_p, 'TTAG', log_ins, log_del, bandwidth=1).get_col(pos + 1)
-        assert_array_equal(result, expected)
-
-    def test_updated_col_insertion(self):
-        log_del = -10
-        log_ins = -5
-        template = 'AAAAA'
-        seq = 'AAAAAT'
-        log_p = np.repeat(-3, len(seq))
-        A = forward(seq, log_p, template, log_ins, log_del, bandwidth=1)
-        result = updated_col(len(template), 'T', template, seq, log_p, A, log_ins, log_del)
-        expected = forward(seq, log_p, seq, log_ins, log_del, bandwidth=1).get_col(len(template) + 1)
         assert_array_equal(result, expected)
 
     def test_random_mutations(self):
@@ -97,7 +86,7 @@ class TestQuiver2(unittest.TestCase):
             template = template_seq
             seq = sample_from_template(template_seq, point_rate, insertion_rate, deletion_rate)
             bandwidth = max(2 * np.abs(len(template) - len(seq)), 5)
-            f = random.choice(['substitution', 'insertion', 'deletion'])
+            f = random.choice(['substitution', 'insertion'])#, 'deletion'])
             maxpos = len(template) if f == 'insertion' else len(template) - 1
             pos = random.randint(0, maxpos)
             base = random.choice('ACGT')
@@ -111,10 +100,11 @@ class TestQuiver2(unittest.TestCase):
             B = backward(seq, log_p, template, log_ins, log_del, bandwidth)
             M = forward(seq, log_p, new_template, log_ins, log_del, bandwidth)
             nr, nc = M.shape
-            # if f != 'deletion':
-            #     col = updated_col(pos, base, template, seq, log_p, A, log_ins, log_del)
-            #     exp_col = M.get_col(pos + (0 if f == 'deletion' else 1))
-            #     assert_array_equal(col, exp_col)
+            if f == 'substitution':
+                # this is the only case where the updated column exactly matches the full result
+                col = updated_col(pos, pos + 1, base, template, seq, log_p, A, log_ins, log_del)
+                exp_col = M.get_col(pos + 1)
+                assert_array_equal(col, exp_col)
             score = score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
             score2 = score_slow(new_template, seq, log_p, log_ins, log_del, bandwidth)
             score3 = M.get_elt(nr - 1, nc - 1)

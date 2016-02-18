@@ -71,12 +71,9 @@ class BandedMatrix:
         stop = start + (b - a)
         return start, stop
 
-    def get_col(self, j):
-        result = np.zeros(self.nrows)
-        start, stop = self.row_range(j)
+    def get_col(self, j, full=False):
         dstart, dstop = self.data_row_range(j)
-        result[start:stop] = self.data[dstart:dstop, j]
-        return result
+        return self.data[dstart:dstop, j]
 
     def __setitem__(self, key, val):
         # TODO: implement multidim slicing and negative indices
@@ -142,48 +139,41 @@ def backward(s, log_p, t, log_ins, log_del, bandwidth):
     return result
 
 
-def updated_col(pos, base, template, seq, log_p, A, log_ins, log_del):
-    j = pos + 1
-    result = np.zeros(A.nrows)
-    if j < A.h_offset + A.bandwidth:
-        result[0] = log_del * j
-    start, stop = A.row_range(j)
-    # TODO: code duplication with `update()`
-    for i in range(start, stop):
-        sub = (0 if base == seq[i-1] else log_p[i-1])
+def updated_col(prev_col, new_col, base, template, seq, log_p, A, log_ins, log_del):
+    prev = A.get_col(prev_col)
+    prev_start, prev_stop = A.row_range(prev_col)
+    row_start, row_stop = A.row_range(new_col)
+    offset = 1 - (row_start - prev_start)
+    result = np.empty((row_stop - row_start))
+    for i, real_i in enumerate(range(row_start, row_stop)):
         scores = []
-        if A.inband(i - 1, j):
+        if i > 0:
             # insertion
             scores.append(result[i - 1] + log_ins)
-        if A.inband(i, j - 1):
+        if real_i > prev_start and real_i <= prev_stop:
+            # match / substitution
+            scores.append(prev[i - offset] + (0 if base == seq[real_i-1] else log_p[real_i-1]))
+        if real_i >= prev_start and real_i < prev_stop:
             # deletion
-            scores.append(A.get_elt(i, j - 1) + log_del)
-        if A.inband(i - 1, j - 1):
-            scores.append(A.get_elt(i - 1, j - 1) + sub)
+            scores.append(prev[i - offset + 1] + log_del)
         result[i] = max(scores)
     return result
 
 
 def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth):
     """Score a mutation using the forward-backward trick."""
-    # FIXME: account for different size of array for an insertion or deletion
     mtype, pos, base = mutation
+    bj = pos + (0 if mtype == 'insertion' else 1)
+    Bcol = B.get_col(bj, full=True)
     if mtype == 'deletion':
         aj = pos
         Acol = A.get_col(aj)
-    else:
-        aj = pos + 1
-        Acol = updated_col(pos, base, template, seq, log_p, A, log_ins, log_del)
-    bj = pos + (0 if mtype == 'insertion' else 1)
+        # need to align columns
+        raise NotImplementedError()
+    aj = pos + (1 if mtype == 'substitution' else 0)
+    Acol = updated_col(pos, aj, base, template, seq, log_p, A, log_ins, log_del)
     Bcol = B.get_col(bj)
-
-    # need to chop off beginning of Acol and end of Bcol and align
-    a_start, a_stop = A.row_range(aj)
-    b_start, b_stop = B.row_range(bj)
-
-    start = max(a_start, b_start)
-    stop = min(a_stop, b_stop)
-    return (Acol[start:stop] + Bcol[start:stop]).max()
+    return (Acol + Bcol).max()
 
 
 def mutations(template):
