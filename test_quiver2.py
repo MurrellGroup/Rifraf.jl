@@ -6,11 +6,13 @@ from numpy.testing import assert_array_equal
 
 from sample import phred
 from sample import sample_from_template
+from sample import sample
 from quiver2 import update_template
 from quiver2 import forward
 from quiver2 import backward
 from quiver2 import score_mutation
 from quiver2 import updated_col
+from quiver2 import quiver2
 
 
 def random_seq(length):
@@ -112,6 +114,12 @@ class TestQuiver2(unittest.TestCase):
             self.assertAlmostEqual(score, score2)
             self.assertAlmostEqual(score, score3)
             self.assertAlmostEqual(score, score4)
+
+    def test_quiver2(self):
+        for _ in range(10):
+            template, reads, phreds = sample(n=10, length=20, error_rate=3/100, insertion_rate=3/100, deletion_rate=3/100)
+            result = quiver2(reads[0], reads, phreds, np.log10(3/100), np.log10(3/100), verbose=False, bandwidth=3, min_dist=9)
+            self.assertEqual(template, result)
 
 
 if __name__ == '__main__':
