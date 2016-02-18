@@ -1,11 +1,8 @@
 import numpy as np
 
-# FIXME: insertions can cause wrong answers in `updated_col()` and
-# functions that rely on it, because they change the shape of the
-# matrix.
-
-# FIXME: subsitutions also sometimes cause wrong answers, but it must
-# be for some other reason.
+# FIXME: insertions/delections can cause wrong answers in
+# `updated_col()` and functions that rely on it, because they change
+# the shape of the matrix.
 
 # TODO: cache BandedMatrix calls
 # TODO: test BandedMatrix
@@ -257,6 +254,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
     Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
     best_score = sum(A.last_elt() for A in As)
     for i in range(max_iters):
+        old_template = template
         old_score = best_score
         if verbose:
             print("iteration {}".format(i))
@@ -292,5 +290,10 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
         if verbose:
             print('  kept {} mutations'.format(len(chosen_cands)))
             print('  score: {:.4f}'.format(best_score))
-        assert best_score > old_score
+        if old_score > best_score:
+            if verbose:
+                # this can happen because score_mutation() is not exact for insertions and deletions
+                # FIXME: attempt to recover
+                print('Failed to converge.')
+            return old_template
     return template
