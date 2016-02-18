@@ -86,7 +86,7 @@ class TestQuiver2(unittest.TestCase):
             template = template_seq
             seq = sample_from_template(template_seq, point_rate, insertion_rate, deletion_rate)
             bandwidth = max(2 * np.abs(len(template) - len(seq)), 5)
-            f = random.choice(['substitution', 'insertion'])#, 'deletion'])
+            f = random.choice(['substitution', 'insertion', 'deletion'])
             maxpos = len(template) if f == 'insertion' else len(template) - 1
             pos = random.randint(0, maxpos)
             base = random.choice('ACGT')

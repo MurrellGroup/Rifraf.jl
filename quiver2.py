@@ -168,8 +168,14 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
     if mtype == 'deletion':
         aj = pos
         Acol = A.get_col(aj)
-        # need to align columns
-        raise NotImplementedError()
+        # need to chop off beginning of Acol and end of Bcol and align
+        a_start, a_stop = A.row_range(aj)
+        b_start, b_stop = B.row_range(bj)
+        amin = max(b_start - a_start, 0)
+        amax = len(Acol) - max(a_stop - b_stop, 0)
+        bmin = max(a_start - b_start, 0)
+        bmax = len(Bcol) - max(b_stop - a_stop, 0)
+        return (Acol[amin:amax] + Bcol[bmin:bmax]).max()
     aj = pos + (1 if mtype == 'substitution' else 0)
     Acol = updated_col(pos, aj, base, template, seq, log_p, A, log_ins, log_del)
     Bcol = B.get_col(bj)
