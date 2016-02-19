@@ -4,7 +4,8 @@ import numpy as np
 # `updated_col()` and functions that rely on it, because they change
 # the shape of the matrix.
 
-# TODO: cache BandedMatrix calls
+# TODO: cache BandedMatrix calls, or precompute ranges, if they take too much time
+# TODO: bounds checks in BandedMatrix
 # TODO: test BandedMatrix
 # TODO: improve slicing and arithmetic operations of BandedMatrix
 # TODO: port to Julia and compare speed
