@@ -21,8 +21,7 @@ def random_seq(length):
 
 def score_slow(template, sequence, log_p, log_ins, log_del, bandwidth):
     A = forward(sequence, log_p, template, log_ins, log_del, bandwidth)
-    nrows, ncols = A.shape
-    return A.get_elt(nrows - 1, ncols - 1)
+    return A[-1, -1]
 
 
 class TestQuiver2(unittest.TestCase):
@@ -101,7 +100,6 @@ class TestQuiver2(unittest.TestCase):
             A = forward(seq, log_p, template, log_ins, log_del, bandwidth)
             B = backward(seq, log_p, template, log_ins, log_del, bandwidth)
             M = forward(seq, log_p, new_template, log_ins, log_del, bandwidth)
-            nr, nc = M.shape
             if f == 'substitution':
                 # this is the only case where the updated column exactly matches the full result
                 col = updated_col(pos, pos + 1, base, template, seq, log_p, A, log_ins, log_del)
@@ -109,8 +107,8 @@ class TestQuiver2(unittest.TestCase):
                 assert_array_equal(col, exp_col)
             score = score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
             score2 = score_slow(new_template, seq, log_p, log_ins, log_del, bandwidth)
-            score3 = M.get_elt(nr - 1, nc - 1)
-            score4 = backward(seq, log_p, new_template, log_ins, log_del, bandwidth).get_elt(0, 0)
+            score3 = M[-1, -1]
+            score4 = backward(seq, log_p, new_template, log_ins, log_del, bandwidth)[0, 0]
             self.assertAlmostEqual(score, score2)
             self.assertAlmostEqual(score, score3)
             self.assertAlmostEqual(score, score4)

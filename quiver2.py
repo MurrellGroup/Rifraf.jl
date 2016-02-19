@@ -47,16 +47,17 @@ class BandedMatrix:
         return self.shape[1]
 
     def data_row(self, i, j):
+        """Returns k where self.data[k, j] stores M[i, j]"""
         return (i - j) + self.h_offset + self.bandwidth
 
-    def get_elt(self, i, j):
+    def __getitem__(self, key):
+        i, j = key
+        while i < 0:
+            i = self.nrows + i
+        while j < 0:
+            j = self.ncols + j
         row = self.data_row(i, j)
         return self.data[row, j]
-
-    def last_elt(self):
-        i, j = self.nrows -1, self.ncols - 1
-        di = self.data_row(i, j)
-        return self.data[di, j]
 
     def row_range(self, j):
         start = max(0, j - self.h_offset - self.bandwidth)
@@ -104,12 +105,12 @@ def update(arr, i, j, s_base, t_base, log_p, log_ins, log_del):
     scores = []
     if arr.inband(i - 1, j):
         # insertion
-        scores.append(arr.get_elt(i - 1, j) + log_ins)
+        scores.append(arr[i - 1, j] + log_ins)
     if arr.inband(i, j - 1):
         # deletion
-        scores.append(arr.get_elt(i, j - 1) + log_del)
+        scores.append(arr[i, j - 1] + log_del)
     if arr.inband(i - 1, j - 1):
-        scores.append(arr.get_elt(i - 1, j - 1) + sub)
+        scores.append(arr[i - 1, j - 1] + sub)
     return max(scores)
 
 
@@ -253,7 +254,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
         print("computing initial alignments")
     As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
     Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-    best_score = sum(A.last_elt() for A in As)
+    best_score = sum(A[-1, -1] for A in As)
     best_template = template
     current_score = best_score
     current_template = best_template
@@ -280,7 +281,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
         current_template = apply_mutations(current_template, chosen_cands)
         As = list(forward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
         Bs = list(backward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-        current_score = sum(A.last_elt() for A in As)
+        current_score = sum(A[-1, -1] for A in As)
 
         # detect if a single mutation is better
         # FIXME: code duplication
@@ -292,7 +293,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
             current_template = apply_mutations(old_template, chosen_cands)
             As = list(forward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
             Bs = list(backward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-            current_score = sum(A.last_elt() for A in As)
+            current_score = sum(A[-1, -1] for A in As)
         if verbose:
             print('  score: {:.4f}'.format(current_score))
         if current_score > best_score:
