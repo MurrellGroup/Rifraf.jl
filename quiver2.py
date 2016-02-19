@@ -60,39 +60,40 @@ class BandedMatrix:
         return self.data[row, j]
 
     def row_range(self, j):
+        """[start, stop) of band in column j"""
         start = max(0, j - self.h_offset - self.bandwidth)
         stop = min(j + self.v_offset + self.bandwidth + 1, self.nrows)
         return start, stop
 
     def data_row_range(self, j):
+        """[start, stop) of band in self.data column j"""
         start = max(0, self.h_offset + self.bandwidth - j)
         a, b = self.row_range(j)
         stop = start + (b - a)
         return start, stop
 
     def get_col(self, j, full=False):
+        """banded part only of column j"""
         dstart, dstop = self.data_row_range(j)
         return self.data[dstart:dstop, j]
 
     def __setitem__(self, key, val):
-        # TODO: implement multidim slicing and negative indices
         i, j = key
         row = self.data_row(i, j)
         self.data[row, j] = val
 
     def inband(self, i, j):
+        """whether position [i, j] is in the band"""
         row = self.data_row(i, j)
         return 0 <= row < self.data.shape[0]
 
     def full(self):
-        # this is slow, but just for testing purposes
+        """Construct a dense np.array of this matrix."""
         result = np.zeros((self.nrows, self.ncols))
-        for i in range(self.nrows):
-            for j in range(self.ncols):
-                if not self.inband(i, j):
-                    continue
-                row = self.data_row(i, j)
-                result[i, j] = self.data[row, j]
+        for j in range(self.ncols):
+            start, stop = self.row_range(j)
+            dstart, dstop = self.data_row_range(j)
+            result[start:stop, j] = self.data[dstart:dstop, j]
         return result
 
     def flip(self):
@@ -100,6 +101,7 @@ class BandedMatrix:
 
 
 def update(arr, i, j, s_base, t_base, log_p, log_ins, log_del):
+    """compute alignment score of [i, j]"""
     # TODO: log(1-p) may not be negligible
     sub = (0 if s_base == t_base else log_p)
     scores = []
@@ -115,6 +117,7 @@ def update(arr, i, j, s_base, t_base, log_p, log_ins, log_del):
 
 
 def forward(s, log_p, t, log_ins, log_del, bandwidth):
+    """Forward matrix for aligning `s` to `t`."""
     result = BandedMatrix((len(s) + 1, len(t) + 1), bandwidth)
     for i in range(min(result.shape[0], result.v_offset + bandwidth + 1)):
         result[i, 0] = log_ins * i
@@ -130,6 +133,7 @@ def forward(s, log_p, t, log_ins, log_del, bandwidth):
 
 
 def backward(s, log_p, t, log_ins, log_del, bandwidth):
+    """Backward matrix for aligning `s` to `t`."""
     s = ''.join(reversed(s))
     log_p = np.array(list(reversed(log_p)))
     t = ''.join(reversed(t))
@@ -139,6 +143,15 @@ def backward(s, log_p, t, log_ins, log_del, bandwidth):
 
 
 def updated_col(prev_col, new_col, base, template, seq, log_p, A, log_ins, log_del):
+    """Compute a new column for `base` in a particular position.
+
+    prev_col: column from which to calculate new result
+
+    new_col: used only for shape. If this is a substitution, it is
+             prev_col + 1; if it is a deletion it is the same as
+             prev_col.
+
+    """
     prev = A.get_col(prev_col)
     prev_start, prev_stop = A.row_range(prev_col)
     row_start, row_stop = A.row_range(new_col)
@@ -182,7 +195,7 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
 
 
 def mutations(template):
-    """Returns (name, position, base)"""
+    """Yields all mutations as tuple (name, position, base)"""
     for j in range(len(template)):
         for base in 'ACGT':
             if template[j] == base:
@@ -197,6 +210,7 @@ def mutations(template):
 
 
 def update_template(template, mutation):
+    """Apply a mutation to a template"""
     mtype, pos, base = mutation
     if mtype == 'substitution':
         return ''.join([template[:pos], base, template[pos + 1:]])
@@ -209,6 +223,12 @@ def update_template(template, mutation):
 
 
 def apply_mutations(template, mutations):
+    """Apply multiple mutations to a template.
+
+    Keeps track of changes in positions due to insertions and
+    deletions.
+
+    """
     for i in range(len(mutations)):
         score, mutation = mutations[i]
         template = update_template(template, mutation)
@@ -225,6 +245,7 @@ def apply_mutations(template, mutations):
 
 
 def choose_candidates(candidates, min_dist):
+    """Choose best mutations that are at least `min_dist` bases distant."""
     final_cands = []
     posns = set()
     for c in reversed(sorted(candidates, key=lambda c: c[0])):
@@ -243,6 +264,19 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
     sequences: list of dna sequences
 
     phreds: list of arrays of phred scores
+
+    log_ins: penalty for insertion
+
+    log_del: penalty for deletion
+
+    bandwidth: extra bandwidth in banded alignment matrices
+
+    min_dist: minimum distance between multiple mutations accepted in
+              a single iteration
+
+    max_iters: maximum iterations before termination
+
+    verbose: print progress to the command line
 
     """
     log_ps = list((-phred / 10) for phred in phreds)
