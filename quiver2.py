@@ -253,47 +253,53 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
     As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
     Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
     best_score = sum(A.last_elt() for A in As)
+    best_template = template
+    current_score = best_score
+    current_template = best_template
+    if verbose:
+        print('initial score: {:.4f}'.format(best_score))
     for i in range(max_iters):
-        old_template = template
-        old_score = best_score
+        old_template = current_template
+        old_score = current_score
         if verbose:
             print("iteration {}".format(i))
         candidates = []
-        for mutation in mutations(template):
-            score = sum(score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
+        for mutation in mutations(current_template):
+            score = sum(score_mutation(mutation, current_template, seq, log_p, A, B, log_ins, log_del, bandwidth)
                         for seq, log_p, A, B in zip(sequences, log_ps, As, Bs))
-            if score > best_score:
+            if score > current_score:
                 candidates.append([score, mutation])
         if not candidates:
             break
         if verbose:
             print("  found {} candidate mutations".format(len(candidates)))
         chosen_cands = choose_candidates(candidates, min_dist)
-        template = apply_mutations(template, chosen_cands)
-        As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-        Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-        best_score = sum(A.last_elt() for A in As)
+        if verbose:
+            print('  filtered to {} candidate mutations'.format(len(chosen_cands)))
+        current_template = apply_mutations(current_template, chosen_cands)
+        As = list(forward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+        Bs = list(backward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+        current_score = sum(A.last_elt() for A in As)
 
         # detect if a single mutation is better
         # FIXME: code duplication
         # FIXME: this may not actually work, because score_mutation() is not exact
-        if best_score < chosen_cands[0][0]:
+        if current_score < chosen_cands[0][0]:
             if verbose:
                 print('  rejecting multiple candidates in favor of best')
             chosen_cands = [chosen_cands[0]]
-            template = apply_mutations(template, chosen_cands)
-            As = list(forward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-            Bs = list(backward(s, p, template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
-            best_score = sum(A.last_elt() for A in As)
-            # cannot assert this because score_mutation() does not return exact same results
-            # assert new_best_score == chosen_cands[0][0]
+            current_template = apply_mutations(old_template, chosen_cands)
+            As = list(forward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+            Bs = list(backward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
+            current_score = sum(A.last_elt() for A in As)
         if verbose:
-            print('  kept {} mutations'.format(len(chosen_cands)))
-            print('  score: {:.4f}'.format(best_score))
-        if old_score > best_score:
+            print('  score: {:.4f}'.format(current_score))
+        if current_score > best_score:
+            best_template = current_template
+            best_score = current_score
+        if old_score > current_score:
             if verbose:
                 # this can happen because score_mutation() is not exact for insertions and deletions
-                # FIXME: attempt to recover
-                print('Failed to converge.')
-            return old_template
-    return template
+                # FIXME: detect if this keeps happening and return best overall template
+                print('Warning: score decreased.')
+    return best_template
