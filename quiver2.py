@@ -9,6 +9,7 @@ import numpy as np
 # TODO: test BandedMatrix
 # TODO: improve slicing and arithmetic operations of BandedMatrix
 # TODO: port to Julia and compare speed
+# TODO: stochastic gradient descent. weight choices by sequence quality.
 
 # TODO: use faster version of partial order aligner
 # TODO: benchmark against actual quiver implementation
@@ -102,7 +103,6 @@ class BandedMatrix:
 
 def update(arr, i, j, s_base, t_base, log_p, log_ins, log_del):
     """compute alignment score of [i, j]"""
-    # TODO: log(1-p) may not be negligible
     sub = (0 if s_base == t_base else log_p)
     scores = []
     if arr.inband(i - 1, j):
@@ -294,6 +294,8 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
     current_template = best_template
     if verbose:
         print('initial score: {:.4f}'.format(best_score))
+    converged = False
+    total_mutations = 0
     for i in range(max_iters):
         old_template = current_template
         old_score = current_score
@@ -306,6 +308,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
             if score > current_score:
                 candidates.append([score, mutation])
         if not candidates:
+            converged = True
             break
         if verbose:
             print("  found {} candidate mutations".format(len(candidates)))
@@ -328,6 +331,7 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
             As = list(forward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
             Bs = list(backward(s, p, current_template, log_ins, log_del, bandwidth) for s, p in zip(sequences, log_ps))
             current_score = sum(A[-1, -1] for A in As)
+        total_mutations += len(chosen_cands)
         if verbose:
             print('  score: {:.4f}'.format(current_score))
         if current_score > best_score:
@@ -338,4 +342,9 @@ def quiver2(template, sequences, phreds, log_ins, log_del, bandwidth=10,
                 # this can happen because score_mutation() is not exact for insertions and deletions
                 # FIXME: detect if this keeps happening and return best overall template
                 print('Warning: score decreased.')
-    return best_template
+    info = {
+        'converged': converged,
+        'iterations': i,
+        'mutations': total_mutations,
+    }
+    return best_template, info
