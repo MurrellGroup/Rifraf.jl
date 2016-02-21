@@ -48,7 +48,7 @@ def repeat_and_chain(items, ns):
     return chain.from_iterable(repeat(item, n) for item, n in zip(items, ns))
 
 
-def sample(n, length, error_rate, insertion_rate, deletion_rate):
+def sample(n, length, error_rate):
     """Generate a template, and sample from it.
 
     Paramters
@@ -66,14 +66,12 @@ def sample(n, length, error_rate, insertion_rate, deletion_rate):
     phreds = []
     template = sample_template(length)
     for i in range(n):
-        point_rate = poisson(error_rate) / length
-        read = sample_from_template(template, point_rate,
-                                    insertion_rate, deletion_rate)
+        read = sample_from_template(template, error_rate,
+                                    error_rate, error_rate)
         reads.append(read)
         # TODO:
         # - vary quality scores
         # - make varied scores actually reflect chance of mutation
         # - include insertion/deletion scores
-        error_rate = point_rate + insertion_rate + deletion_rate
         phreds.append(phred(list(repeat(error_rate, len(read)))))
     return template, reads, phreds
