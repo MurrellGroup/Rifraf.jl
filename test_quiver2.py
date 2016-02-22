@@ -115,8 +115,11 @@ class TestQuiver2(unittest.TestCase):
 
     def test_quiver2(self):
         for _ in range(10):
-            template, reads, phreds = sample(n=10, length=20, error_rate=3/100, insertion_rate=3/100, deletion_rate=3/100)
-            result = quiver2(reads[0], reads, phreds, np.log10(3/100), np.log10(3/100), verbose=False, bandwidth=3, min_dist=9)
+            template, reads, phreds = sample(n=10, length=20, error_rate=3/100)
+            result, _ = quiver2(reads[0], reads, phreds,
+                                np.log10(3/100), np.log10(3/100),
+                                verbose=False, bandwidth=3,
+                                min_dist=9)
             self.assertEqual(template, result)
 
 
