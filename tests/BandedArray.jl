@@ -88,3 +88,14 @@ begin
     expected[1, 3] = 0
     @test full(m) == expected
 end
+
+#test individual setting
+begin
+    m = BandedArray{Int32}((3, 3), 1)
+    m[1, 2] = 3
+    m[2, 1] = 5
+    expected = zeros(Int32, (3, 3))
+    expected[1, 2] = 3
+    expected[2, 1] = 5
+    @test full(m) == expected
+end

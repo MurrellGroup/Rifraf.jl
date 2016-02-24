@@ -1,6 +1,6 @@
 module BandedArrayModule
 
-export BandedArray, sparsecol, data_row, data_row_range, inband, full, flip!
+export BandedArray, sparsecol, data_row, row_range, data_row_range, inband, full, flip!
 
 immutable BandedArray{T} <: AbstractArray{T,1}
     data::Array{T}
@@ -33,6 +33,7 @@ function sparsecol(A::BandedArray, j)
     return A.data[start:stop, j]
 end
 
+# FIXME: these are wrong. need to be tested.
 data_row(A::BandedArray, i, j) = (i - j) + A.h_offset + A.bandwidth + 1
 
 function row_range(A::BandedArray, j)
