@@ -144,7 +144,7 @@ function update_template(template::AbstractString, mutation::Mutation)
     elseif mutation.m == "insertion"
         return string(template[1:(mutation.pos - 1)], mutation.base, template[(mutation.pos):end])
     elseif mutation.m == "deletion"
-        return string(template[1:(mutation.pos - 1)], mutation.base, template[(mutation.pos + 1):end])
+        return string(template[1:(mutation.pos - 1)], template[(mutation.pos + 1):end])
     else
         # FIXME: solve with type system
         error("unknown mutation")

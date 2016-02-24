@@ -154,7 +154,6 @@ function test_random_mutations()
         end
         score = Quiver2.score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
         @test_approx_eq score M[end, end]
-        @test_approx_eq score Quiver2.backward(seq, log_p, new_template, log_ins, log_del, bandwidth)[1, 1]
     end
 end
 
