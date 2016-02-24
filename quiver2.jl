@@ -60,13 +60,14 @@ immutable MCand
     score::Float64
 end
 
-function updated_col{T}(prev_col::Int, new_col::Int, base::Char,
+function updated_col{T}(mutation::Mutation,
                         template::AbstractString, seq::AbstractString,
                         log_p::Array{Float64, 1}, A::BandedArray{T},
                         log_ins::Float64, log_del::Float64)
-    prev = sparsecol(A, prev_col)
-    prev_start, prev_stop = row_range(A, prev_col)
-    row_start, row_stop = row_range(A, new_col)
+    aj = mutation.pos + (mutation.m == "substitution" ? 1 : 0)
+    prev = sparsecol(A, mutation.pos)
+    prev_start, prev_stop = row_range(A, mutation.pos)
+    row_start, row_stop = row_range(A, aj)
     offset = 1 - (row_start - prev_start)
     result = Array{T}((row_stop - row_start + 1))
     for real_i in row_start:row_stop
@@ -78,7 +79,7 @@ function updated_col{T}(prev_col::Int, new_col::Int, base::Char,
         end
         if real_i > prev_start && real_i <= prev_stop + 1
             # match / substitution
-            score = max(score, prev[i - offset] + (base == seq[real_i-1] ? 0 : log_p[real_i-1]))
+            score = max(score, prev[i - offset] + (mutation.base == seq[real_i-1] ? 0 : log_p[real_i-1]))
         end
         if real_i >= prev_start && real_i <= prev_stop
             # deletion
@@ -87,6 +88,18 @@ function updated_col{T}(prev_col::Int, new_col::Int, base::Char,
         result[i] = score
     end
     return result
+end
+
+function equal_ranges(a_range, b_range)
+    a_start, a_stop = a_range
+    b_start, b_stop = b_range
+    alen = a_stop - a_start + 1
+    blen = b_stop - b_start + 1
+    amin = max(b_start - a_start + 1, 1)
+    amax = alen - max(a_stop - b_stop, 0)
+    bmin = max(a_start - b_start + 1, 1)
+    bmax = blen - max(b_stop - a_stop, 0)
+    return (amin, amax), (bmin, bmax)
 end
 
 function score_mutation{T}(mutation::Mutation, template::AbstractString,
@@ -99,16 +112,10 @@ function score_mutation{T}(mutation::Mutation, template::AbstractString,
         aj = mutation.pos
         Acol = sparsecol(A, aj)
         # need to chop off beginning of Acol and end of Bcol and align
-        a_start, a_stop = row_range(A, aj)
-        b_start, b_stop = row_range(B, bj)
-        amin = max(b_start - a_start + 1, 1)
-        amax = length(Acol) - max(a_stop - b_stop + 1, 0)
-        bmin = max(a_start - b_start + 1, 1)
-        bmax = length(Bcol) - max(b_stop - a_stop + 1, 0)
+        (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj), row_range(B, bj))
         return maximum(Acol[amin:amax] + Bcol[bmin:bmax])
     end
-    aj = mutation.pos + (mutation.m == "substitution" ? 1 : 0)
-    Acol = updated_col(mutation.pos, aj, mutation.base, template, seq, log_p, A, log_ins, log_del)
+    Acol = updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
     return maximum(Acol + Bcol)
 end
 
