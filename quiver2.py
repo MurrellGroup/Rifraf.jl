@@ -73,7 +73,7 @@ class BandedMatrix:
         stop = start + (b - a)
         return start, stop
 
-    def get_col(self, j, full=False):
+    def get_col(self, j):
         """banded part only of column j"""
         dstart, dstop = self.data_row_range(j)
         return self.data[dstart:dstop, j]
@@ -176,7 +176,7 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
     """Score a mutation using the forward-backward trick."""
     mtype, pos, base = mutation
     bj = pos + (0 if mtype == 'insertion' else 1)
-    Bcol = B.get_col(bj, full=True)
+    Bcol = B.get_col(bj)
     if mtype == 'deletion':
         aj = pos
         Acol = A.get_col(aj)
@@ -190,7 +190,6 @@ def score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandw
         return (Acol[amin:amax] + Bcol[bmin:bmax]).max()
     aj = pos + (1 if mtype == 'substitution' else 0)
     Acol = updated_col(pos, aj, base, template, seq, log_p, A, log_ins, log_del)
-    Bcol = B.get_col(bj)
     return (Acol + Bcol).max()
 
 
