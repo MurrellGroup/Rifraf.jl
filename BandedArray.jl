@@ -10,6 +10,7 @@ immutable BandedArray{T} <: AbstractArray{T,2}
     v_offset::Int
 
     function BandedArray(data, shape, bandwidth)
+        # TODO: check bandwidth
         drows = datarows(shape, bandwidth)
         nrows, ncols = shape
         h_offset = max(ncols - nrows, 0)
