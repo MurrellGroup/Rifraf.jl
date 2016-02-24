@@ -1,28 +1,42 @@
 module BandedArrayModule
 
-export BandedArray, sparsecol, data_row, row_range, data_row_range, inband, full, flip!
+export BandedArray, sparsecol, data_row, row_range, data_row_range, inband, full, flip
 
-immutable BandedArray{T} <: AbstractArray{T,1}
+immutable BandedArray{T} <: AbstractArray{T,2}
     data::Array{T}
-    shape::NTuple{2,Int}
+    shape::Tuple{Int,Int}
     bandwidth::Int
-    diff::Int
     h_offset::Int
     v_offset::Int
 
-    function BandedArray(shape, bandwidth)
+    function BandedArray(data, shape, bandwidth)
+        drows = datarows(shape, bandwidth)
         nrows, ncols = shape
-        diff = abs(nrows - ncols)
-        data_nrows = 2 * bandwidth + diff + 1
-        dshape = (data_nrows, ncols)
         h_offset = max(ncols - nrows, 0)
         v_offset = max(nrows - ncols, 0)
 
-        return new(zeros(T, dshape), shape, bandwidth, diff, h_offset, v_offset)
+        if size(data) != (drows, ncols)
+            error("data is wrong shape")
+        end
+
+        return new(data, shape, bandwidth, h_offset, v_offset)
     end
+
+end
+
+function BandedArray(T::Type, shape::Tuple{Int,Int}, bandwidth::Int)
+    drows = datarows(shape, bandwidth)
+    dshape = (drows, shape[2])
+    data = zeros(T, dshape)
+    return BandedArray{T}(data, shape, bandwidth)
 end
 
 Base.size(A::BandedArray) = A.shape
+
+function datarows(shape::Tuple{Int,Int}, bandwidth::Int)
+    diff = abs(shape[1] - shape[2])
+    return 2 * bandwidth + diff + 1
+end
 
 Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int) = get(A.data, (data_row(A, i, j), j), zero(T))
 
@@ -33,7 +47,7 @@ function sparsecol(A::BandedArray, j)
     return A.data[start:stop, j]
 end
 
-# FIXME: these are wrong. need to be tested.
+# TODO: bounds checks
 data_row(A::BandedArray, i, j) = (i - j) + A.h_offset + A.bandwidth + 1
 
 function row_range(A::BandedArray, j)
@@ -43,10 +57,8 @@ function row_range(A::BandedArray, j)
 end
 
 function data_row_range(A::BandedArray, j)
-    start = max(1, A.h_offset + A.bandwidth - j)
     a, b = row_range(A, j)
-    stop = start + (b - a)
-    return start, stop
+    return data_row(A, a, j), data_row(A, b, j)
 end
 
 inband(A::BandedArray, i, j) = 1 <= data_row(A, i, j) <= size(A.data)[1]
@@ -63,7 +75,7 @@ end
 
 function flip{T}(A::BandedArray{T})
     newdata = flipdim(flipdim(A.data, 1), 2)
-    return BandedArray{T}(newdata, A.shape, A.bandwidth, A.diff, A.h_offset, A.v_offset)
+    return BandedArray{T}(newdata, size(A), A.bandwidth)
 end
 
 end
