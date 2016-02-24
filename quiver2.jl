@@ -119,24 +119,24 @@ function score_mutation{T}(mutation::Mutation, template::AbstractString,
     return maximum(Acol + Bcol)
 end
 
-# function mutations(template::AbstractString)
-#     for j in 1:length(template)
-#         for base in "ACGT"
-#             if template[j] == base
-#                 continue
-#             end
-#             produce(Mutation("substitution", j, base))
-#         end
-#         produce(Mutation("deletion", j, None))
-#         for base in "ACGT"
-#             produce(Mutation("insertion", j, base))
-#         end
-#     end
-#     # insertion after last
-#     for base in "ACGT"
-#         produce(Mutation("insertion", length(template) + 1, base))
-#     end
-# end
+function mutations(template::AbstractString)
+    for j in 1:length(template)
+        for base in "ACGT"
+            if template[j] == base
+                continue
+            end
+            produce(Mutation("substitution", j, base))
+        end
+        produce(Mutation("deletion", j, 'X'))  # FIXME: how to represent no base here?
+        for base in "ACGT"
+            produce(Mutation("insertion", j, base))
+        end
+    end
+    # insertion after last
+    for base in "ACGT"
+        produce(Mutation("insertion", length(template) + 1, base))
+    end
+end
 
 function update_template(template::AbstractString, mutation::Mutation)
     if mutation.m == "substitution"
@@ -147,26 +147,33 @@ function update_template(template::AbstractString, mutation::Mutation)
         return string(template[1:(mutation.pos - 1)], template[(mutation.pos + 1):end])
     else
         # FIXME: solve with type system
-        error("unknown mutation")
+        error("unknown mutation: $(mutation.m)")
     end
 end
 
-# function apply_mutations!(template::AbstractString, mutations::Array(Mutation, 1))
-#     # FIXME: make pure
-#     for i in 1:length(mutations):
-#         mutation = mutations[i]
-#         template = update_template(template, mutation)
-#         # TODO: solve with type system
-#         offsets = Dict("insertion" => 1, "deletion" => -1, "substitution" => 0)
-#         o = offsets[mutation.m]
-#         for ii = (i + 1):length(mutations)
-#             if mutations[ii].pos > mutation.pos
-#                 mutations[ii] = Mutation(mutation.m, mutation.base, mutation..pos + o)
-#             end
-#         end
-#     end
-#     return template
-# end
+function apply_mutations(template::AbstractString, mutations::Array{Mutation, 1})
+    # check that mutations all have different positions.
+    # this is a bit too strict, since there are some combinations of
+    # mutations affecting the same spot that are unambiguous.
+    if length(Set([m.pos for m in mutations])) != length(mutations)
+        error("Cannot have multiple mutations affecting the same position")
+    end
+    remaining = [m for m in mutations]
+
+    while length(remaining) > 0
+        m = pop!(remaining)
+        template = update_template(template, m)
+        o = Dict("insertion" => 1, "deletion" => -1, "substitution" => 0)[m.m]
+        for i in 1:length(remaining)
+            m2 = remaining[i]
+            if m2.pos >= m.pos
+                remaining[i] = Mutation(m2.m, m2.pos + o, m2.base)
+            end
+        end
+    end
+
+    return template
+end
 
 # function choose_candidates(candidates::Vector(MCand, 1), min_dist::Int)
 #     final_cands = []

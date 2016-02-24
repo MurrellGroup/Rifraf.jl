@@ -131,7 +131,7 @@ function test_random_mutations()
     deletion_rate = 0.01
     log_ins = log10(insertion_rate)
     log_del = log10(deletion_rate)
-    for i = 1:1000
+    for i = 1:100
         template_len = rand(10:20)
         template_seq = random_seq(template_len)
         template = template_seq
@@ -157,9 +157,30 @@ function test_random_mutations()
     end
 end
 
+function test_mutations()
+    n = 0
+    seq = "ACG"
+    for m in Task(() -> Quiver2.mutations(seq))
+        n += 1
+    end
+    @test n == length(seq) + 3 * length(seq) + 4 * (length(seq) + 1)
+end
+
+function test_apply_mutations()
+    template = "ACG"
+    mutations = [Quiver2.Mutation("insertion", 1, 'T'),
+                 Quiver2.Mutation("deletion", 3, 'X'),
+                 Quiver2.Mutation("substitution", 2, 'T')]
+    expected = "TAT"
+    result = Quiver2.apply_mutations(template, mutations)
+    @test result == expected
+end
+
 test_perfect_forward()
 test_perfect_backward()
 test_imperfect_forward()
 test_updated_col_substitution_versus_forward()
 test_equal_ranges()
 test_random_mutations()
+test_mutations()
+test_apply_mutations()
