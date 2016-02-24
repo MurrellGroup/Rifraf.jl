@@ -23,20 +23,13 @@ end
 
 function forward(s::AbstractString, log_p::Array{Float64, 1}, t::AbstractString,
                  log_ins::Float64, log_del::Float64, bandwidth::Int)
-    result = BandedArray{Float64}((length(s) + 1, length(t) + 1), bandwidth)
+    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
-        print(i)
-        print(' ')
         result[i, 1] = log_ins * (i - 1)
     end
     for j = 2:min(size(result)[2], result.h_offset + bandwidth + 1)
-        print(j)
-        print(' ')
         result[1, j] = log_del * (j - 1)
     end
-    print(full(result))
-    return result
-    # TODO: reverse order of iteration?
     for j = 2:size(result)[2]
         start, stop = row_range(result, j)
         start = max(start, 2)
@@ -47,13 +40,13 @@ function forward(s::AbstractString, log_p::Array{Float64, 1}, t::AbstractString,
     return result
 end
 
-function backward(s, log_p, t, log_ins, log_del, bandwidth)
+function backward(s::AbstractString, log_p::Array{Float64, 1}, t::AbstractString,
+                 log_ins::Float64, log_del::Float64, bandwidth::Int)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
     t = reverse(t)
     result = forward(s, log_p, t, log_ins, log_del, bandwidth)
-    flip!(result)
-    return result
+    return flip(result)
 end
 
 end
