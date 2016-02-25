@@ -264,8 +264,10 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         end
         candidates = MCand[]
         for mutation in Task(() -> mutations(current_template))
-            score = sum([score_mutation(mutation, current_template, seq, log_p, A, B, log_ins, log_del, bandwidth)
-                         for (seq, log_p, A, B) in zip(sequences, log_ps, As, Bs)])
+            score = 0
+            for si in 1:length(sequences)
+                score += score_mutation(mutation, current_template, sequences[si], log_ps[si], As[si], Bs[si], log_ins, log_del, bandwidth)
+            end
             if score > current_score
                 push!(candidates, MCand(mutation, score))
             end
