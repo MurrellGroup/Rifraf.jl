@@ -133,7 +133,12 @@ function score_deletion(mutation::Mutation, A::BandedArray{Float64}, B::BandedAr
     Acol = sparsecol(A, aj)
     Bcol = sparsecol(B, bj)
     (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj), row_range(B, bj))
-    return maximum(Acol[amin:amax] + Bcol[bmin:bmax])
+
+    result = Acol[amin] + Bcol[bmin]
+    for (i, j) in zip((amin+1):amax, (bmin+1):bmax)
+        result = max(result, Acol[i] + Bcol[j])
+    end
+    return result
 end
 
 function score_mutation(mutation::Mutation, template::AbstractString,
@@ -146,7 +151,12 @@ function score_mutation(mutation::Mutation, template::AbstractString,
     Acol::Array{Float64} = updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
     bj = mutation.pos + (mutation.m == "insertion" ? 0 : 1)
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
-    return maximum(Acol + Bcol)
+
+    result = Acol[1] + Bcol[1]
+    for i = 2:length(Acol)
+        result = max(result, Acol[i] + Bcol[i])
+    end
+    return result
 end
 
 function mutations(template::AbstractString)
