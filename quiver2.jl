@@ -51,10 +51,20 @@ function backward(s::AbstractString, log_p::Array{Float64, 1}, t::AbstractString
     return flip(result)
 end
 
-immutable Mutation
-    m::AbstractString  # TODO: make custom type?
+abstract Mutation
+
+immutable Substitution <: Mutation
     pos::Int
     base::Char
+end
+
+immutable Insertion <: Mutation
+    pos::Int
+    base::Char
+end
+
+immutable Deletion <: Mutation
+    pos::Int
 end
 
 immutable MCand
@@ -66,7 +76,7 @@ function updated_col(mutation::Mutation,
                      template::AbstractString, seq::AbstractString,
                      log_p::Array{Float64, 1}, A::BandedArray{Float64},
                      log_ins::Float64, log_del::Float64)
-    aj = mutation.pos + (mutation.m == "substitution" ? 1 : 0)
+    aj = mutation.pos + (typeof(mutation) == Substitution ? 1 : 0)
     prev::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(A, mutation.pos)
     prev_start, prev_stop = row_range(A, mutation.pos)
     row_start, row_stop = row_range(A, aj)
@@ -127,68 +137,48 @@ function equal_ranges(a_range::Tuple{Int64,Int64}, b_range::Tuple{Int64,Int64})
     return (amin, amax), (bmin, bmax)
 end
 
-function score_deletion(mutation::Mutation, A::BandedArray{Float64}, B::BandedArray{Float64})
+function score_mutation(mutation::Deletion, template::AbstractString,
+                        seq::AbstractString, log_p::Array{Float64, 1},
+                        A::BandedArray{Float64}, B::BandedArray{Float64},
+                        log_ins::Float64, log_del::Float64, bandwidth::Int)
     aj = mutation.pos
     bj = mutation.pos + 1
     Acol = sparsecol(A, aj)
     Bcol = sparsecol(B, bj)
     (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj), row_range(B, bj))
 
-    result = Acol[amin] + Bcol[bmin]
+    result::Float64 = Acol[amin] + Bcol[bmin]
     for (i, j) in zip((amin+1):amax, (bmin+1):bmax)
         result = max(result, Acol[i] + Bcol[j])
     end
     return result
 end
 
-function score_mutation(mutation::Mutation, template::AbstractString,
+function score_mutation(mutation::Union{Insertion,Substitution}, template::AbstractString,
                         seq::AbstractString, log_p::Array{Float64, 1},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
                         log_ins::Float64, log_del::Float64, bandwidth::Int)
-    if mutation.m == "deletion"
-        return score_deletion(mutation, A, B)
-    end
     Acol::Array{Float64} = updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
-    bj = mutation.pos + (mutation.m == "insertion" ? 0 : 1)
+    bj = mutation.pos + (typeof(mutation) == Insertion ? 0 : 1)
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
 
-    result = Acol[1] + Bcol[1]
+    result::Float64 = Acol[1] + Bcol[1]
     for i = 2:length(Acol)
         result = max(result, Acol[i] + Bcol[i])
     end
     return result
 end
 
-function mutations(template::AbstractString)
-    for j in 1:length(template)
-        for base in "ACGT"
-            if template[j] == base
-                continue
-            end
-            produce(Mutation("substitution", j, base))
-        end
-        produce(Mutation("deletion", j, 'X'))  # FIXME: how to represent no base here?
-        for base in "ACGT"
-            produce(Mutation("insertion", j, base))
-        end
-    end
-    # insertion after last
-    for base in "ACGT"
-        produce(Mutation("insertion", length(template) + 1, base))
-    end
+function update_template(template::AbstractString, mutation::Substitution)
+    return string(template[1:(mutation.pos - 1)], mutation.base, template[(mutation.pos + 1):end])
 end
 
-function update_template(template::AbstractString, mutation::Mutation)
-    if mutation.m == "substitution"
-        return string(template[1:(mutation.pos - 1)], mutation.base, template[(mutation.pos + 1):end])
-    elseif mutation.m == "insertion"
-        return string(template[1:(mutation.pos - 1)], mutation.base, template[(mutation.pos):end])
-    elseif mutation.m == "deletion"
-        return string(template[1:(mutation.pos - 1)], template[(mutation.pos + 1):end])
-    else
-        # FIXME: solve with type system
-        error("unknown mutation: $(mutation.m)")
-    end
+function update_template(template::AbstractString, mutation::Insertion)
+    return string(template[1:(mutation.pos - 1)], mutation.base, template[(mutation.pos):end])
+end
+
+function update_template(template::AbstractString, mutation::Deletion)
+    return string(template[1:(mutation.pos - 1)], template[(mutation.pos + 1):end])
 end
 
 function apply_mutations(template::AbstractString, mutations::Array{Mutation, 1})
@@ -203,16 +193,40 @@ function apply_mutations(template::AbstractString, mutations::Array{Mutation, 1}
     while length(remaining) > 0
         m = pop!(remaining)
         template = update_template(template, m)
-        o = Dict("insertion" => 1, "deletion" => -1, "substitution" => 0)[m.m]
+        o = Dict(Insertion => 1, Deletion => -1, Substitution => 0)[typeof(m)]
         for i in 1:length(remaining)
             m2 = remaining[i]
             if m2.pos >= m.pos
-                remaining[i] = Mutation(m2.m, m2.pos + o, m2.base)
+                T = typeof(m2)
+                if T == Deletion
+                    remaining[i] = T(m2.pos + o)
+                else
+                    remaining[i] = T(m2.pos + o, m2.base)
+                end
             end
         end
     end
 
     return template
+end
+
+function mutations(template::AbstractString)
+    for j in 1:length(template)
+        for base in "ACGT"
+            if template[j] == base
+                continue
+            end
+            produce(Substitution(j, base))
+        end
+        produce(Deletion(j))
+        for base in "ACGT"
+            produce(Insertion(j, base))
+        end
+    end
+    # insertion after last
+    for base in "ACGT"
+        produce(Insertion(length(template) + 1, base))
+    end
 end
 
 function choose_candidates(candidates::Vector{MCand}, min_dist::Int)
@@ -227,7 +241,6 @@ function choose_candidates(candidates::Vector{MCand}, min_dist::Int)
     end
     return final_cands
 end
-
 
 function getcands(template::AbstractString, current_score::Float64,
                   sequences::Vector{ASCIIString},
@@ -246,7 +259,6 @@ function getcands(template::AbstractString, current_score::Float64,
     end
     return candidates
 end
-
 
 function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                  phreds::Vector{Vector{Float64}},

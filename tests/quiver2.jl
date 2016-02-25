@@ -65,7 +65,7 @@ function test_updated_col_substitution_versus_forward()
     bandwidth = 1
     template = "TAAG"
     seq = "ATAG"
-    mutation = Quiver2.Mutation("substitution", 2, 'T')
+    mutation = Quiver2.Substitution(2, 'T')
     new_template = Quiver2.update_template(template, mutation)
     log_p = fill(-3.0, length(seq))
     A = Quiver2.forward(seq, log_p, template, log_ins, log_del, bandwidth)
@@ -93,16 +93,20 @@ function test_random_mutations()
         template = template_seq
         seq = sample_from_template(template_seq, point_rate, insertion_rate, deletion_rate)
         bandwidth = max(2 * abs(length(template) - length(seq)), 5)
-        m = ["substitution", "insertion", "deletion"][rand(1:3)]
-        maxpos = (m == "insertion" ? length(template) + 1: length(template))
-        mutation = Quiver2.Mutation(m, rand(1:maxpos), rbase())
+        T = [Quiver2.Substitution, Quiver2.Insertion, Quiver2.Deletion][rand(1:3)]
+        maxpos = (T == Quiver2.Insertion ? length(template) + 1: length(template))
+        if T == Quiver2.Deletion
+            mutation = T(rand(1:maxpos))
+        else
+            mutation = T(rand(1:maxpos), rbase())
+        end
         new_template = Quiver2.update_template(template, mutation)
         phreds = phred(fill(point_rate + insertion_rate + deletion_rate, length(seq)))
         log_p = -phreds / 10
         A = Quiver2.forward(seq, log_p, template, log_ins, log_del, bandwidth)
         B = Quiver2.backward(seq, log_p, template, log_ins, log_del, bandwidth)
         M = Quiver2.forward(seq, log_p, new_template, log_ins, log_del, bandwidth)
-        if mutation.m == "substitution"
+        if typeof(mutation) == Quiver2.Substitution
             # this is the only case where the updated column exactly matches the full result
             col = Quiver2.updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
             exp_col = sparsecol(M, mutation.pos + 1)
@@ -124,9 +128,9 @@ end
 
 function test_apply_mutations()
     template = "ACG"
-    mutations = [Quiver2.Mutation("insertion", 1, 'T'),
-                 Quiver2.Mutation("deletion", 3, 'X'),
-                 Quiver2.Mutation("substitution", 2, 'T')]
+    mutations = [Quiver2.Insertion(1, 'T'),
+                 Quiver2.Deletion(3),
+                 Quiver2.Substitution(2, 'T')]
     expected = "TAT"
     result = Quiver2.apply_mutations(template, mutations)
     @test result == expected
