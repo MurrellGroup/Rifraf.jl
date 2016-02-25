@@ -228,12 +228,32 @@ function choose_candidates(candidates::Vector{MCand}, min_dist::Int)
     return final_cands
 end
 
+
+function getcands(template::AbstractString, current_score::Float64,
+                  sequences::Vector{ASCIIString},
+                  log_ps::Vector{Vector{Float64}},
+                  As::Vector{BandedArray{Float64}}, Bs::Vector{BandedArray{Float64}},
+                  log_ins::Float64, log_del::Float64, bandwidth::Int)
+    candidates = MCand[]
+    for mutation::Mutation in Task(() -> mutations(template))
+        score = 0.0
+        for si in 1:length(sequences)
+            score += score_mutation(mutation, template, sequences[si], log_ps[si], As[si], Bs[si], log_ins, log_del, bandwidth)
+        end
+        if score > current_score
+            push!(candidates, MCand(mutation, score))
+        end
+    end
+    return candidates
+end
+
+
 function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                  phreds::Vector{Vector{Float64}},
                  log_ins::Float64, log_del::Float64;
-                 bandwidth=10::Int, min_dist=9::Int, max_iters=100::Int,
-                 verbose=false::Boolean)
-    log_ps = [(-phred / 10) for phred in phreds]
+                 bandwidth::Int=10, min_dist::Int=9, max_iters::Int=100,
+                 verbose::Bool=false)
+    log_ps = [(-phred / 10.0) for phred in phreds]
 
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
@@ -262,16 +282,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         if verbose
             print("iteration $i\n")
         end
-        candidates = MCand[]
-        for mutation in Task(() -> mutations(current_template))
-            score = 0
-            for si in 1:length(sequences)
-                score += score_mutation(mutation, current_template, sequences[si], log_ps[si], As[si], Bs[si], log_ins, log_del, bandwidth)
-            end
-            if score > current_score
-                push!(candidates, MCand(mutation, score))
-            end
-        end
+        candidates = getcands(current_template, current_score, sequences, log_ps, As, Bs, log_ins, log_del, bandwidth)
         if length(candidates) == 0
             converged = true
             break
