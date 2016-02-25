@@ -62,37 +62,60 @@ immutable MCand
     score::Float64
 end
 
-function updated_col{T}(mutation::Mutation,
-                        template::AbstractString, seq::AbstractString,
-                        log_p::Array{Float64, 1}, A::BandedArray{T},
-                        log_ins::Float64, log_del::Float64)
+function updated_col(mutation::Mutation,
+                     template::AbstractString, seq::AbstractString,
+                     log_p::Array{Float64, 1}, A::BandedArray{Float64},
+                     log_ins::Float64, log_del::Float64)
     aj = mutation.pos + (mutation.m == "substitution" ? 1 : 0)
-    prev = sparsecol(A, mutation.pos)
+    prev::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(A, mutation.pos)
     prev_start, prev_stop = row_range(A, mutation.pos)
     row_start, row_stop = row_range(A, aj)
     offset = 1 - (row_start - prev_start)
-    result = Array{T}((row_stop - row_start + 1))
-    for real_i in row_start:row_stop
+    result = Array{Float64}(row_stop - row_start + 1)
+    # do first position
+    i = 1
+    real_i = row_start
+    if row_start > prev_start
+        # deletion or substitution
+        result[1] = max(prev[i - offset] + (mutation.base == seq[real_i - 1] ? 0.0 : log_p[real_i - 1]),
+                        prev[i - offset + 1] + log_del)
+    else
+        if row_start != prev_start
+            error("This should not happen")
+        end
+        # deletion only
+        result[1] = prev[i - offset + 1] + log_del
+    end
+    # do middle positions
+    stop = min(prev_stop, row_stop)
+    for real_i in (row_start+1):stop
+        seq_i = real_i - 1
         i = real_i - row_start + 1
-        score = typemin(Float64)
-        if i > 1
-            # insertion
-            score = max(score, result[i - 1] + log_ins)
+        ii = i - offset + 1
+        result[i] = max(result[i - 1] + log_ins,
+                        prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]),
+                        prev[ii] + log_del)
+    end
+    # do last position(s)
+    for real_i in (stop+1):row_stop
+        i = real_i - row_start + 1
+        ii = i - offset
+        if real_i == prev_stop + 1
+            # substitution or insertion
+            result[i] = max(result[i - 1] + log_ins,
+                            prev[ii] + (mutation.base == seq[real_i - 1] ? 0.0 : log_p[real_i - 1]))
+        else
+            # insertion only
+            if real_i <= prev_stop
+                error("This should not happen")
+            end
+            result[i] = result[i - 1] + log_ins
         end
-        if real_i > prev_start && real_i <= prev_stop + 1
-            # match / substitution
-            score = max(score, prev[i - offset] + (mutation.base == seq[real_i-1] ? 0.0 : log_p[real_i-1]))
-        end
-        if real_i >= prev_start && real_i <= prev_stop
-            # deletion
-            score = max(score, prev[i - offset + 1] + log_del)
-        end
-        result[i] = score
     end
     return result
 end
 
-function equal_ranges(a_range, b_range)
+function equal_ranges(a_range::Tuple{Int64,Int64}, b_range::Tuple{Int64,Int64})
     a_start, a_stop = a_range
     b_start, b_stop = b_range
     alen = a_stop - a_start + 1
@@ -104,20 +127,25 @@ function equal_ranges(a_range, b_range)
     return (amin, amax), (bmin, bmax)
 end
 
-function score_mutation{T}(mutation::Mutation, template::AbstractString,
-                           seq::AbstractString, log_p::Array{Float64, 1},
-                           A::BandedArray{T}, B::BandedArray{T},
-                           log_ins::Float64, log_del::Float64, bandwidth::Int)
-    bj = mutation.pos + (mutation.m == "insertion" ? 0 : 1)
+function score_deletion(mutation::Mutation, A::BandedArray{Float64}, B::BandedArray{Float64})
+    aj = mutation.pos
+    bj = mutation.pos + 1
+    Acol = sparsecol(A, aj)
     Bcol = sparsecol(B, bj)
+    (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj), row_range(B, bj))
+    return maximum(Acol[amin:amax] + Bcol[bmin:bmax])
+end
+
+function score_mutation(mutation::Mutation, template::AbstractString,
+                        seq::AbstractString, log_p::Array{Float64, 1},
+                        A::BandedArray{Float64}, B::BandedArray{Float64},
+                        log_ins::Float64, log_del::Float64, bandwidth::Int)
     if mutation.m == "deletion"
-        aj = mutation.pos
-        Acol = sparsecol(A, aj)
-        # need to chop off beginning of Acol and end of Bcol and align
-        (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj), row_range(B, bj))
-        return maximum(Acol[amin:amax] + Bcol[bmin:bmax])
+        return score_deletion(mutation, A, B)
     end
-    Acol = updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
+    Acol::Array{Float64} = updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
+    bj = mutation.pos + (mutation.m == "insertion" ? 0 : 1)
+    Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     return maximum(Acol + Bcol)
 end
 
