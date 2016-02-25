@@ -39,13 +39,13 @@ function datarows(shape::Tuple{Int,Int}, bandwidth::Int)
     return 2 * bandwidth + diff + 1
 end
 
-Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int) = get(A.data, (data_row(A, i, j), j), zero(T))
+Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int) = A.data[data_row(A, i, j), j]
 
 Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int) = (A.data[data_row(A, i, j), j] = v)
 
 function sparsecol(A::BandedArray, j::Int)
     start, stop = data_row_range(A, j)
-    return slice(A.data, start:stop, j)
+    return sub(A.data, start:stop, j)
 end
 
 # TODO: bounds checks
