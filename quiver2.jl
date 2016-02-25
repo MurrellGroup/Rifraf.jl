@@ -81,7 +81,7 @@ function updated_col{T}(mutation::Mutation,
         end
         if real_i > prev_start && real_i <= prev_stop + 1
             # match / substitution
-            score = max(score, prev[i - offset] + (mutation.base == seq[real_i-1] ? 0 : log_p[real_i-1]))
+            score = max(score, prev[i - offset] + (mutation.base == seq[real_i-1] ? 0.0 : log_p[real_i-1]))
         end
         if real_i >= prev_start && real_i <= prev_stop
             # deletion
