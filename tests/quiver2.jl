@@ -1,56 +1,12 @@
 include("../BandedArray.jl")
 include("../quiver2.jl")
+include("../sample.jl")
 
 using BandedArrayModule
+using Sample
 using Quiver2
 
 using Base.Test
-
-function rbase()
-    bases = ['A', 'C', 'G', 'T']
-    return bases[rand(1:4)]
-end
-
-function mutate_base(base::Char)
-    result = rbase()
-    while result == base
-        result = rbase()
-    end
-    return result
-end
-
-function random_seq(n)
-    return join([rbase() for i in 1:n])
-end
-
-function coinflip(p)
-    return rand() < p
-end
-
-function sample_from_template(template, point_rate, insertion_rate, deletion_rate)
-    result = []
-    for base in template
-        while coinflip(insertion_rate)
-            push!(result, rbase())
-        end
-        if coinflip(deletion_rate)
-            continue
-        end
-        if coinflip(point_rate)
-            push!(result, mutate_base(base))
-        else
-            push!(result, base)
-        end
-    end
-    while coinflip(insertion_rate)
-        push!(result, rbase())
-    end
-    return string(result)
-end
-
-function phred(p)
-    return -10 * log10(p)
-end
 
 # tests
 function test_perfect_forward()
@@ -176,6 +132,18 @@ function test_apply_mutations()
     @test result == expected
 end
 
+function test_quiver2()
+    # TODO: can't guarantee this test actually passes, since it is random
+    error_rate = 1/100
+    for i in 1:100
+        template, reads, phreds = sample(20, 30, error_rate)
+        result, info = Quiver2.quiver2(reads[1], reads, phreds,
+                                       log10(error_rate), log10(error_rate),
+                                       bandwidth=3, min_dist=9, verbose=false)
+        @test result == template
+    end
+end
+
 test_perfect_forward()
 test_perfect_backward()
 test_imperfect_forward()
@@ -184,3 +152,4 @@ test_equal_ranges()
 test_random_mutations()
 test_mutations()
 test_apply_mutations()
+test_quiver2()

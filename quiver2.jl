@@ -4,6 +4,8 @@ include("BandedArray.jl")
 
 using BandedArrayModule
 
+export quiver2
+
 function update(A::BandedArray{Float64}, i::Int, j::Int, s_base::Char, t_base::Char,
                 log_p::Float64, log_ins::Float64, log_del::Float64)
     score = typemin(Float64)
@@ -175,18 +177,111 @@ function apply_mutations(template::AbstractString, mutations::Array{Mutation, 1}
     return template
 end
 
-# function choose_candidates(candidates::Vector(MCand, 1), min_dist::Int)
-#     final_cands = []
-#     posns = set()
-#     for c in reversed(sorted(candidates, key=lambda c: c[0]))
-#         _, (_, posn, _) = c
-#         if any(abs(posn - p) < min_dist for p in posns)
-#             continue
-#         end
-#         posns.add(posn)
-#         final_cands.append(c)
-#     end
-#     return final_cands
-# end
+function choose_candidates(candidates::Vector{MCand}, min_dist::Int)
+    final_cands = MCand[]
+    posns = Set()
+    for c in sort(candidates, by=(c) -> c.score, rev=true)
+        if any(Bool[(abs(c.mutation.pos - p) < min_dist) for p in posns])
+            continue
+        end
+        push!(posns, c.mutation.pos)
+        push!(final_cands, c)
+    end
+    return final_cands
+end
+
+function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
+                 phreds::Vector{Vector{Float64}},
+                 log_ins::Float64, log_del::Float64;
+                 bandwidth=10::Int, min_dist=9::Int, max_iters=100::Int,
+                 verbose=false::Boolean)
+    log_ps = [(-phred / 10) for phred in phreds]
+
+    if bandwidth < 0
+        error("bandwidth cannot be negative: $bandwidth")
+    end
+
+    if verbose
+        print("computing initial alignments\n")
+    end
+
+    As = [forward(s, p, template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
+    Bs = [backward(s, p, template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
+    best_score = sum([A[end, end] for A in As])
+    best_template = template
+    current_score = best_score
+    current_template = best_template
+    if verbose
+        print("initial score: $best_score\n")
+    end
+    converged = false
+    total_mutations = 0
+    iterations = 0
+    for i in 1:max_iters
+        iterations = i
+        old_template = current_template
+        old_score = current_score
+        if verbose
+            print("iteration $i\n")
+        end
+        candidates = MCand[]
+        for mutation in Task(() -> mutations(current_template))
+            score = sum([score_mutation(mutation, current_template, seq, log_p, A, B, log_ins, log_del, bandwidth)
+                         for (seq, log_p, A, B) in zip(sequences, log_ps, As, Bs)])
+            if score > current_score
+                push!(candidates, MCand(mutation, score))
+            end
+        end
+        if length(candidates) == 0
+            converged = true
+            break
+        end
+        if verbose
+            print("  found $(length(candidates)) candidate mutations.\n")
+        end
+        chosen_cands = choose_candidates(candidates, min_dist)
+        if verbose
+            print("  filtered to $(length(chosen_cands)) candidate mutations\n")
+        end
+        current_template = apply_mutations(current_template, Mutation[c.mutation for c in chosen_cands])
+        As = [forward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
+        Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
+        current_score = sum([A[end, end] for A in As])
+
+        # detect if a single mutation is better
+        # FIXME: code duplication
+        # FIXME: this may not actually work, because score_mutation() is not exact
+        if current_score < chosen_cands[1].score
+            if verbose
+                print("  rejecting multiple candidates in favor of best\n")
+            end
+            chosen_cands = MCand[chosen_cands[1]]
+            current_template = apply_mutations(old_template, Mutation[c.mutation for c in chosen_cands])
+            As = [forward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
+            Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
+            current_score = sum([A[end, end] for A in As])
+        end
+        total_mutations += length(chosen_cands)
+        if verbose
+            print("  score: $current_score\n")
+        end
+        if current_score > best_score
+            best_template = current_template
+            best_score = current_score
+        end
+        if old_score > current_score
+            if verbose
+                # this can happen because score_mutation() is not exact for insertions and deletions
+                # FIXME: detect if this keeps happening and return best overall template
+                print("Warning: score decreased.\n")
+            end
+        end
+    end
+    info = Dict("converged" => converged,
+                "iterations" => iterations,
+                "mutations" => total_mutations,
+                )
+    return best_template, info
+end
 
 end
