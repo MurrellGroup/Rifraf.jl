@@ -82,39 +82,21 @@ function updated_col(mutation::Mutation,
     row_start, row_stop = row_range(A, aj)
     offset = 1 - (row_start - prev_start)
     result = Array{Float64}(row_stop - row_start + 1)
-    # do first position
-    i = 1
-    real_i = row_start
-    if row_start > prev_start
-        # deletion or substitution
-        result[1] = max(prev[i - offset] + (mutation.base == seq[real_i - 1] ? 0.0 : log_p[real_i - 1]),
-                        prev[i - offset + 1] + log_del)
-    else
-        # deletion only
-        result[1] = prev[i - offset + 1] + log_del
-    end
-    # do middle positions
-    stop = min(prev_stop, row_stop)
-    for real_i in (row_start+1):stop
+    for real_i in row_start:row_stop
         seq_i = real_i - 1
         i = real_i - row_start + 1
         ii = i - offset + 1
-        result[i] = max(result[i - 1] + log_ins,
-                        prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]),
-                        prev[ii] + log_del)
-    end
-    # do last position(s)
-    for real_i in (stop+1):row_stop
-        i = real_i - row_start + 1
-        ii = i - offset
-        if real_i == prev_stop + 1
-            # substitution or insertion
-            result[i] = max(result[i - 1] + log_ins,
-                            prev[ii] + (mutation.base == seq[real_i - 1] ? 0.0 : log_p[real_i - 1]))
-        else
-            # insertion only
-            result[i] = result[i - 1] + log_ins
+        score = typemin(Float64)
+        if i > 1
+            score = max(score, result[i - 1] + log_ins)
         end
+        if prev_start < real_i <= (prev_stop + 1)
+            score = max(score, prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]))
+        end
+        if prev_start <= real_i <= prev_stop
+            score = max(score, prev[ii] + log_del)
+        end
+        result[i] = score
     end
     return result
 end
