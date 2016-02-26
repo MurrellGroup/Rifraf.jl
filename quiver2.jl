@@ -76,29 +76,6 @@ function updated_col(mutation::Mutation,
                      template::AbstractString, seq::AbstractString,
                      log_p::Array{Float64, 1}, A::BandedArray{Float64},
                      log_ins::Float64, log_del::Float64)
-    aj = mutation.pos + (typeof(mutation) == Substitution ? 1 : 0)
-    prev::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(A, mutation.pos)
-    prev_start, prev_stop = row_range(A, mutation.pos)
-    row_start, row_stop = row_range(A, aj)
-    offset = 1 - (row_start - prev_start)
-    result = Array{Float64}(row_stop - row_start + 1)
-    for real_i in row_start:row_stop
-        seq_i = real_i - 1
-        i = real_i - row_start + 1
-        ii = i - offset + 1
-        score = typemin(Float64)
-        if i > 1
-            score = max(score, result[i - 1] + log_ins)
-        end
-        if prev_start < real_i <= (prev_stop + 1)
-            score = max(score, prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]))
-        end
-        if prev_start <= real_i <= prev_stop
-            score = max(score, prev[ii] + log_del)
-        end
-        result[i] = score
-    end
-    return result
 end
 
 function equal_ranges(a_range::Tuple{Int64,Int64}, b_range::Tuple{Int64,Int64})
@@ -143,11 +120,35 @@ function score_mutation(mutation::Union{Insertion,Substitution}, template::Abstr
                         seq::AbstractString, log_p::Array{Float64, 1},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
                         log_ins::Float64, log_del::Float64, bandwidth::Int)
-    Acol::Array{Float64} = updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
     bj = mutation.pos + (typeof(mutation) == Insertion ? 0 : 1)
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
-
-    return summax(Acol, Bcol)
+    aj = mutation.pos + (typeof(mutation) == Substitution ? 1 : 0)
+    prev::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(A, mutation.pos)
+    prev_start, prev_stop = row_range(A, mutation.pos)
+    row_start, row_stop = row_range(A, aj)
+    offset = 1 - (row_start - prev_start)
+    result::Float64 = typemin(Float64)
+    # for efficiency, do not allocate and compute complete column of A. Just keep running score.
+    # `prev_score` is the value of Acol[i - 1], for the insertion move
+    prev_score::Float64 = 0.0
+    for real_i in row_start:row_stop
+        seq_i = real_i - 1
+        i = real_i - row_start + 1
+        ii = i - offset + 1
+        score = typemin(Float64)
+        if i > 1
+            score = max(score, prev_score + log_ins)
+        end
+        if prev_start < real_i <= (prev_stop + 1)
+            score = max(score, prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]))
+        end
+        if prev_start <= real_i <= prev_stop
+            score = max(score, prev[ii] + log_del)
+        end
+        result = max(result, score + Bcol[i])
+        prev_score = score
+    end
+    return result
 end
 
 function update_template(template::AbstractString, mutation::Substitution)

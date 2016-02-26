@@ -55,26 +55,6 @@ function test_imperfect_forward()
     @test full(A) == expected
 end
 
-# TODO: test updated_col substitution
-
-# TODO: test updated_col insertion
-
-function test_updated_col_substitution_versus_forward()
-    log_del = -10.0
-    log_ins = -5.0
-    bandwidth = 1
-    template = "TAAG"
-    seq = "ATAG"
-    mutation = Quiver2.Substitution(2, 'T')
-    new_template = Quiver2.update_template(template, mutation)
-    log_p = fill(-3.0, length(seq))
-    A = Quiver2.forward(seq, log_p, template, log_ins, log_del, bandwidth)
-    result = Quiver2.updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
-    Ae = Quiver2.forward(seq, log_p, new_template, log_ins, log_del, bandwidth)
-    expected = sparsecol(Ae, mutation.pos + 1)
-    @test result == expected
-end
-
 function test_equal_ranges()
     @test Quiver2.equal_ranges((3, 5), (4, 6)) == ((2, 3), (1, 2))
     @test Quiver2.equal_ranges((1, 5), (1, 2)) == ((1, 2), (1, 2))
@@ -106,12 +86,6 @@ function test_random_mutations()
         A = Quiver2.forward(seq, log_p, template, log_ins, log_del, bandwidth)
         B = Quiver2.backward(seq, log_p, template, log_ins, log_del, bandwidth)
         M = Quiver2.forward(seq, log_p, new_template, log_ins, log_del, bandwidth)
-        if typeof(mutation) == Quiver2.Substitution
-            # this is the only case where the updated column exactly matches the full result
-            col = Quiver2.updated_col(mutation, template, seq, log_p, A, log_ins, log_del)
-            exp_col = sparsecol(M, mutation.pos + 1)
-            @test col == exp_col
-        end
         score = Quiver2.score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
         @test_approx_eq score M[end, end]
     end
@@ -134,7 +108,8 @@ function test_quiver2()
         template, reads, phreds = sample(20, 30, error_rate)
         result, info = Quiver2.quiver2(reads[1], reads, phreds,
                                        log10(error_rate), log10(error_rate),
-                                       bandwidth=3, min_dist=9, verbose=false)
+                                       bandwidth=3, min_dist=9, batch=20,
+                                       verbose=false)
         @test result == template
     end
 end
@@ -142,7 +117,6 @@ end
 test_perfect_forward()
 test_perfect_backward()
 test_imperfect_forward()
-test_updated_col_substitution_versus_forward()
 test_equal_ranges()
 test_random_mutations()
 test_apply_mutations()
