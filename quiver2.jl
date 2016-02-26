@@ -90,9 +90,6 @@ function updated_col(mutation::Mutation,
         result[1] = max(prev[i - offset] + (mutation.base == seq[real_i - 1] ? 0.0 : log_p[real_i - 1]),
                         prev[i - offset + 1] + log_del)
     else
-        if row_start != prev_start
-            error("This should not happen")
-        end
         # deletion only
         result[1] = prev[i - offset + 1] + log_del
     end
@@ -116,9 +113,6 @@ function updated_col(mutation::Mutation,
                             prev[ii] + (mutation.base == seq[real_i - 1] ? 0.0 : log_p[real_i - 1]))
         else
             # insertion only
-            if real_i <= prev_stop
-                error("This should not happen")
-            end
             result[i] = result[i - 1] + log_ins
         end
     end
