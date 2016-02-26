@@ -63,11 +63,7 @@ function data_row_range(A::BandedArray, j::Int)
 end
 
 function inband(A::BandedArray, i::Int, j::Int)
-    # return (1 <= data_row(A, i, j) <= size(A.data)[1])::Bool
-    r = data_row(A, i, j)
-    a = 1 <= r
-    b = r <= size(A.data)[1]::Int
-    return a && b
+    return 1 <= data_row(A, i, j) <= size(A.data)[1]::Int
 end
 
 function Base.full{T}(A::BandedArray{T})

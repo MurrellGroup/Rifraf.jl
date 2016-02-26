@@ -230,11 +230,14 @@ end
 
 # This macro is used in getcands() for performance reasons, to avoid
 # using a variable of type `Mutation`.
+#
+# TODO: convert this to a generated function.
 macro process_mutation(m)
     return quote
         score = 0.0
         for si in 1:length(sequences)
-            score += score_mutation($m, template, sequences[si], log_ps[si], As[si], Bs[si], log_ins, log_del, bandwidth)
+            score += score_mutation($m, template, sequences[si], log_ps[si],
+                                    As[si], Bs[si], log_ins, log_del, bandwidth)
         end
         if score > current_score
             push!(candidates, MCand($m, score))
