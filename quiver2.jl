@@ -67,7 +67,7 @@ immutable Deletion <: Mutation
     pos::Int
 end
 
-immutable MCand
+immutable CandMutation
     mutation::Mutation
     score::Float64
 end
@@ -191,8 +191,8 @@ function apply_mutations(template::AbstractString, mutations::Array{Mutation, 1}
     return template
 end
 
-function choose_candidates(candidates::Vector{MCand}, min_dist::Int)
-    final_cands = MCand[]
+function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
+    final_cands = CandMutation[]
     posns = Set()
     for c in sort(candidates, by=(c) -> c.score, rev=true)
         if any(Bool[(abs(c.mutation.pos - p) < min_dist) for p in posns])
@@ -216,7 +216,7 @@ macro process_mutation(m)
                                     As[si], Bs[si], log_ins, log_del, bandwidth)
         end
         if score > current_score
-            push!(candidates, MCand($m, score))
+            push!(candidates, CandMutation($m, score))
         end
     end
 end
@@ -226,7 +226,7 @@ function getcands(template::AbstractString, current_score::Float64,
                   log_ps::Vector{Vector{Float64}},
                   As::Vector{BandedArray{Float64}}, Bs::Vector{BandedArray{Float64}},
                   log_ins::Float64, log_del::Float64, bandwidth::Int)
-    candidates = MCand[]
+    candidates = CandMutation[]
     for j in 1:length(template)
         for base in "ACGT"
             mi = Insertion(j, base)
@@ -306,7 +306,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             if verbose
                 print("  rejecting multiple candidates in favor of best\n")
             end
-            chosen_cands = MCand[chosen_cands[1]]
+            chosen_cands = CandMutation[chosen_cands[1]]
             current_template = apply_mutations(old_template, Mutation[c.mutation for c in chosen_cands])
             As = [forward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
             Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
