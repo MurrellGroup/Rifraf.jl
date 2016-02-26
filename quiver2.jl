@@ -251,8 +251,8 @@ end
 function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                  phreds::Vector{Vector{Float64}},
                  log_ins::Float64, log_del::Float64;
-                 bandwidth::Int=10, min_dist::Int=9, max_iters::Int=100,
-                 verbose::Bool=false)
+                 bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
+                 max_iters::Int=100, verbose::Bool=false)
     log_ps = [(-phred / 10.0) for phred in phreds]
 
     if bandwidth < 0
@@ -263,8 +263,21 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         print("computing initial alignments\n")
     end
 
-    As = [forward(s, p, template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
-    Bs = [backward(s, p, template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
+    if batch < 0
+        batch = length(sequences)
+    end
+    batch = min(batch, length(sequences))
+    if batch < length(sequences)
+        indices = rand(1:length(sequences), batch)
+        seqs = sequences[indices]
+        lps = log_ps[indices]
+    else
+        seqs = sequences
+        lps = log_ps
+    end
+
+    As = [forward(s, p, template, log_ins, log_del, bandwidth) for (s, p) in zip(seqs, lps)]
+    Bs = [backward(s, p, template, log_ins, log_del, bandwidth) for (s, p) in zip(seqs, lps)]
     best_score = sum([A[end, end] for A in As])
     best_template = template
     current_score = best_score
@@ -282,51 +295,85 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         if verbose
             print("iteration $i\n")
         end
-        candidates = getcands(current_template, current_score, sequences, log_ps, As, Bs, log_ins, log_del, bandwidth)
-        if length(candidates) == 0
-            converged = true
-            break
-        end
-        if verbose
-            print("  found $(length(candidates)) candidate mutations.\n")
-        end
-        chosen_cands = choose_candidates(candidates, min_dist)
-        if verbose
-            print("  filtered to $(length(chosen_cands)) candidate mutations\n")
-        end
-        current_template = apply_mutations(current_template, Mutation[c.mutation for c in chosen_cands])
-        As = [forward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
-        Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
-        current_score = sum([A[end, end] for A in As])
 
-        # detect if a single mutation is better
-        # FIXME: code duplication
-        # FIXME: this may not actually work, because score_mutation() is not exact
-        if current_score < chosen_cands[1].score
-            if verbose
-                print("  rejecting multiple candidates in favor of best\n")
-            end
-            chosen_cands = CandMutation[chosen_cands[1]]
-            current_template = apply_mutations(old_template, Mutation[c.mutation for c in chosen_cands])
-            As = [forward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
-            Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(sequences, log_ps)]
-            current_score = sum([A[end, end] for A in As])
-        end
-        total_mutations += length(chosen_cands)
-        if verbose
-            print("  score: $current_score\n")
-        end
-        if current_score > best_score
-            best_template = current_template
-            best_score = current_score
-        end
-        if old_score > current_score
-            if verbose
-                # this can happen because score_mutation() is not exact for insertions and deletions
-                # FIXME: detect if this keeps happening and return best overall template
-                print("Warning: score decreased.\n")
+        candidates = getcands(current_template, current_score, seqs, lps, As, Bs, log_ins, log_del, bandwidth)
+        if length(candidates) == 0
+            if batch < length(sequences)
+                if verbose
+                    print("no candidates found. switching off batch mode.\n")
+                end
+                # start full runs
+                batch = length(sequences)
+                # TODO: this is necessary because unbatched scores will be worse.
+                # what's the alternative?
+                best_score = typemin(Float64)
+                # TODO: instead of turning off batch mode, try increasing batch size
+                # TODO: is there some fast way to detect convergence without a full run?
+                # TODO: try multiple iterations before changing/disabling batch
+            else
+                converged = true
+                break
             end
         end
+        if length(candidates) > 0
+            if verbose
+                print("  found $(length(candidates)) candidate mutations.\n")
+            end
+            chosen_cands = choose_candidates(candidates, min_dist)
+            if verbose
+                print("  filtered to $(length(chosen_cands)) candidate mutations\n")
+            end
+            current_template = apply_mutations(current_template, Mutation[c.mutation for c in chosen_cands])
+            current_score = 0.0
+            for i = 1:length(seqs)
+                current_score += forward(seqs[i], lps[i], current_template, log_ins, log_del, bandwidth)[end, end]
+            end
+
+            # detect if a single mutation is better
+            # FIXME: code duplication
+            # FIXME: this may not actually work, because score_mutation() is not exact
+            if current_score < chosen_cands[1].score
+                if verbose
+                    print("  rejecting multiple candidates in favor of best\n")
+                end
+                chosen_cands = CandMutation[chosen_cands[1]]
+                current_template = apply_mutations(old_template, Mutation[c.mutation for c in chosen_cands])
+                current_score = 0.0
+                for i = 1:length(seqs)
+                    current_score += forward(seqs[i], lps[i], current_template, log_ins, log_del, bandwidth)[end, end]
+                end
+            end
+            total_mutations += length(chosen_cands)
+            if verbose
+                print("  score: $current_score\n")
+            end
+            if current_score > best_score
+                best_template = current_template
+                best_score = current_score
+            end
+            if old_score > current_score
+                if verbose
+                    # this can happen because score_mutation() is not exact for insertions and deletions
+                    # FIXME: detect if this keeps happening and return best overall template
+                    print("Warning: score decreased.\n")
+                end
+            end
+        end
+        if batch < length(sequences)
+            indices = rand(1:length(sequences), batch)
+            seqs = sequences[indices]
+            lps = log_ps[indices]
+        else
+            seqs = sequences
+            lps = log_ps
+        end
+        As = [forward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(seqs, lps)]
+        Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(seqs, lps)]
+        current_score = 0.0
+        for i = 1:length(seqs)
+            current_score += As[i][end, end]
+        end
+
     end
     info = Dict("converged" => converged,
                 "iterations" => iterations,
