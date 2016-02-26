@@ -137,6 +137,16 @@ function equal_ranges(a_range::Tuple{Int64,Int64}, b_range::Tuple{Int64,Int64})
     return (amin, amax), (bmin, bmax)
 end
 
+@generated function summax(a, b)
+    return quote
+        result::Float64 = a[1] + b[1]
+        for i = 2:min(length(a), length(b))
+            result = max(result, a[i] + b[i])
+        end
+        return result
+    end
+end
+
 function score_mutation(mutation::Deletion, template::AbstractString,
                         seq::AbstractString, log_p::Array{Float64, 1},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
@@ -147,11 +157,10 @@ function score_mutation(mutation::Deletion, template::AbstractString,
     Bcol = sparsecol(B, bj)
     (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj), row_range(B, bj))
 
-    result::Float64 = Acol[amin] + Bcol[bmin]
-    for (i, j) in zip((amin+1):amax, (bmin+1):bmax)
-        result = max(result, Acol[i] + Bcol[j])
-    end
-    return result
+    asub = sub(Acol, amin:amax)
+    bsub = sub(Bcol, bmin:bmax)
+
+    return summax(asub, bsub)
 end
 
 function score_mutation(mutation::Union{Insertion,Substitution}, template::AbstractString,
@@ -162,11 +171,7 @@ function score_mutation(mutation::Union{Insertion,Substitution}, template::Abstr
     bj = mutation.pos + (typeof(mutation) == Insertion ? 0 : 1)
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
 
-    result::Float64 = Acol[1] + Bcol[1]
-    for i = 2:length(Acol)
-        result = max(result, Acol[i] + Bcol[i])
-    end
-    return result
+    return summax(Acol, Bcol)
 end
 
 function update_template(template::AbstractString, mutation::Substitution)
@@ -245,17 +250,21 @@ function getcands(template::AbstractString, current_score::Float64,
     candidates = MCand[]
     for j in 1:length(template)
         for base in "ACGT"
-            @process_mutation Insertion(j, base)
+            mi = Insertion(j, base)
+            @process_mutation mi
             if template[j] == base
                 continue
             end
-            @process_mutation Substitution(j, base)
+            ms = Substitution(j, base)
+            @process_mutation ms
         end
-        @process_mutation Deletion(j)
+        md = Deletion(j)
+        @process_mutation md
     end
     # insertion after last
     for base in "ACGT"
-        @process_mutation Insertion(length(template) + 1, base)
+        mi = Insertion(length(template) + 1, base)
+        @process_mutation mi
     end
     return candidates
 end
