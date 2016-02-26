@@ -105,7 +105,7 @@ function test_quiver2()
     # TODO: can't guarantee this test actually passes, since it is random
     error_rate = 1/100
     for i in 1:100
-        template, reads, phreds = sample(20, 30, error_rate)
+        template, reads, phreds = sample(20, 30, error_rate, error_rate, error_rate)
         result, info = Quiver2.quiver2(reads[1], reads, phreds,
                                        log10(error_rate), log10(error_rate),
                                        bandwidth=3, min_dist=9, batch=20,

@@ -23,7 +23,7 @@ function coinflip(p)
     return rand() < p
 end
 
-function sample_from_template(template, point_rate, insertion_rate, deletion_rate)
+function sample_from_template(template, sub_rate, insertion_rate, deletion_rate)
     result = []
     for base in template
         while coinflip(insertion_rate)
@@ -32,7 +32,7 @@ function sample_from_template(template, point_rate, insertion_rate, deletion_rat
         if coinflip(deletion_rate)
             continue
         end
-        if coinflip(point_rate)
+        if coinflip(sub_rate)
             push!(result, mutate_base(base))
         else
             push!(result, base)
@@ -48,12 +48,13 @@ function phred(p)
     return -10 * log10(p)
 end
 
-function sample(n::Int, len::Int, error_rate::Float64)
+function sample(n::Int, len::Int, sub_rate::Float64, ins_rate::Float64, del_rate::Float64)
     reads = ASCIIString[]
     phreds = Vector{Float64}[]
     template = random_seq(len)
+    error_rate = sub_rate + ins_rate + del_rate
     for i in 1:n
-        r = sample_from_template(template, error_rate, error_rate, error_rate)
+        r = sample_from_template(template, sub_rate, ins_rate, del_rate)
         push!(phreds, phred(fill(error_rate, length(r))))
         push!(reads, r)
     end
