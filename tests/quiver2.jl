@@ -117,15 +117,6 @@ function test_random_mutations()
     end
 end
 
-function test_mutations()
-    n = 0
-    seq = "ACG"
-    for m in Task(() -> Quiver2.mutations(seq))
-        n += 1
-    end
-    @test n == length(seq) + 3 * length(seq) + 4 * (length(seq) + 1)
-end
-
 function test_apply_mutations()
     template = "ACG"
     mutations = [Quiver2.Insertion(1, 'T'),
@@ -154,6 +145,5 @@ test_imperfect_forward()
 test_updated_col_substitution_versus_forward()
 test_equal_ranges()
 test_random_mutations()
-test_mutations()
 test_apply_mutations()
 test_quiver2()

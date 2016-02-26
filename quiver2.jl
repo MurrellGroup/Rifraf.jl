@@ -210,25 +210,6 @@ function apply_mutations(template::AbstractString, mutations::Array{Mutation, 1}
     return template
 end
 
-function mutations(template::AbstractString)
-    for j in 1:length(template)
-        for base in "ACGT"
-            if template[j] == base
-                continue
-            end
-            produce(Substitution(j, base))
-        end
-        produce(Deletion(j))
-        for base in "ACGT"
-            produce(Insertion(j, base))
-        end
-    end
-    # insertion after last
-    for base in "ACGT"
-        produce(Insertion(length(template) + 1, base))
-    end
-end
-
 function choose_candidates(candidates::Vector{MCand}, min_dist::Int)
     final_cands = MCand[]
     posns = Set()
@@ -242,20 +223,39 @@ function choose_candidates(candidates::Vector{MCand}, min_dist::Int)
     return final_cands
 end
 
+# This macro is used in getcands() for performance reasons, to avoid
+# using a variable of type `Mutation`.
+macro process_mutation(m)
+    return quote
+        score = 0.0
+        for si in 1:length(sequences)
+            score += score_mutation($m, template, sequences[si], log_ps[si], As[si], Bs[si], log_ins, log_del, bandwidth)
+        end
+        if score > current_score
+            push!(candidates, MCand($m, score))
+        end
+    end
+end
+
 function getcands(template::AbstractString, current_score::Float64,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
                   As::Vector{BandedArray{Float64}}, Bs::Vector{BandedArray{Float64}},
                   log_ins::Float64, log_del::Float64, bandwidth::Int)
     candidates = MCand[]
-    for mutation::Mutation in Task(() -> mutations(template))
-        score = 0.0
-        for si in 1:length(sequences)
-            score += score_mutation(mutation, template, sequences[si], log_ps[si], As[si], Bs[si], log_ins, log_del, bandwidth)
+    for j in 1:length(template)
+        for base in "ACGT"
+            @process_mutation Insertion(j, base)
+            if template[j] == base
+                continue
+            end
+            @process_mutation Substitution(j, base)
         end
-        if score > current_score
-            push!(candidates, MCand(mutation, score))
-        end
+        @process_mutation Deletion(j)
+    end
+    # insertion after last
+    for base in "ACGT"
+        @process_mutation Insertion(length(template) + 1, base)
     end
     return candidates
 end
