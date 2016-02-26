@@ -1,3 +1,5 @@
+# TODO: documentation
+
 module Quiver2
 
 include("BandedArray.jl")
@@ -6,7 +8,8 @@ using BandedArrayModule
 
 export quiver2
 
-function update(A::BandedArray{Float64}, i::Int, j::Int, s_base::Char, t_base::Char,
+function update(A::BandedArray{Float64}, i::Int, j::Int,
+                s_base::Char, t_base::Char,
                 log_p::Float64, log_ins::Float64, log_del::Float64)
     score = typemin(Float64)
     if inband(A, i - 1, j)
@@ -23,7 +26,8 @@ function update(A::BandedArray{Float64}, i::Int, j::Int, s_base::Char, t_base::C
     return score
 end
 
-function forward(s::AbstractString, log_p::Array{Float64, 1}, t::AbstractString,
+function forward(s::AbstractString, log_p::Array{Float64, 1},
+                 t::AbstractString,
                  log_ins::Float64, log_del::Float64, bandwidth::Int)
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
@@ -36,14 +40,16 @@ function forward(s::AbstractString, log_p::Array{Float64, 1}, t::AbstractString,
         start, stop = row_range(result, j)
         start = max(start, 2)
         for i = start:stop
-            result[i, j] = update(result, i, j, s[i-1], t[j-1], log_p[i-1], log_ins, log_del)
+            result[i, j] = update(result, i, j, s[i-1], t[j-1],
+                                  log_p[i-1], log_ins, log_del)
         end
     end
     return result
 end
 
-function backward(s::AbstractString, log_p::Array{Float64, 1}, t::AbstractString,
-                 log_ins::Float64, log_del::Float64, bandwidth::Int)
+function backward(s::AbstractString, log_p::Array{Float64, 1},
+                  t::AbstractString,
+                  log_ins::Float64, log_del::Float64, bandwidth::Int)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
     t = reverse(t)
@@ -78,7 +84,8 @@ function updated_col(mutation::Mutation,
                      log_ins::Float64, log_del::Float64)
 end
 
-function equal_ranges(a_range::Tuple{Int64,Int64}, b_range::Tuple{Int64,Int64})
+function equal_ranges(a_range::Tuple{Int64,Int64},
+                      b_range::Tuple{Int64,Int64})
     a_start, a_stop = a_range
     b_start, b_stop = b_range
     alen = a_stop - a_start + 1
@@ -108,7 +115,8 @@ function score_mutation(mutation::Deletion, template::AbstractString,
     bj = mutation.pos + 1
     Acol = sparsecol(A, aj)
     Bcol = sparsecol(B, bj)
-    (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj), row_range(B, bj))
+    (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj),
+                                              row_range(B, bj))
 
     asub = sub(Acol, amin:amax)
     bsub = sub(Bcol, bmin:bmax)
@@ -116,7 +124,8 @@ function score_mutation(mutation::Deletion, template::AbstractString,
     return summax(asub, bsub)
 end
 
-function score_mutation(mutation::Union{Insertion,Substitution}, template::AbstractString,
+function score_mutation(mutation::Union{Insertion,Substitution},
+                        template::AbstractString,
                         seq::AbstractString, log_p::Array{Float64, 1},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
                         log_ins::Float64, log_del::Float64, bandwidth::Int)
@@ -128,8 +137,9 @@ function score_mutation(mutation::Union{Insertion,Substitution}, template::Abstr
     row_start, row_stop = row_range(A, aj)
     offset = 1 - (row_start - prev_start)
     result::Float64 = typemin(Float64)
-    # for efficiency, do not allocate and compute complete column of A. Just keep running score.
-    # `prev_score` is the value of Acol[i - 1], for the insertion move
+    # for efficiency, do not allocate and compute complete column of
+    # A. Just keep running score.  `prev_score` is the value of
+    # Acol[i - 1], for the insertion move
     prev_score::Float64 = 0.0
     for real_i in row_start:row_stop
         seq_i = real_i - 1
@@ -151,22 +161,32 @@ function score_mutation(mutation::Union{Insertion,Substitution}, template::Abstr
     return result
 end
 
-function update_template(template::AbstractString, mutation::Substitution)
-    return string(template[1:(mutation.pos - 1)], mutation.base, template[(mutation.pos + 1):end])
+function update_template(template::AbstractString,
+                         mutation::Substitution)
+    return string(template[1:(mutation.pos - 1)],
+                  mutation.base,
+                  template[(mutation.pos + 1):end])
 end
 
-function update_template(template::AbstractString, mutation::Insertion)
-    return string(template[1:(mutation.pos - 1)], mutation.base, template[(mutation.pos):end])
+function update_template(template::AbstractString,
+                         mutation::Insertion)
+    return string(template[1:(mutation.pos - 1)],
+                  mutation.base,
+                  template[(mutation.pos):end])
 end
 
-function update_template(template::AbstractString, mutation::Deletion)
-    return string(template[1:(mutation.pos - 1)], template[(mutation.pos + 1):end])
+function update_template(template::AbstractString,
+                         mutation::Deletion)
+    return string(template[1:(mutation.pos - 1)],
+                  template[(mutation.pos + 1):end])
 end
 
-function apply_mutations(template::AbstractString, mutations::Array{Mutation, 1})
-    # check that mutations all have different positions.
-    # this is a bit too strict, since there are some combinations of
-    # mutations affecting the same spot that are unambiguous.
+function apply_mutations(template::AbstractString,
+                         mutations::Array{Mutation, 1})
+    # check that mutations all have different positions. this is too
+    # strict, since there are some combinations of mutations affecting
+    # the same spot that are unambiguous, but combined with `min_dist`
+    # it is fine.
     if length(Set([m.pos for m in mutations])) != length(mutations)
         error("Cannot have multiple mutations affecting the same position")
     end
@@ -225,7 +245,8 @@ end
 function getcands(template::AbstractString, current_score::Float64,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
-                  As::Vector{BandedArray{Float64}}, Bs::Vector{BandedArray{Float64}},
+                  As::Vector{BandedArray{Float64}},
+                  Bs::Vector{BandedArray{Float64}},
                   log_ins::Float64, log_del::Float64, bandwidth::Int)
     candidates = CandMutation[]
     for j in 1:length(template)
@@ -277,8 +298,10 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         lps = log_ps
     end
 
-    As = [forward(s, p, template, log_ins, log_del, bandwidth) for (s, p) in zip(seqs, lps)]
-    Bs = [backward(s, p, template, log_ins, log_del, bandwidth) for (s, p) in zip(seqs, lps)]
+    As = [forward(s, p, template, log_ins, log_del, bandwidth)
+          for (s, p) in zip(seqs, lps)]
+    Bs = [backward(s, p, template, log_ins, log_del, bandwidth)
+          for (s, p) in zip(seqs, lps)]
     best_score = sum([A[end, end] for A in As])
     best_template = template
     current_score = best_score
@@ -297,7 +320,8 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             print("iteration $i\n")
         end
 
-        candidates = getcands(current_template, current_score, seqs, lps, As, Bs, log_ins, log_del, bandwidth)
+        candidates = getcands(current_template, current_score, seqs, lps, As, Bs,
+                              log_ins, log_del, bandwidth)
         if length(candidates) == 0
             if batch < length(sequences)
                 if verbose
@@ -309,7 +333,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                 # what's the alternative?
                 best_score = typemin(Float64)
                 # TODO: instead of turning off batch mode, try increasing batch size
-                # TODO: is there some fast way to detect convergence without a full run?
+                # TODO: is there some fast way to detect convergence w/o full run?
                 # TODO: try multiple iterations before changing/disabling batch
             else
                 converged = true
@@ -324,10 +348,13 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             if verbose
                 print("  filtered to $(length(chosen_cands)) candidate mutations\n")
             end
-            current_template = apply_mutations(current_template, Mutation[c.mutation for c in chosen_cands])
+            current_template = apply_mutations(current_template,
+                                               Mutation[c.mutation
+                                                        for c in chosen_cands])
             current_score = 0.0
             for i = 1:length(seqs)
-                current_score += forward(seqs[i], lps[i], current_template, log_ins, log_del, bandwidth)[end, end]
+                current_score += forward(seqs[i], lps[i], current_template,
+                                         log_ins, log_del, bandwidth)[end, end]
             end
 
             # detect if a single mutation is better
@@ -338,10 +365,13 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                     print("  rejecting multiple candidates in favor of best\n")
                 end
                 chosen_cands = CandMutation[chosen_cands[1]]
-                current_template = apply_mutations(old_template, Mutation[c.mutation for c in chosen_cands])
+                current_template = apply_mutations(old_template,
+                                                   Mutation[c.mutation
+                                                            for c in chosen_cands])
                 current_score = 0.0
                 for i = 1:length(seqs)
-                    current_score += forward(seqs[i], lps[i], current_template, log_ins, log_del, bandwidth)[end, end]
+                    current_score += forward(seqs[i], lps[i], current_template,
+                                             log_ins, log_del, bandwidth)[end, end]
                 end
             end
             total_mutations += length(chosen_cands)
@@ -354,8 +384,10 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             end
             if old_score > current_score
                 if verbose
-                    # this can happen because score_mutation() is not exact for insertions and deletions
-                    # FIXME: detect if this keeps happening and return best overall template
+                    # this can happen because score_mutation() is not
+                    # exact for insertions and deletions
+                    # FIXME: detect if this keeps happening and return
+                    # best overall template
                     print("Warning: score decreased.\n")
                 end
             end
@@ -368,13 +400,14 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             seqs = sequences
             lps = log_ps
         end
-        As = [forward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(seqs, lps)]
-        Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth) for (s, p) in zip(seqs, lps)]
+        As = [forward(s, p, current_template, log_ins, log_del, bandwidth)
+              for (s, p) in zip(seqs, lps)]
+        Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth)
+              for (s, p) in zip(seqs, lps)]
         current_score = 0.0
         for i = 1:length(seqs)
             current_score += As[i][end, end]
         end
-
     end
     info = Dict("converged" => converged,
                 "iterations" => iterations,
