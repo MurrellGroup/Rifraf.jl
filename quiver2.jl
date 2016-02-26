@@ -78,12 +78,6 @@ immutable CandMutation
     score::Float64
 end
 
-function updated_col(mutation::Mutation,
-                     template::AbstractString, seq::AbstractString,
-                     log_p::Array{Float64, 1}, A::BandedArray{Float64},
-                     log_ins::Float64, log_del::Float64)
-end
-
 function equal_ranges(a_range::Tuple{Int64,Int64},
                       b_range::Tuple{Int64,Int64})
     a_start, a_stop = a_range
