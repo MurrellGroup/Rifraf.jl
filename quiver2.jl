@@ -1,5 +1,6 @@
 # TODO: documentation
-# TODO: update types to use generic BioJulia types
+# TODO: swap forward and backword args
+# TODO: rename Array{T, 1} to Vector{T}
 
 module Quiver2
 
@@ -268,12 +269,10 @@ function getcands(template::AbstractString, current_score::Float64,
 end
 
 function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
-                 phreds::Vector{Vector{Float64}},
+                 log_ps::Vector{Vector{Float64}},
                  log_ins::Float64, log_del::Float64;
                  bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
                  max_iters::Int=100, verbose::Bool=false)
-    log_ps = [(-phred / 10.0) for phred in phreds]
-
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
     end
@@ -417,15 +416,15 @@ end
 Alternate quiver2() using BioJulia types.
 
 """
-function quiver2(template::DNASequence, sequences::Vector{Seq.FASTQSeqRecord},
-                 log_ins::Float64, log_del::Float64;
-                 bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
-                 max_iters::Int=100, verbose::Bool=false)
+function quiver2{T<:NucleotideSequence}(template::DNASequence,
+                                        sequences::Vector{T},
+                                        log_ps::Vector{Vector{Float64}},
+                                        log_ins::Float64, log_del::Float64;
+                                        bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
+                                        max_iters::Int=100, verbose::Bool=false)
     new_template = convert(AbstractString, template)
-    new_sequences = ASCIIString[convert(AbstractString, s.seq) for s in sequences]
-    new_phreds = Vector{Float64}[[convert(Float64, p) for p in seq.metadata.quality]
-                                 for seq in sequences]
-    result, info = quiver2(new_template, new_sequences, new_phreds,
+    new_sequences = ASCIIString[convert(AbstractString, s) for s in sequences]
+    result, info = quiver2(new_template, new_sequences, log_ps,
                            log_ins, log_del,
                            bandwidth=bandwidth, min_dist=min_dist, batch=batch,
                            max_iters=max_iters, verbose=verbose)

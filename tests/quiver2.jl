@@ -72,10 +72,9 @@ function test_random_mutations()
         template_len = rand(10:20)
         template_seq = random_seq(template_len)
         template = convert(AbstractString, template_seq)
-        record = sample_from_template(template_seq, error_rate,
+        bioseq, log_p = sample_from_template(template_seq, error_rate,
                                       sub_ratio, ins_ratio, del_ratio)
-        seq = convert(AbstractString, record.seq)
-        log_p = Float64[-Float64(q) / 10.0 for q in record.metadata.quality]
+        seq = convert(AbstractString, bioseq)
         bandwidth = max(2 * abs(length(template) - length(seq)), 5)
         T = [Quiver2.Substitution, Quiver2.Insertion, Quiver2.Deletion][rand(1:3)]
         maxpos = (T == Quiver2.Insertion ? length(template) + 1: length(template))
@@ -111,9 +110,10 @@ function test_quiver2()
     ins_ratio = 1.0 / 3.0
     del_ratio = 1.0 / 3.0
     for i in 1:100
-        template, reads = sample(20, 30, max_error_rate, mean_error_rate,
-                                 sub_ratio, ins_ratio, del_ratio)
-        result, info = Quiver2.quiver2(reads[1].seq, reads,
+        template, reads, log_ps = sample(20, 30, max_error_rate, mean_error_rate,
+                                         sub_ratio, ins_ratio, del_ratio)
+        result, info = Quiver2.quiver2(reads[1], reads,
+                                       log_ps,
                                        log10(ins_ratio * mean_error_rate),
                                        log10(del_ratio * mean_error_rate),
                                        bandwidth=3, min_dist=9, batch=20,

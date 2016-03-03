@@ -4,7 +4,7 @@ using Bio.Seq
 
 using Distributions
 
-export rbase, mutate_base, random_seq, sample_from_template, phred, sample
+export rbase, mutate_base, random_seq, sample_from_template, sample
 
 function rbase()
     bases = [DNA_A, DNA_C, DNA_G, DNA_T]
@@ -21,10 +21,6 @@ end
 
 function random_seq(n)
     return DNASequence([rbase() for i in 1:n])
-end
-
-function phred(p)
-    return Int8(min(typemax(Int8), floor(-10 * log10(p))))
 end
 
 function BetaAlt(mean::Float64, sample_size::Float64)
@@ -73,9 +69,7 @@ function sample_from_template(template, error_rate,
         push!(final_probs, rand(prob_d))
     end
 
-    return Seq.FASTQSeqRecord("",
-                              DNASequence(final_seq),
-                              Seq.FASTQMetadata("", map(phred, final_probs)))
+    return DNASequence(final_seq), log10(final_probs)
 end
 
 function sample(nseqs::Int, len::Int, max_error_rate::Float64, mean_error_rate::Float64,
@@ -90,15 +84,17 @@ function sample(nseqs::Int, len::Int, max_error_rate::Float64, mean_error_rate::
     ins_ratio = (ins_part / (sub_part + ins_part + del_part))
     del_ratio = (del_part / (sub_part + ins_part + del_part))
 
-    result = Seq.FASTQSeqRecord[]
+    seqs = DNASequence[]
+    log_ps = Vector{Float64}[]
 
     for i = 1:nseqs
         error_rate = rand(error_d) * max_error_rate
-        record = sample_from_template(template, error_rate,
+        seq, log_p = sample_from_template(template, error_rate,
                                       sub_ratio, ins_ratio, del_ratio)
-        push!(result, record)
+        push!(seqs, seq)
+        push!(log_ps, log_p)
     end
-    return DNASequence(template), result
+    return DNASequence(template), seqs, log_ps
 end
 
 end
