@@ -28,7 +28,7 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
     return score
 end
 
-function forward(t::AbstractString, s::AbstractString, log_p::Array{Float64, 1},
+function forward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
                  log_ins::Float64, log_del::Float64, bandwidth::Int)
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
@@ -48,7 +48,7 @@ function forward(t::AbstractString, s::AbstractString, log_p::Array{Float64, 1},
     return result
 end
 
-function backward(t::AbstractString, s::AbstractString, log_p::Array{Float64, 1},
+function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
                   log_ins::Float64, log_del::Float64, bandwidth::Int)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
@@ -102,7 +102,7 @@ end
 end
 
 function score_mutation(mutation::Deletion, template::AbstractString,
-                        seq::AbstractString, log_p::Array{Float64, 1},
+                        seq::AbstractString, log_p::Vector{Float64},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
                         log_ins::Float64, log_del::Float64, bandwidth::Int)
     aj = mutation.pos
@@ -120,7 +120,7 @@ end
 
 function score_mutation(mutation::Union{Insertion,Substitution},
                         template::AbstractString,
-                        seq::AbstractString, log_p::Array{Float64, 1},
+                        seq::AbstractString, log_p::Vector{Float64},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
                         log_ins::Float64, log_del::Float64, bandwidth::Int)
     bj = mutation.pos + (typeof(mutation) == Insertion ? 0 : 1)
