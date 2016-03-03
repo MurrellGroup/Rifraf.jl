@@ -302,10 +302,15 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         print("initial score: $best_score\n")
     end
     converged = false
-    total_mutations = 0
-    iterations = 0
+    mutations = Int[]
+    batch_iterations = 0
+    full_iterations = 0
     for i in 1:max_iters
-        iterations = i
+        if batch < length(sequences)
+            batch_iterations +=1
+        else
+            full_iterations += 1
+        end
         old_template = current_template
         old_score = current_score
         if verbose
@@ -315,6 +320,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         candidates = getcands(current_template, current_score, seqs, lps, As, Bs,
                               log_ins, log_del, bandwidth)
         if length(candidates) == 0
+            push!(mutations, 0)
             if batch < length(sequences)
                 if verbose
                     print("no candidates found. switching off batch mode.\n")
@@ -331,8 +337,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                 converged = true
                 break
             end
-        end
-        if length(candidates) > 0
+        else
             if verbose
                 print("  found $(length(candidates)) candidate mutations.\n")
             end
@@ -366,7 +371,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                                              log_ins, log_del, bandwidth)[end, end]
                 end
             end
-            total_mutations += length(chosen_cands)
+            push!(mutations, length(chosen_cands))
             if verbose
                 print("  score: $current_score\n")
             end
@@ -402,8 +407,9 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         end
     end
     info = Dict("converged" => converged,
-                "iterations" => iterations,
-                "mutations" => total_mutations,
+                "batch_iterations" => batch_iterations,
+                "full_iterations" => full_iterations,
+                "mutations" => mutations,
                 )
     return best_template, info
 end
