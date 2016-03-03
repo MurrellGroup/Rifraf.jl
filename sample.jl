@@ -24,8 +24,7 @@ function random_seq(n)
 end
 
 function phred(p)
-    vals = -10 * log10(p)
-    return Int8[Int8(floor(x)) for x in vals]
+    return Int8(min(typemax(Int8), floor(-10 * log10(p))))
 end
 
 function BetaAlt(mean::Float64, sample_size::Float64)
@@ -34,64 +33,69 @@ function BetaAlt(mean::Float64, sample_size::Float64)
     return Beta(alpha, beta)
 end
 
+function sample_from_template(template, error_rate,
+                              sub_ratio, ins_ratio, del_ratio)
+    # do deletions
+    del_rate = error_rate * del_ratio
+    del_d = Bernoulli(del_rate)
+    seq = DNANucleotide[]
+    for j = 1:length(template)
+        if !convert(Bool, rand(del_d))
+            push!(seq, template[j])
+        end
+    end
+
+    # generate per-base error probs
+    prob_d = BetaAlt(error_rate, convert(Float64, length(seq)))
+    probs = rand(prob_d, length(seq))
+
+    # do substitutions
+    for j = 1:length(seq)
+        if rand(Bernoulli(probs[j] * sub_ratio)) == 1
+            seq[j] = mutate_base(seq[j])
+        end
+    end
+
+    final_seq = DNANucleotide[]
+    final_probs = Float64[]
+    # do insertions, drawing new quality scores
+    for j = 1:length(seq)
+        if rand(Bernoulli(probs[j] * ins_ratio)) == 1
+            push!(final_seq, rbase())
+            push!(final_probs, rand(prob_d))
+        end
+        push!(final_seq, seq[j])
+        push!(final_probs, probs[j])
+    end
+    # insertions at end
+    if rand(Bernoulli(probs[end] * ins_ratio)) == 1
+        push!(final_seq, rbase())
+        push!(final_probs, rand(prob_d))
+    end
+
+    return Seq.FASTQSeqRecord("",
+                              DNASequence(final_seq),
+                              Seq.FASTQMetadata("", map(phred, final_probs)))
+end
+
 function sample(nseqs::Int, len::Int, max_error_rate::Float64, mean_error_rate::Float64,
-                sub_ratio::Float64, ins_ratio::Float64, del_ratio::Float64)
+                sub_part::Float64, ins_part::Float64, del_part::Float64)
     if mean_error_rate > max_error_rate
         error("max_error_rate must be greater than mean_error_rate")
     end
     error_d = BetaAlt(mean_error_rate / max_error_rate, convert(Float64, nseqs))
     template = random_seq(len)
 
-    base_del_rate = (del_ratio / (sub_ratio + ins_ratio + del_ratio))
-    base_sub_rate = (sub_ratio / (sub_ratio + ins_ratio + del_ratio))
-    base_ins_rate = (ins_ratio / (sub_ratio + ins_ratio + del_ratio))
+    sub_ratio = (sub_part / (sub_part + ins_part + del_part))
+    ins_ratio = (ins_part / (sub_part + ins_part + del_part))
+    del_ratio = (del_part / (sub_part + ins_part + del_part))
 
     result = Seq.FASTQSeqRecord[]
 
     for i = 1:nseqs
         error_rate = rand(error_d) * max_error_rate
-
-        # do deletions
-        del_rate = error_rate * base_del_rate
-        del_d = Bernoulli(del_rate)
-        seq = DNANucleotide[]
-        for j = 1:length(template)
-            if !convert(Bool, rand(del_d))
-                push!(seq, template[j])
-            end
-        end
-
-        # generate per-base error probs
-        prob_d = BetaAlt(error_rate, convert(Float64, length(seq)))
-        probs = rand(prob_d, length(seq))
-
-        # do substitutions
-        for j = 1:length(seq)
-            if rand(Bernoulli(probs[j] * base_sub_rate)) == 1
-                seq[j] = mutate_base(seq[j])
-            end
-        end
-
-        final_seq = DNANucleotide[]
-        final_probs = Float64[]
-        # do insertions, drawing new quality scores
-        for j = 1:length(seq)
-            if rand(Bernoulli(probs[j] * base_ins_rate)) == 1
-                push!(final_seq, rbase())
-                push!(final_probs, rand(prob_d))
-            end
-            push!(final_seq, seq[j])
-            push!(final_probs, probs[j])
-        end
-        # insertions at end
-        if rand(Bernoulli(probs[end] * base_ins_rate)) == 1
-            push!(final_seq, rbase())
-            push!(final_probs, rand(prob_d))
-        end
-
-        record = Seq.FASTQSeqRecord("",
-                                    DNASequence(final_seq),
-                                    Seq.FASTQMetadata("", phred(final_probs)))
+        record = sample_from_template(template, error_rate,
+                                      sub_ratio, ins_ratio, del_ratio)
         push!(result, record)
     end
     return DNASequence(template), result

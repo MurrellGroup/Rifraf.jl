@@ -62,16 +62,20 @@ function test_equal_ranges()
 end
 
 function test_random_mutations()
-    point_rate = 0.1
-    insertion_rate = 0.01
-    deletion_rate = 0.01
-    log_ins = log10(insertion_rate)
-    log_del = log10(deletion_rate)
+    error_rate = 0.1
+    sub_ratio = 2 / 10
+    ins_ratio = 4 / 10
+    del_ratio = 4 / 10
+    log_ins = log10(error_rate * ins_ratio)
+    log_del = log10(error_rate * del_ratio)
     for i = 1:100
         template_len = rand(10:20)
         template_seq = random_seq(template_len)
-        template = template_seq
-        seq = sample_from_template(template_seq, point_rate, insertion_rate, deletion_rate)
+        template = convert(AbstractString, template_seq)
+        record = sample_from_template(template_seq, error_rate,
+                                      sub_ratio, ins_ratio, del_ratio)
+        seq = convert(AbstractString, record.seq)
+        log_p = Float64[-Float64(q) / 10.0 for q in record.metadata.quality]
         bandwidth = max(2 * abs(length(template) - length(seq)), 5)
         T = [Quiver2.Substitution, Quiver2.Insertion, Quiver2.Deletion][rand(1:3)]
         maxpos = (T == Quiver2.Insertion ? length(template) + 1: length(template))
@@ -81,8 +85,6 @@ function test_random_mutations()
             mutation = T(rand(1:maxpos), rbase())
         end
         new_template = Quiver2.update_template(template, mutation)
-        phreds = phred(fill(point_rate + insertion_rate + deletion_rate, length(seq)))
-        log_p = -phreds / 10
         A = Quiver2.forward(seq, log_p, template, log_ins, log_del, bandwidth)
         B = Quiver2.backward(seq, log_p, template, log_ins, log_del, bandwidth)
         M = Quiver2.forward(seq, log_p, new_template, log_ins, log_del, bandwidth)
@@ -103,11 +105,17 @@ end
 
 function test_quiver2()
     # TODO: can't guarantee this test actually passes, since it is random
-    error_rate = 1/100
+    mean_error_rate = 0.1
+    max_error_rate = 0.2
+    sub_ratio = 1.0 / 3.0
+    ins_ratio = 1.0 / 3.0
+    del_ratio = 1.0 / 3.0
     for i in 1:100
-        template, reads, phreds = sample(20, 30, error_rate, error_rate, error_rate)
-        result, info = Quiver2.quiver2(reads[1], reads, phreds,
-                                       log10(error_rate), log10(error_rate),
+        template, reads = sample(20, 30, max_error_rate, mean_error_rate,
+                                 sub_ratio, ins_ratio, del_ratio)
+        result, info = Quiver2.quiver2(reads[1].seq, reads,
+                                       log10(ins_ratio * mean_error_rate),
+                                       log10(del_ratio * mean_error_rate),
                                        bandwidth=3, min_dist=9, batch=20,
                                        verbose=false)
         @test result == template
