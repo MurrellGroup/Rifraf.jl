@@ -23,14 +23,9 @@ function random_seq(n)
     return DNASequence([rbase() for i in 1:n])
 end
 
-function BetaAlt(mean::Float64, sample_size::Float64)
-    alpha = sample_size * mean
-    beta = alpha / mean - alpha
-    return Beta(alpha, beta)
-end
-
 function sample_from_template(template, error_rate,
-                              sub_ratio, ins_ratio, del_ratio)
+                              sub_ratio, ins_ratio, del_ratio;
+                              beta=10.0)
     # do deletions
     del_rate = error_rate * del_ratio
     del_d = Bernoulli(del_rate)
@@ -42,7 +37,8 @@ function sample_from_template(template, error_rate,
     end
 
     # generate per-base error probs
-    prob_d = BetaAlt(error_rate, convert(Float64, length(seq)))
+    alpha = -beta * error_rate / (error_rate - 1)
+    prob_d = Beta(alpha, beta)
     probs = rand(prob_d, length(seq))
 
     # do substitutions
@@ -72,12 +68,12 @@ function sample_from_template(template, error_rate,
     return DNASequence(final_seq), log10(final_probs)
 end
 
-function sample(nseqs::Int, len::Int, max_error_rate::Float64, mean_error_rate::Float64,
-                sub_part::Float64, ins_part::Float64, del_part::Float64)
-    if mean_error_rate > max_error_rate
-        error("max_error_rate must be greater than mean_error_rate")
-    end
-    error_d = BetaAlt(mean_error_rate / max_error_rate, convert(Float64, nseqs))
+function sample(nseqs::Int, len::Int,
+                max_error_rate::Float64,
+                sub_part::Float64, ins_part::Float64, del_part::Float64;
+                error_rate_alpha::Float64=5.0, error_rate_beta::Float64=1.0,
+                quality_beta::Float64=10.0)
+    error_d = Beta(error_rate_alpha, error_rate_beta)
     template = random_seq(len)
 
     sub_ratio = (sub_part / (sub_part + ins_part + del_part))
@@ -90,7 +86,8 @@ function sample(nseqs::Int, len::Int, max_error_rate::Float64, mean_error_rate::
     for i = 1:nseqs
         error_rate = rand(error_d) * max_error_rate
         seq, log_p = sample_from_template(template, error_rate,
-                                      sub_ratio, ins_ratio, del_ratio)
+                                      sub_ratio, ins_ratio, del_ratio,
+                                          beta=quality_beta)
         push!(seqs, seq)
         push!(log_ps, log_p)
     end

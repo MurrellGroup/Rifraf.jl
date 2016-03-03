@@ -110,7 +110,7 @@ function test_quiver2()
     ins_ratio = 1.0 / 3.0
     del_ratio = 1.0 / 3.0
     for i in 1:100
-        template, reads, log_ps = sample(20, 30, max_error_rate, mean_error_rate,
+        template, reads, log_ps = sample(20, 30, max_error_rate,
                                          sub_ratio, ins_ratio, del_ratio)
         result, info = Quiver2.quiver2(reads[1], reads,
                                        log_ps,
