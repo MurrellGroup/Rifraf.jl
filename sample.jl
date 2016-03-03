@@ -25,7 +25,7 @@ end
 
 function sample_from_template(template, error_rate,
                               sub_ratio, ins_ratio, del_ratio;
-                              beta=10.0)
+                              beta=-1.0)
     # do deletions
     del_rate = error_rate * del_ratio
     del_d = Bernoulli(del_rate)
@@ -37,6 +37,9 @@ function sample_from_template(template, error_rate,
     end
 
     # generate per-base error probs
+    if beta < 0
+        beta = 1 / error_rate
+    end
     alpha = -beta * error_rate / (error_rate - 1)
     prob_d = Beta(alpha, beta)
     probs = rand(prob_d, length(seq))
@@ -72,7 +75,7 @@ function sample(nseqs::Int, len::Int,
                 max_error_rate::Float64,
                 sub_part::Float64, ins_part::Float64, del_part::Float64;
                 error_rate_alpha::Float64=5.0, error_rate_beta::Float64=1.0,
-                quality_beta::Float64=10.0)
+                quality_beta::Float64=-1.0)
     error_d = Beta(error_rate_alpha, error_rate_beta)
     template = random_seq(len)
 
@@ -86,7 +89,7 @@ function sample(nseqs::Int, len::Int,
     for i = 1:nseqs
         error_rate = rand(error_d) * max_error_rate
         seq, log_p = sample_from_template(template, error_rate,
-                                      sub_ratio, ins_ratio, del_ratio,
+                                          sub_ratio, ins_ratio, del_ratio,
                                           beta=quality_beta)
         push!(seqs, seq)
         push!(log_ps, log_p)
