@@ -16,7 +16,7 @@ function test_perfect_forward()
     template = "AA"
     seq = "AA"
     log_p = fill(-3.0, length(seq))
-    A = Quiver2.forward(seq, log_p, template, log_ins, log_del, bandwidth)
+    A = Quiver2.forward(template, seq, log_p, log_ins, log_del, bandwidth)
     # transpose because of column-major order
     expected = transpose(reshape([[0.0, -10.0, 0.0];
                                   [-5.0, 0.0, -10.0];
@@ -32,7 +32,7 @@ function test_perfect_backward()
     template = "AA"
     seq = "AT"
     log_p = fill(-3.0, length(seq))
-    B = Quiver2.backward(seq, log_p, template, log_ins, log_del, bandwidth)
+    B = Quiver2.backward(template, seq, log_p, log_ins, log_del, bandwidth)
     expected = transpose(reshape([[-3, -5, 0];
                                   [-13, -3, -5];
                                   [0, -10, 0]],
@@ -47,7 +47,7 @@ function test_imperfect_forward()
     template = "AA"
     seq = "AT"
     log_p = fill(-3.0, length(seq))
-    A = Quiver2.forward(seq, log_p, template, log_ins, log_del, bandwidth)
+    A = Quiver2.forward(template, seq, log_p, log_ins, log_del, bandwidth)
     expected = transpose(reshape([[  0, -10, 0];
                                   [ -5,  0,  -10];
                                   [0, -5,  -3]],
@@ -84,9 +84,9 @@ function test_random_mutations()
             mutation = T(rand(1:maxpos), rbase())
         end
         new_template = Quiver2.update_template(template, mutation)
-        A = Quiver2.forward(seq, log_p, template, log_ins, log_del, bandwidth)
-        B = Quiver2.backward(seq, log_p, template, log_ins, log_del, bandwidth)
-        M = Quiver2.forward(seq, log_p, new_template, log_ins, log_del, bandwidth)
+        A = Quiver2.forward(template, seq, log_p, log_ins, log_del, bandwidth)
+        B = Quiver2.backward(template, seq, log_p, log_ins, log_del, bandwidth)
+        M = Quiver2.forward(new_template, seq, log_p, log_ins, log_del, bandwidth)
         score = Quiver2.score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
         @test_approx_eq score M[end, end]
     end

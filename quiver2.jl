@@ -1,6 +1,4 @@
 # TODO: documentation
-# TODO: swap forward and backword args
-# TODO: rename Array{T, 1} to Vector{T}
 
 module Quiver2
 
@@ -30,8 +28,7 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
     return score
 end
 
-function forward(s::AbstractString, log_p::Array{Float64, 1},
-                 t::AbstractString,
+function forward(t::AbstractString, s::AbstractString, log_p::Array{Float64, 1},
                  log_ins::Float64, log_del::Float64, bandwidth::Int)
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
@@ -51,13 +48,12 @@ function forward(s::AbstractString, log_p::Array{Float64, 1},
     return result
 end
 
-function backward(s::AbstractString, log_p::Array{Float64, 1},
-                  t::AbstractString,
+function backward(t::AbstractString, s::AbstractString, log_p::Array{Float64, 1},
                   log_ins::Float64, log_del::Float64, bandwidth::Int)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
     t = reverse(t)
-    result = forward(s, log_p, t, log_ins, log_del, bandwidth)
+    result = forward(t, s, log_p, log_ins, log_del, bandwidth)
     return flip(result)
 end
 
@@ -294,9 +290,9 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         lps = log_ps
     end
 
-    As = [forward(s, p, template, log_ins, log_del, bandwidth)
+    As = [forward(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    Bs = [backward(s, p, template, log_ins, log_del, bandwidth)
+    Bs = [backward(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
     best_score = sum([A[end, end] for A in As])
     best_template = template
@@ -349,7 +345,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                                                         for c in chosen_cands])
             current_score = 0.0
             for i = 1:length(seqs)
-                current_score += forward(seqs[i], lps[i], current_template,
+                current_score += forward(current_template, seqs[i], lps[i],
                                          log_ins, log_del, bandwidth)[end, end]
             end
 
@@ -366,7 +362,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                                                             for c in chosen_cands])
                 current_score = 0.0
                 for i = 1:length(seqs)
-                    current_score += forward(seqs[i], lps[i], current_template,
+                    current_score += forward(current_template, seqs[i], lps[i],
                                              log_ins, log_del, bandwidth)[end, end]
                 end
             end
@@ -396,9 +392,9 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             seqs = sequences
             lps = log_ps
         end
-        As = [forward(s, p, current_template, log_ins, log_del, bandwidth)
+        As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
               for (s, p) in zip(seqs, lps)]
-        Bs = [backward(s, p, current_template, log_ins, log_del, bandwidth)
+        Bs = [backward(current_template, s, p, log_ins, log_del, bandwidth)
               for (s, p) in zip(seqs, lps)]
         current_score = 0.0
         for i = 1:length(seqs)
