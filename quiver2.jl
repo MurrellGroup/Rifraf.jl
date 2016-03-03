@@ -1,10 +1,13 @@
 # TODO: documentation
+# TODO: update types to use generic BioJulia types
 
 module Quiver2
 
 include("BandedArray.jl")
 
 using BandedArrayModule
+
+using Bio.Seq
 
 export quiver2
 
@@ -408,6 +411,25 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                 "mutations" => total_mutations,
                 )
     return best_template, info
+end
+
+"""
+Alternate quiver2() using BioJulia types.
+
+"""
+function quiver2(template::DNASequence, sequences::Vector{Seq.FASTQSeqRecord},
+                 log_ins::Float64, log_del::Float64;
+                 bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
+                 max_iters::Int=100, verbose::Bool=false)
+    new_template = convert(AbstractString, template)
+    new_sequences = ASCIIString[convert(AbstractString, s.seq) for s in sequences]
+    new_phreds = Vector{Float64}[[convert(Float64, p) for p in seq.metadata.quality]
+                                 for seq in sequences]
+    result, info = quiver2(new_template, new_sequences, new_phreds,
+                           log_ins, log_del,
+                           bandwidth=bandwidth, min_dist=min_dist, batch=batch,
+                           max_iters=max_iters, verbose=verbose)
+    return DNASequence(result), info
 end
 
 end
