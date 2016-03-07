@@ -4,6 +4,8 @@ using Bio.Seq
 
 using Distributions
 
+using QuiverIO
+
 export rbase, mutate_base, random_seq, sample_from_template, sample
 
 function rbase()
@@ -68,7 +70,10 @@ function sample_from_template(template, error_rate,
         push!(final_probs, rand(prob_d))
     end
 
-    return DNASequence(final_seq), log10(final_probs)
+    # round log_ps and cap value so PHRED scores fit in a UInt8, which
+    # is used by BioJulia's FASTQRecord.
+    minval = Float64(typemax(UInt8)) / (-10.0)
+    return DNASequence(final_seq), max(round(log10(final_probs), 1), minval)
 end
 
 function sample(nseqs::Int, len::Int,
@@ -95,6 +100,19 @@ function sample(nseqs::Int, len::Int,
         push!(log_ps, log_p)
     end
     return DNASequence(template), seqs, log_ps
+end
+
+"""Write template into FASTA and sequences into FASTQ."""
+function write_samples(filename, template, seqs, log_ps)
+    write_template(string(filename, "-template.fasta"), template)
+    write_sequences(string(filename, "-sequences.fastq"), seqs, log_ps)
+end
+
+"""Read template from FASTA and sequences from FASTQ."""
+function read_samples(filename)
+    template = read_template(string(filename, "-template.fasta"))
+    seqs, log_ps = read_sequences(string(filename, "-sequences.fastq"))
+    return template, seqs, log_ps
 end
 
 end

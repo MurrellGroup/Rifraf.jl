@@ -274,7 +274,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
     end
 
     if verbose
-        print("computing initial alignments\n")
+        print(STDERR, "computing initial alignments\n")
     end
 
     if batch < 0
@@ -299,7 +299,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
     current_score = best_score
     current_template = best_template
     if verbose
-        print("initial score: $best_score\n")
+        print(STDERR, "initial score: $best_score\n")
     end
     converged = false
     mutations = Int[]
@@ -314,7 +314,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         old_template = current_template
         old_score = current_score
         if verbose
-            print("iteration $i\n")
+            print(STDERR, "iteration $i\n")
         end
 
         candidates = getcands(current_template, current_score, seqs, lps, As, Bs,
@@ -323,7 +323,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             push!(mutations, 0)
             if batch < length(sequences)
                 if verbose
-                    print("no candidates found. switching off batch mode.\n")
+                    print(STDERR, "no candidates found. switching off batch mode.\n")
                 end
                 # start full runs
                 batch = length(sequences)
@@ -339,11 +339,11 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             end
         else
             if verbose
-                print("  found $(length(candidates)) candidate mutations.\n")
+                print(STDERR, "  found $(length(candidates)) candidate mutations.\n")
             end
             chosen_cands = choose_candidates(candidates, min_dist)
             if verbose
-                print("  filtered to $(length(chosen_cands)) candidate mutations\n")
+                print(STDERR, "  filtered to $(length(chosen_cands)) candidate mutations\n")
             end
             current_template = apply_mutations(current_template,
                                                Mutation[c.mutation
@@ -359,7 +359,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             # FIXME: this may not actually work, because score_mutation() is not exact
             if current_score < chosen_cands[1].score
                 if verbose
-                    print("  rejecting multiple candidates in favor of best\n")
+                    print(STDERR, "  rejecting multiple candidates in favor of best\n")
                 end
                 chosen_cands = CandMutation[chosen_cands[1]]
                 current_template = apply_mutations(old_template,
@@ -373,7 +373,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             end
             push!(mutations, length(chosen_cands))
             if verbose
-                print("  score: $current_score\n")
+                print(STDERR, "  score: $current_score\n")
             end
             if current_score > best_score
                 best_template = current_template
@@ -385,7 +385,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                     # exact for insertions and deletions
                     # FIXME: detect if this keeps happening and return
                     # best overall template
-                    print("Warning: score decreased.\n")
+                    print(STDERR, "Warning: score decreased.\n")
                 end
             end
         end
