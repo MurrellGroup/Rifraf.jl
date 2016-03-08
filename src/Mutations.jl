@@ -1,4 +1,3 @@
-__precompile__()
 module Mutations
 
 export Mutation, Substitution, Insertion, Deletion, CandMutation

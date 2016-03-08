@@ -1,6 +1,5 @@
-__precompile__()
-
 module Quiver2
+
 include("Mutations.jl")
 include("BandedArrays.jl")
 include("IO.jl")
