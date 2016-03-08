@@ -1,4 +1,4 @@
-isdefined(Main, :__precompile__) && __precompile__(true)
+__precompile__()
 
 module Quiver2
 include("Mutations.jl")

@@ -59,13 +59,24 @@ end
 function main()
     args = parse_commandline()
 
+    infile = args["infile"]
+    if args["verbose"]
+        print(STDERR, "reading sequences from '$infile'\n")
+    end
     sequences, log_ps = read_sequences(args["infile"])
 
     template = sequences[1]
-    if args["template"] != nothing
+    tfile = args["template"]
+    if tfile != nothing
+        if args["verbose"]
+            print(STDERR, "reading template from '$tfile'\n")
+        end
         template = read_template(args["template"])
     end
 
+    if args["verbose"]
+        print(STDERR, "starting run\n")
+    end
     consensus, info = quiver2(template, sequences, log_ps,
                               args["log_ins"], args["log_del"],
                               bandwidth=args["bandwidth"], min_dist=args["min-dist"],
