@@ -63,7 +63,7 @@ function main()
     if args["verbose"]
         print(STDERR, "reading sequences from '$infile'\n")
     end
-    sequences, log_ps = read_sequences(args["infile"])
+    sequences, log_ps = read_fastq(args["infile"])
 
     template = sequences[1]
     tfile = args["template"]

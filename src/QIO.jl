@@ -1,10 +1,19 @@
-module IO
+module QIO
 
 using Bio.Seq
 
-export read_sequences, write_sequences, read_template, write_template
+export write_fasta, read_fastq, write_fastq, read_template, write_template
 
-function read_sequences(filename)
+function write_fasta(filename, seqs)
+    stream = open(filename, "w")
+    for i = 1:length(seqs)
+        s = seqs[i]
+        write(stream, Seq.FASTASeqRecord(string("seq_", i), s, Seq.FASTAMetadata("")))
+    end
+    close(stream)
+end
+
+function read_fastq(filename)
     stream = open(filename, FASTQ)
     seqs = DNASequence[]
     log_ps = Vector{Float64}[]
@@ -16,7 +25,7 @@ function read_sequences(filename)
     return seqs, log_ps
 end
 
-function write_sequences(filename, seqs, log_ps)
+function write_fastq(filename, seqs, log_ps)
     stream = open(filename, "w")
     i = 0
     for (s, lps) in zip(seqs, log_ps)
@@ -29,7 +38,8 @@ end
 
 function read_template(filename)
     stream = open(filename, FASTA)
-    for entry in stream
+    entry = Seq.FASTADNASeqRecord()
+    while read!(stream, entry)
         return entry.seq
     end
 end

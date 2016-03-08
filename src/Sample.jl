@@ -3,7 +3,7 @@ module Sample
 using Bio.Seq
 using Distributions
 
-using Quiver2.IO
+using Quiver2.QIO
 
 export rbase, mutate_base, random_seq, sample_from_template, sample
 
@@ -104,13 +104,13 @@ end
 """Write template into FASTA and sequences into FASTQ."""
 function write_samples(filename, template, seqs, log_ps)
     write_template(string(filename, "-template.fasta"), template)
-    write_sequences(string(filename, "-sequences.fastq"), seqs, log_ps)
+    write_fastq(string(filename, "-sequences.fastq"), seqs, log_ps)
 end
 
 """Read template from FASTA and sequences from FASTQ."""
 function read_samples(filename)
     template = read_template(string(filename, "-template.fasta"))
-    seqs, log_ps = read_sequences(string(filename, "-sequences.fastq"))
+    seqs, log_ps = read_fastq(string(filename, "-sequences.fastq"))
     return template, seqs, log_ps
 end
 
