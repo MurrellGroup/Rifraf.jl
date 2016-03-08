@@ -1,12 +1,8 @@
-include("BandedArray.jl")
-include("quiver2.jl")
-include("io.jl")
-
-using Quiver2
-using QuiverIO
-
 using Bio.Seq
 using ArgParse
+
+using Quiver2.Model
+using Quiver2.IO
 
 function parse_commandline()
     s = ArgParseSettings()

@@ -1,10 +1,9 @@
 module Sample
 
 using Bio.Seq
-
 using Distributions
 
-using QuiverIO
+using Quiver2.IO
 
 export rbase, mutate_base, random_seq, sample_from_template, sample
 

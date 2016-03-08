@@ -1,4 +1,4 @@
-module BandedArrayModule
+module BandedArrays
 
 export BandedArray, sparsecol, data_row, row_range, data_row_range, inband, full, flip
 

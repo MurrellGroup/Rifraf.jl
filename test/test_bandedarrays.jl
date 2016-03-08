@@ -1,6 +1,4 @@
-include("../BandedArray.jl")
-
-using BandedArrayModule
+using Quiver2.BandedArrays
 
 using Base.Test
 

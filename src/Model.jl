@@ -1,12 +1,11 @@
 # TODO: documentation
 
-module Quiver2
-
-include("BandedArray.jl")
-
-using BandedArrayModule
+module Model
 
 using Bio.Seq
+
+using Quiver2.BandedArrays
+using Quiver2.Mutations
 
 export quiver2
 
@@ -55,27 +54,6 @@ function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
     t = reverse(t)
     result = forward(t, s, log_p, log_ins, log_del, bandwidth)
     return flip(result)
-end
-
-abstract Mutation
-
-immutable Substitution <: Mutation
-    pos::Int
-    base::Char
-end
-
-immutable Insertion <: Mutation
-    pos::Int
-    base::Char
-end
-
-immutable Deletion <: Mutation
-    pos::Int
-end
-
-immutable CandMutation
-    mutation::Mutation
-    score::Float64
 end
 
 function equal_ranges(a_range::Tuple{Int64,Int64},

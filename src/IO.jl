@@ -1,4 +1,4 @@
-module QuiverIO
+module IO
 
 using Bio.Seq
 
