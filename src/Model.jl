@@ -154,7 +154,7 @@ function update_template(template::AbstractString,
 end
 
 function apply_mutations(template::AbstractString,
-                         mutations::Array{Mutation, 1})
+                         mutations::Vector{Mutation})
     # check that mutations all have different positions. this is too
     # strict, since there are some combinations of mutations affecting
     # the same spot that are unambiguous, but combined with `min_dist`
@@ -242,6 +242,7 @@ function getcands(template::AbstractString, current_score::Float64,
     return candidates
 end
 
+
 function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                  log_ps::Vector{Vector{Float64}},
                  log_ins::Float64, log_del::Float64;
@@ -272,12 +273,10 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
           for (s, p) in zip(seqs, lps)]
     Bs = [backward(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    best_score = sum([A[end, end] for A in As])
-    best_template = template
-    current_score = best_score
-    current_template = best_template
+    current_score = sum([A[end, end] for A in As])
+    current_template = template
     if verbose
-        print(STDERR, "initial score: $best_score\n")
+        print(STDERR, "initial score: $current_score\n")
     end
     converged = false
     mutations = Int[]
@@ -295,8 +294,12 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             print(STDERR, "iteration $i\n")
         end
 
+        # FIXME: this conversion should not be necessary
+        As = convert(Vector{BandedArray{Float64}}, As)
+        Bs = convert(Vector{BandedArray{Float64}}, Bs)
         candidates = getcands(current_template, current_score, seqs, lps, As, Bs,
                               log_ins, log_del, bandwidth)
+        recompute_As = false
         if length(candidates) == 0
             push!(mutations, 0)
             if batch < length(sequences)
@@ -305,9 +308,6 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                 end
                 # start full runs
                 batch = length(sequences)
-                # TODO: this is necessary because unbatched scores will be worse.
-                # what's the alternative?
-                best_score = typemin(Float64)
                 # TODO: instead of turning off batch mode, try increasing batch size
                 # TODO: is there some fast way to detect convergence w/o full run?
                 # TODO: try multiple iterations before changing/disabling batch
@@ -323,19 +323,16 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             if verbose
                 print(STDERR, "  filtered to $(length(chosen_cands)) candidate mutations\n")
             end
-            current_template = apply_mutations(current_template,
-                                               Mutation[c.mutation
-                                                        for c in chosen_cands])
-            current_score = 0.0
-            for i = 1:length(seqs)
-                current_score += forward(current_template, seqs[i], lps[i],
-                                         log_ins, log_del, bandwidth)[end, end]
-            end
+            current_template = apply_mutations(old_template,
+                                            Mutation[c.mutation
+                                                     for c in chosen_cands])
+            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)[end, end]
+                  for (s, p) in zip(seqs, lps)]
+            temp_score = sum([A[end, end] for A in As])
 
             # detect if a single mutation is better
-            # FIXME: code duplication
-            # FIXME: this may not actually work, because score_mutation() is not exact
-            if current_score < chosen_cands[1].score
+            # note: this may not always be correct, because score_mutation() is not exact
+            if temp_score < chosen_cands[1].score
                 if verbose
                     print(STDERR, "  rejecting multiple candidates in favor of best\n")
                 end
@@ -343,45 +340,28 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                 current_template = apply_mutations(old_template,
                                                    Mutation[c.mutation
                                                             for c in chosen_cands])
-                current_score = 0.0
-                for i = 1:length(seqs)
-                    current_score += forward(current_template, seqs[i], lps[i],
-                                             log_ins, log_del, bandwidth)[end, end]
-                end
+                recompute_As = true
             end
             push!(mutations, length(chosen_cands))
-            if verbose
-                print(STDERR, "  score: $current_score\n")
-            end
-            if current_score > best_score
-                best_template = current_template
-                best_score = current_score
-            end
-            if old_score > current_score
-                if verbose
-                    # this can happen because score_mutation() is not
-                    # exact for insertions and deletions
-                    # FIXME: detect if this keeps happening and return
-                    # best overall template
-                    print(STDERR, "Warning: score decreased.\n")
-                end
-            end
         end
         if batch < length(sequences)
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
             lps = log_ps[indices]
+            recompute_As = true
         else
             seqs = sequences
             lps = log_ps
         end
-        As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
-              for (s, p) in zip(seqs, lps)]
+        if recompute_As
+            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
+                  for (s, p) in zip(seqs, lps)]
+        end
         Bs = [backward(current_template, s, p, log_ins, log_del, bandwidth)
               for (s, p) in zip(seqs, lps)]
-        current_score = 0.0
-        for i = 1:length(seqs)
-            current_score += As[i][end, end]
+        current_score = sum([A[end, end] for A in As])
+        if verbose
+            print(STDERR, "  score: $current_score\n")
         end
     end
     info = Dict("converged" => converged,
@@ -389,7 +369,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                 "full_iterations" => full_iterations,
                 "mutations" => mutations,
                 )
-    return best_template, info
+    return current_template, info
 end
 
 """
