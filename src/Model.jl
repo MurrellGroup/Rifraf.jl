@@ -308,6 +308,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                 end
                 # start full runs
                 batch = length(sequences)
+                recompute_As = true
                 # TODO: instead of turning off batch mode, try increasing batch size
                 # TODO: is there some fast way to detect convergence w/o full run?
                 # TODO: try multiple iterations before changing/disabling batch
