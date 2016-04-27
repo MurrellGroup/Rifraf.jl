@@ -1,20 +1,13 @@
 using Bio.Seq
 using ArgParse
+using Glob
 
 using Quiver2.Model
-using Quiver2.IO
+using Quiver2.QIO
 
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
-        "--template"
-        help = "FASTA file containing a template."
-
-        "--name"
-        help = "name to give consensus sequence"
-        arg_type = ASCIIString
-        default = "consensus"
-
         "--bandwidth"
         help = "alignment bandwidth"
         arg_type = Int
@@ -39,10 +32,6 @@ function parse_commandline()
         help = "print progress"
         action = :store_true
 
-        "infile"
-        help = "input FASTQ file"
-        required = true
-
         "log_ins"
         help = "log10 insertion probability"
         arg_type = Float64
@@ -52,39 +41,43 @@ function parse_commandline()
         help = "log10 deletion probability"
         arg_type = Float64
         required = true
+
+        "input"
+        help = "a single file or a glob. each filename should be unique."
+        required = true
     end
     return parse_args(s)
 end
 
 function main()
     args = parse_commandline()
+    input = args["input"]
 
-    infile = args["infile"]
-    if args["verbose"]
-        print(STDERR, "reading sequences from '$infile'\n")
+    infiles = glob(input, dirname(input))
+    names = [splitext(basename(f))[1] for f in infiles]
+    if length(Set(names)) != length(names)
+        error("Files do not have unique names")
     end
-    sequences, log_ps = read_fastq(args["infile"])
 
-    template = sequences[1]
-    tfile = args["template"]
-    if tfile != nothing
+    for i = 1:length(infiles)
         if args["verbose"]
-            print(STDERR, "reading template from '$tfile'\n")
+            print(STDERR, "reading sequences from '$(infiles[i])'\n")
         end
-        template = read_template(args["template"])
+        sequences, log_ps = read_fastq(infiles[i])
+
+        template = sequences[1]
+
+        if args["verbose"]
+            print(STDERR, "starting run\n")
+        end
+        consensus, info = quiver2(template, sequences, log_ps,
+                                  args["log_ins"], args["log_del"],
+                                  bandwidth=args["bandwidth"], min_dist=args["min-dist"],
+                                  batch=args["batch"], max_iters=args["max-iters"],
+                                  verbose=args["verbose"])
+
+        write(STDOUT, Seq.FASTASeqRecord(names[i], consensus, Seq.FASTAMetadata("")))
     end
-
-    if args["verbose"]
-        print(STDERR, "starting run\n")
-    end
-    consensus, info = quiver2(template, sequences, log_ps,
-                              args["log_ins"], args["log_del"],
-                              bandwidth=args["bandwidth"], min_dist=args["min-dist"],
-                              batch=args["batch"], max_iters=args["max-iters"],
-                              verbose=args["verbose"])
-
-    write(STDOUT, Seq.FASTASeqRecord(args["name"], consensus, Seq.FASTAMetadata("")))
-
 end
 
 main()
