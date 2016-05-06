@@ -8,6 +8,11 @@ using Quiver2.QIO
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
+        "--prefix"
+        help = "prependedto each filename to make label"
+        arg_type = AbstractString
+        default = ""
+
         "--bandwidth"
         help = "alignment bandwidth"
         arg_type = Int
@@ -60,6 +65,8 @@ function main()
         error("Files do not have unique names")
     end
 
+    prefix = args["prefix"]
+
     for i = 1:length(infiles)
         if args["verbose"]
             print(STDERR, "reading sequences from '$(infiles[i])'\n")
@@ -77,7 +84,8 @@ function main()
                                   batch=args["batch"], max_iters=args["max-iters"],
                                   verbose=args["verbose"])
 
-        write(STDOUT, Seq.FASTASeqRecord(names[i], consensus, Seq.FASTAMetadata("")))
+        label = string(prefix, names[i])
+        write(STDOUT, Seq.FASTASeqRecord(label, consensus, Seq.FASTAMetadata("")))
     end
 end
 
