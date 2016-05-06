@@ -294,9 +294,6 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             print(STDERR, "iteration $i\n")
         end
 
-        # FIXME: this conversion should not be necessary
-        As = convert(Vector{BandedArray{Float64}}, As)
-        Bs = convert(Vector{BandedArray{Float64}}, Bs)
         candidates = getcands(current_template, current_score, seqs, lps, As, Bs,
                               log_ins, log_del, bandwidth)
         recompute_As = false
@@ -327,7 +324,7 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             current_template = apply_mutations(old_template,
                                             Mutation[c.mutation
                                                      for c in chosen_cands])
-            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)[end, end]
+            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
             temp_score = sum([A[end, end] for A in As])
 
