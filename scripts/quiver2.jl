@@ -53,7 +53,8 @@ function main()
     args = parse_commandline()
     input = args["input"]
 
-    infiles = glob(input, dirname(input))
+    dir, pattern = splitdir(input)
+    infiles = glob(pattern, dir)
     names = [splitext(basename(f))[1] for f in infiles]
     if length(Set(names)) != length(names)
         error("Files do not have unique names")
