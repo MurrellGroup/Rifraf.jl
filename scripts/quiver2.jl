@@ -1,9 +1,12 @@
-using Bio.Seq
+import Bio.Seq
+@everywhere using Bio.Seq
 using ArgParse
 using Glob
 
-using Quiver2.Model
-using Quiver2.QIO
+import Quiver2.Model
+import Quiver2.QIO
+@everywhere using Quiver2.Model
+@everywhere using Quiver2.QIO
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -54,6 +57,23 @@ function parse_commandline()
     return parse_args(s)
 end
 
+@everywhere function dofile(file, args)
+    if args["verbose"]
+        print(STDERR, "reading sequences from '$(file)'\n")
+    end
+    sequences, log_ps = read_fastq(file)
+    template = sequences[1]
+    if args["verbose"]
+        print(STDERR, "starting run\n")
+    end
+    consensus, info = quiver2(template, sequences, log_ps,
+                              args["log_ins"], args["log_del"],
+                              bandwidth=args["bandwidth"], min_dist=args["min-dist"],
+                              batch=args["batch"], max_iters=args["max-iters"],
+                              verbose=args["verbose"])
+    return consensus
+end
+
 function main()
     args = parse_commandline()
     input = args["input"]
@@ -65,27 +85,16 @@ function main()
         error("Files do not have unique names")
     end
 
+    @everywhere function f(x)
+        return dofile(x, args)
+    end
+    results = pmap((f, a) -> dofile(f, a), infiles, [args for i in 1:length(infiles)])
+
     prefix = args["prefix"]
-
-    for i = 1:length(infiles)
-        if args["verbose"]
-            print(STDERR, "reading sequences from '$(infiles[i])'\n")
-        end
-        sequences, log_ps = read_fastq(infiles[i])
-
-        template = sequences[1]
-
-        if args["verbose"]
-            print(STDERR, "starting run\n")
-        end
-        consensus, info = quiver2(template, sequences, log_ps,
-                                  args["log_ins"], args["log_del"],
-                                  bandwidth=args["bandwidth"], min_dist=args["min-dist"],
-                                  batch=args["batch"], max_iters=args["max-iters"],
-                                  verbose=args["verbose"])
-
-        label = string(prefix, names[i])
-        write(STDOUT, Seq.FASTASeqRecord(label, consensus, Seq.FASTAMetadata("")))
+    for i=1:length(results)
+        name = splitext(basename(infiles[i]))[1]
+        label = string(prefix, name)
+        write(STDOUT, Seq.FASTASeqRecord(label, results[i], Seq.FASTAMetadata("")))
     end
 end
 
