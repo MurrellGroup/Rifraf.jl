@@ -1,5 +1,14 @@
 # TODO: documentation
 
+# TODO: annealing schedule for log_ins and log_del penalties for
+# aligning template to reference
+
+# TODO: backtrace or sample reference alignments. If they contain
+# length-1 or length-2 indels, increase penalty and keep running.
+
+# FIXME: swap log_ins and log_del penalties for aligning template to
+# reference
+
 module Model
 
 using Bio.Seq
@@ -11,7 +20,9 @@ export quiver2
 
 function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
-                log_p::Float64, log_ins::Float64, log_del::Float64)
+                log_p::Float64, log_ins::Float64, log_del::Float64,
+                 allow_codon_indels::Bool,
+                 log_codon_ins::Float64, log_codon_del::Float64)
     score = typemin(Float64)
     if inband(A, i - 1, j)
         # insertion
@@ -24,11 +35,30 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
     if inband(A, i - 1, j - 1)
         score = max(score, A[i - 1, j - 1] +( s_base == t_base ? 0.0 : log_p))
     end
+    if allow_codon_indels
+        if i > 3  && inband(A, i - 3, j)
+            # codon insertion
+            score = max(score, A[i - 3, j] + log_codon_ins)
+        end
+        if j > 3 && inband(A, i, j - 3)
+            # codon deletion
+            score = max(score, A[i, j - 3] + log_codon_del)
+        end
+    end
     return score
 end
 
+"""
+F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
+
+"""
 function forward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                 log_ins::Float64, log_del::Float64, bandwidth::Int)
+                 log_ins::Float64, log_del::Float64, bandwidth::Int,
+                 allow_codon_indels::Bool,
+                 log_codon_ins::Float64, log_codon_del::Float64)
+    if length(s) != length(log_p)
+        error("sequence length does not match quality score length")
+    end
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
         result[i, 1] = log_ins * (i - 1)
@@ -41,19 +71,38 @@ function forward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
         start = max(start, 2)
         for i = start:stop
             result[i, j] = update(result, i, j, s[i-1], t[j-1],
-                                  log_p[i-1], log_ins, log_del)
+                                  log_p[i-1], log_ins, log_del,
+                                  allow_codon_indels,
+                                  log_codon_ins, log_codon_del)
         end
     end
     return result
 end
 
+function forward_seq(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
+                     log_ins::Float64, log_del::Float64, bandwidth::Int)
+    return forward(t, s, log_p, log_ins, log_del, bandwidth, false, 0.0, 0.0)
+end
+
+"""
+B[i, j] is the log probability of aligning s[i:end] to t[j:end].
+
+"""
 function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                  log_ins::Float64, log_del::Float64, bandwidth::Int)
+                  log_ins::Float64, log_del::Float64, bandwidth::Int,
+                  allow_codon_indels::Bool,
+                  log_codon_ins::Float64, log_codon_del::Float64)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
     t = reverse(t)
-    result = forward(t, s, log_p, log_ins, log_del, bandwidth)
+    result = forward(t, s, log_p, log_ins, log_del, bandwidth,
+                     allow_codon_indels, log_codon_ins, log_codon_del)
     return flip(result)
+end
+
+function backward_seq(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
+                      log_ins::Float64, log_del::Float64, bandwidth::Int)
+    return backward(t, s, log_p, log_ins, log_del, bandwidth, false, 0.0, 0.0)
 end
 
 function equal_ranges(a_range::Tuple{Int64,Int64},
@@ -82,9 +131,11 @@ end
 function score_mutation(mutation::Deletion, template::AbstractString,
                         seq::AbstractString, log_p::Vector{Float64},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
-                        log_ins::Float64, log_del::Float64, bandwidth::Int)
-    aj = mutation.pos
-    bj = mutation.pos + 1
+                        log_ins::Float64, log_del::Float64, bandwidth::Int,
+                        allow_codon_indels::Bool,
+                        log_codon_ins::Float64, log_codon_del::Float64)
+    aj = mutation.pos      # column before base to delete (new last column before change)
+    bj = mutation.pos + 1  # column after base to delete
     Acol = sparsecol(A, aj)
     Bcol = sparsecol(B, bj)
     (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj),
@@ -100,35 +151,52 @@ function score_mutation(mutation::Union{Insertion,Substitution},
                         template::AbstractString,
                         seq::AbstractString, log_p::Vector{Float64},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
-                        log_ins::Float64, log_del::Float64, bandwidth::Int)
-    bj = mutation.pos + (typeof(mutation) == Insertion ? 0 : 1)
+                        log_ins::Float64, log_del::Float64, bandwidth::Int,
+                        allow_codon_indels::Bool,
+                        log_codon_ins::Float64, log_codon_del::Float64)
+    col_offset = (typeof(mutation) == Insertion ? 0 : 1)
+    bj = mutation.pos + col_offset  # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
-    aj = mutation.pos + (typeof(mutation) == Substitution ? 1 : 0)
+    aj = mutation.pos + col_offset  # column of base to mutate or insert (new last column before change)
     prev::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(A, mutation.pos)
-    prev_start, prev_stop = row_range(A, mutation.pos)
-    row_start, row_stop = row_range(A, aj)
+    prev_start, prev_stop = row_range(A, mutation.pos)  # row range of column before base to mutate or insert
+    row_start, row_stop = row_range(A, aj)  # row range of column to mutate or insert
     offset = 1 - (row_start - prev_start)
     result::Float64 = typemin(Float64)
     # for efficiency, do not allocate and compute complete column of
-    # A. Just keep running score.  `prev_score` is the value of
-    # Acol[i - 1], for the insertion move
-    prev_score::Float64 = 0.0
+    # A. Just keep last three positions.
+    # `prev_scores[i]` is the value of Acol[real_i - i]
+    prev_scores = [0.0, 0.0, 0.0]
     for real_i in row_start:row_stop
-        seq_i = real_i - 1
-        i = real_i - row_start + 1
-        ii = i - offset + 1
+        seq_i = real_i - 1  # position in the template sequence
+        i = real_i - row_start + 1  # position in this iteration
+        ii = i - offset + 1 # position in `prev` matching i
         score = typemin(Float64)
         if i > 1
-            score = max(score, prev_score + log_ins)
+            # insertion
+            score = max(score, prev_scores[1] + log_ins)
         end
         if prev_start < real_i <= (prev_stop + 1)
+            # (mis)match
             score = max(score, prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]))
         end
         if prev_start <= real_i <= prev_stop
+            # deletion
             score = max(score, prev[ii] + log_del)
         end
+        if allow_codon_indels
+            if i > 3
+                # insertion
+                score = max(score, prev_scores[3] + log_codon_ins)
+            end
+            if prev_start <= real_i <= prev_stop
+                # deletion
+                score = max(score, prev[ii] + log_codon_del)
+            end
+        end
         result = max(result, score + Bcol[i])
-        prev_score = score
+        print("$prev_scores\n")
+        prev_scores[:] = [score, prev_scores[1], prev_scores[2]]
     end
     return result
 end
@@ -206,8 +274,12 @@ macro process_mutation(m)
         score = 0.0
         for si in 1:length(sequences)
             score += score_mutation($m, template, sequences[si], log_ps[si],
-                                    As[si], Bs[si], log_ins, log_del, bandwidth)
+                                    As[si], Bs[si], log_ins, log_del, bandwidth,
+                                    false, log_codon_ins, log_codon_del)
         end
+        score += score_mutation($m, template, reference, reference_log_p,
+                                A_t, B_t, log_ref_ins, log_ref_del, bandwidth,
+                                true, log_codon_ins, log_codon_del)
         if score > current_score
             push!(candidates, CandMutation($m, score))
         end
@@ -215,11 +287,17 @@ macro process_mutation(m)
 end
 
 function getcands(template::AbstractString, current_score::Float64,
+                  reference::AbstractString,
+                  reference_log_p::Vector{Float64},
+                  A_t::BandedArray{Float64},
+                  B_t::BandedArray{Float64},
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
                   As::Vector{BandedArray{Float64}},
                   Bs::Vector{BandedArray{Float64}},
-                  log_ins::Float64, log_del::Float64, bandwidth::Int)
+                  log_ins::Float64, log_del::Float64, bandwidth::Int,
+                  log_ref_ins::Float64, log_ref_del::Float64,
+                  log_codon_ins::Float64, log_codon_del::Float64)
     candidates = CandMutation[]
     for j in 1:length(template)
         for base in "ACGT"
@@ -243,10 +321,14 @@ function getcands(template::AbstractString, current_score::Float64,
 end
 
 
-function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
+function quiver2(reference::AbstractString,
+                 template::AbstractString,
+                 sequences::Vector{ASCIIString},
                  log_ps::Vector{Vector{Float64}},
                  log_ins::Float64, log_del::Float64;
-                 bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
+                 use_ref::Bool=true,
+                 bandwidth::Int=10, min_dist::Int=9,
+                 batch::Int=10,
                  max_iters::Int=100, verbose::Bool=false)
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
@@ -254,6 +336,20 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
 
     if verbose
         print(STDERR, "computing initial alignments\n")
+    end
+
+    # TODO: do not hardcode
+    log_codon_ins = 0.0
+    log_codon_del = 0.0
+    log_mismatch = 0.0
+    log_ref_ins = 0.0
+    log_ref_del = 0.0
+    if use_ref
+        log_codon_ins = -0.1
+        log_codon_del = -0.1
+        log_mismatch = -0.1
+        log_ref_ins = -99999.9
+        log_ref_del = -99999.9
     end
 
     if batch < 0
@@ -269,11 +365,17 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
         lps = log_ps
     end
 
-    As = [forward(template, s, p, log_ins, log_del, bandwidth)
+    reference_log_p = log_mismatch * ones(length(reference))
+
+    As = [forward_seq(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    Bs = [backward(template, s, p, log_ins, log_del, bandwidth)
+    Bs = [backward_seq(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    current_score = sum([A[end, end] for A in As])
+    A_t = forward(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                  true, log_codon_ins, log_codon_del)
+    B_t = backward(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                   true, log_codon_ins, log_codon_del)
+    current_score = A_t[end, end] + sum([A[end, end] for A in As])
     current_template = template
     if verbose
         print(STDERR, "initial score: $current_score\n")
@@ -294,8 +396,12 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             print(STDERR, "iteration $i\n")
         end
 
-        candidates = getcands(current_template, current_score, seqs, lps, As, Bs,
-                              log_ins, log_del, bandwidth)
+        candidates = getcands(current_template, current_score,
+                              reference, reference_log_p, A_t, B_t,
+                              seqs, lps, As, Bs,
+                              log_ins, log_del, bandwidth,
+                              log_ref_ins, log_ref_del,
+                              log_codon_ins, log_codon_del)
         recompute_As = false
         if length(candidates) == 0
             push!(mutations, 0)
@@ -322,11 +428,13 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
                 print(STDERR, "  filtered to $(length(chosen_cands)) candidate mutations\n")
             end
             current_template = apply_mutations(old_template,
-                                            Mutation[c.mutation
-                                                     for c in chosen_cands])
-            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
+                                               Mutation[c.mutation
+                                                        for c in chosen_cands])
+            As = [forward_seq(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
-            temp_score = sum([A[end, end] for A in As])
+            A_t = forward(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                          true, log_codon_ins, log_codon_del)
+            temp_score = A_t[end, end] + sum([A[end, end] for A in As])
 
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
@@ -352,12 +460,16 @@ function quiver2(template::AbstractString, sequences::Vector{ASCIIString},
             lps = log_ps
         end
         if recompute_As
-            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
+            As = [forward_seq(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
+            A_t = forward(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                          true, log_codon_ins, log_codon_del)
         end
-        Bs = [backward(current_template, s, p, log_ins, log_del, bandwidth)
+        Bs = [backward_seq(current_template, s, p, log_ins, log_del, bandwidth)
               for (s, p) in zip(seqs, lps)]
-        current_score = sum([A[end, end] for A in As])
+        B_t = backward(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                       true, log_codon_ins, log_codon_del)
+        current_score = A_t[end, end] + sum([A[end, end] for A in As])
         if verbose
             print(STDERR, "  score: $current_score\n")
         end
@@ -374,16 +486,20 @@ end
 Alternate quiver2() using BioJulia types.
 
 """
-function quiver2{T<:NucleotideSequence}(template::DNASequence,
+function quiver2{T<:NucleotideSequence}(reference::DNASequence,
+                                        template::DNASequence,
                                         sequences::Vector{T},
                                         log_ps::Vector{Vector{Float64}},
                                         log_ins::Float64, log_del::Float64;
+                                        use_ref::Bool=true,
                                         bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
                                         max_iters::Int=100, verbose::Bool=false)
+    new_reference = convert(AbstractString, reference)
     new_template = convert(AbstractString, template)
     new_sequences = ASCIIString[convert(AbstractString, s) for s in sequences]
-    result, info = quiver2(new_template, new_sequences, log_ps,
+    result, info = quiver2(new_reference, new_template, new_sequences, log_ps,
                            log_ins, log_del,
+                           use_ref=use_ref,
                            bandwidth=bandwidth, min_dist=min_dist, batch=batch,
                            max_iters=max_iters, verbose=verbose)
     return DNASequence(result), info

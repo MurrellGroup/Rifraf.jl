@@ -13,7 +13,7 @@ function test_perfect_forward()
     template = "AA"
     seq = "AA"
     log_p = fill(-3.0, length(seq))
-    A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
+    A = Model.forward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
     # transpose because of column-major order
     expected = transpose(reshape([[0.0, -10.0, 0.0];
                                   [-5.0, 0.0, -10.0];
@@ -29,7 +29,7 @@ function test_perfect_backward()
     template = "AA"
     seq = "AT"
     log_p = fill(-3.0, length(seq))
-    B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
+    B = Model.backward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
     expected = transpose(reshape([[-3, -5, 0];
                                   [-13, -3, -5];
                                   [0, -10, 0]],
@@ -44,7 +44,7 @@ function test_imperfect_forward()
     template = "AA"
     seq = "AT"
     log_p = fill(-3.0, length(seq))
-    A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
+    A = Model.forward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
     expected = transpose(reshape([[  0, -10, 0];
                                   [ -5,  0,  -10];
                                   [0, -5,  -3]],
@@ -81,10 +81,11 @@ function test_random_mutations()
             mutation = T(rand(1:maxpos), rbase())
         end
         new_template = Model.update_template(template, mutation)
-        A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
-        B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
-        M = Model.forward(new_template, seq, log_p, log_ins, log_del, bandwidth)
-        score = Model.score_mutation(mutation, template, seq, log_p, A, B, log_ins, log_del, bandwidth)
+        A = Model.forward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
+        B = Model.backward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
+        M = Model.forward_seq(new_template, seq, log_p, log_ins, log_del, bandwidth)
+        score = Model.score_mutation(mutation, template, seq, log_p,
+                                     A, B, log_ins, log_del, bandwidth, false, 0.0, 0.0)
         @test_approx_eq score M[end, end]
     end
 end
@@ -103,16 +104,18 @@ function test_quiver2()
     # TODO: can't guarantee this test actually passes, since it is random
     mean_error_rate = 0.1
     max_error_rate = 0.2
-    sub_ratio = 1.0 / 3.0
-    ins_ratio = 1.0 / 3.0
-    del_ratio = 1.0 / 3.0
+    sub_ratio = 1.0 / 7.0
+    ins_ratio = 3.0 / 7.0
+    del_ratio = 3.0 / 7.0
     for i in 1:100
-        template, reads, log_ps = sample(20, 30, max_error_rate,
-                                         sub_ratio, ins_ratio, del_ratio)
-        result, info = Model.quiver2(reads[1], reads,
+        reference, template, template_log_p, reads, log_ps = sample(30, 30, max_error_rate,
+                                                                    sub_ratio, ins_ratio, del_ratio)
+        initial_template = reads[1]
+        result, info = Model.quiver2(reference, initial_template, reads,
                                      log_ps,
                                      log10(ins_ratio * mean_error_rate),
                                      log10(del_ratio * mean_error_rate),
+                                     use_ref=true,
                                      bandwidth=3, min_dist=9, batch=20,
                                      verbose=false)
         @test result == template
