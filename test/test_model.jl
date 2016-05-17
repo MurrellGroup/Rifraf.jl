@@ -5,7 +5,6 @@ using Quiver2.Mutations
 
 using Base.Test
 
-# tests
 function test_perfect_forward()
     log_ins = -5.0
     log_del = -10.0
@@ -13,7 +12,7 @@ function test_perfect_forward()
     template = "AA"
     seq = "AA"
     log_p = fill(-3.0, length(seq))
-    A = Model.forward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
+    A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
     # transpose because of column-major order
     expected = transpose(reshape([[0.0, -10.0, 0.0];
                                   [-5.0, 0.0, -10.0];
@@ -29,7 +28,7 @@ function test_perfect_backward()
     template = "AA"
     seq = "AT"
     log_p = fill(-3.0, length(seq))
-    B = Model.backward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
+    B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
     expected = transpose(reshape([[-3, -5, 0];
                                   [-13, -3, -5];
                                   [0, -10, 0]],
@@ -44,7 +43,7 @@ function test_imperfect_forward()
     template = "AA"
     seq = "AT"
     log_p = fill(-3.0, length(seq))
-    A = Model.forward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
+    A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
     expected = transpose(reshape([[  0, -10, 0];
                                   [ -5,  0,  -10];
                                   [0, -5,  -3]],
@@ -81,9 +80,9 @@ function test_random_mutations()
             mutation = T(rand(1:maxpos), rbase())
         end
         new_template = Model.update_template(template, mutation)
-        A = Model.forward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
-        B = Model.backward_seq(template, seq, log_p, log_ins, log_del, bandwidth)
-        M = Model.forward_seq(new_template, seq, log_p, log_ins, log_del, bandwidth)
+        A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
+        B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
+        M = Model.forward(new_template, seq, log_p, log_ins, log_del, bandwidth)
         score = Model.score_mutation(mutation, template, seq, log_p,
                                      A, B, log_ins, log_del, bandwidth, false, 0.0, 0.0)
         @test_approx_eq score M[end, end]

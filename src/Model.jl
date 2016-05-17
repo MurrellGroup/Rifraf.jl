@@ -52,10 +52,10 @@ end
 F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
-function forward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                 log_ins::Float64, log_del::Float64, bandwidth::Int,
-                 allow_codon_indels::Bool,
-                 log_codon_ins::Float64, log_codon_del::Float64)
+function forward_codon(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
+                       log_ins::Float64, log_del::Float64, bandwidth::Int,
+                       allow_codon_indels::Bool,
+                       log_codon_ins::Float64, log_codon_del::Float64)
     if length(s) != length(log_p)
         error("sequence length does not match quality score length")
     end
@@ -79,30 +79,30 @@ function forward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
     return result
 end
 
-function forward_seq(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                     log_ins::Float64, log_del::Float64, bandwidth::Int)
-    return forward(t, s, log_p, log_ins, log_del, bandwidth, false, 0.0, 0.0)
+function forward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
+                 log_ins::Float64, log_del::Float64, bandwidth::Int)
+    return forward_codon(t, s, log_p, log_ins, log_del, bandwidth, false, 0.0, 0.0)
 end
 
 """
 B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
-function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                  log_ins::Float64, log_del::Float64, bandwidth::Int,
-                  allow_codon_indels::Bool,
-                  log_codon_ins::Float64, log_codon_del::Float64)
+function backward_codon(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
+                        log_ins::Float64, log_del::Float64, bandwidth::Int,
+                        allow_codon_indels::Bool,
+                        log_codon_ins::Float64, log_codon_del::Float64)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
     t = reverse(t)
-    result = forward(t, s, log_p, log_ins, log_del, bandwidth,
-                     allow_codon_indels, log_codon_ins, log_codon_del)
+    result = forward_codon(t, s, log_p, log_ins, log_del, bandwidth,
+                           allow_codon_indels, log_codon_ins, log_codon_del)
     return flip(result)
 end
 
-function backward_seq(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                      log_ins::Float64, log_del::Float64, bandwidth::Int)
-    return backward(t, s, log_p, log_ins, log_del, bandwidth, false, 0.0, 0.0)
+function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
+                  log_ins::Float64, log_del::Float64, bandwidth::Int)
+    return backward_codon(t, s, log_p, log_ins, log_del, bandwidth, false, 0.0, 0.0)
 end
 
 function equal_ranges(a_range::Tuple{Int64,Int64},
@@ -365,14 +365,14 @@ function quiver2(reference::AbstractString,
 
     reference_log_p = log_mismatch * ones(length(reference))
 
-    As = [forward_seq(template, s, p, log_ins, log_del, bandwidth)
+    As = [forward(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    Bs = [backward_seq(template, s, p, log_ins, log_del, bandwidth)
+    Bs = [backward(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    A_t = forward(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                  true, log_codon_ins, log_codon_del)
-    B_t = backward(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                   true, log_codon_ins, log_codon_del)
+    A_t = forward_codon(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                        true, log_codon_ins, log_codon_del)
+    B_t = backward_codon(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                         true, log_codon_ins, log_codon_del)
     current_score = A_t[end, end] + sum([A[end, end] for A in As])
     current_template = template
     if verbose
@@ -428,10 +428,10 @@ function quiver2(reference::AbstractString,
             current_template = apply_mutations(old_template,
                                                Mutation[c.mutation
                                                         for c in chosen_cands])
-            As = [forward_seq(current_template, s, p, log_ins, log_del, bandwidth)
+            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
-            A_t = forward(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                          true, log_codon_ins, log_codon_del)
+            A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                                true, log_codon_ins, log_codon_del)
             temp_score = A_t[end, end] + sum([A[end, end] for A in As])
 
             # detect if a single mutation is better
@@ -458,15 +458,15 @@ function quiver2(reference::AbstractString,
             lps = log_ps
         end
         if recompute_As
-            As = [forward_seq(current_template, s, p, log_ins, log_del, bandwidth)
+            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
-            A_t = forward(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                          true, log_codon_ins, log_codon_del)
+            A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                                true, log_codon_ins, log_codon_del)
         end
-        Bs = [backward_seq(current_template, s, p, log_ins, log_del, bandwidth)
+        Bs = [backward(current_template, s, p, log_ins, log_del, bandwidth)
               for (s, p) in zip(seqs, lps)]
-        B_t = backward(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                       true, log_codon_ins, log_codon_del)
+        B_t = backward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                             true, log_codon_ins, log_codon_del)
         current_score = A_t[end, end] + sum([A[end, end] for A in As])
         if verbose
             print(STDERR, "  score: $current_score\n")
