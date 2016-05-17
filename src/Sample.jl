@@ -27,23 +27,25 @@ end
 function sample_from_template(template, error_rate,
                               sub_ratio, ins_ratio, del_ratio;
                               beta=-1.0, codon=true)
-    offset = codon ? 2 : 0
     # do deletions
-    del_rate = error_rate * del_ratio / (offset + 1)
+    del_rate = error_rate * del_ratio
+    if codon
+        del_rate /= 3
+    end
     del_d = Bernoulli(del_rate)
     seq = DNANucleotide[]
     skip = 0
     for j = 1:length(template)
         if skip > 0
             skip -= 1
-        elseif j < (length(template) - offset) && rand(del_d) == 0
+            continue
+        end
+        if rand(del_d) == 0 || (codon && ((length(template) - j) < 2))
+            push!(seq, template[j])
+        else
+            # do deletion
             if codon
-                push!(seq, template[j])
-                push!(seq, template[j+1])
-                push!(seq, template[j+2])
                 skip = 2
-            else
-                push!(seq, template[j])
             end
         end
     end
