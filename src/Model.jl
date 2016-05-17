@@ -21,8 +21,8 @@ export quiver2
 function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
                 log_p::Float64, log_ins::Float64, log_del::Float64,
-                 allow_codon_indels::Bool,
-                 log_codon_ins::Float64, log_codon_del::Float64)
+                allow_codon_indels::Bool,
+                log_codon_ins::Float64, log_codon_del::Float64)
     score = typemin(Float64)
     if inband(A, i - 1, j)
         # insertion
@@ -164,37 +164,39 @@ function score_mutation(mutation::Union{Insertion,Substitution},
     offset = 1 - (row_start - prev_start)
     result::Float64 = typemin(Float64)
     # for efficiency, do not allocate and compute complete column of
-    # A. Just keep last three positions.
-    # `prev_scores[i]` is the value of Acol[real_i - i]
-    prev_scores = [0.0, 0.0, 0.0]
+    # A. Just keep last four positions.
+    # `scores[1]` is the score of the current entry
+    # `scores[4]` is the score of the entry one codon above the current entry
+    scores = [0.0, 0.0, 0.0, 0.0]
     for real_i in row_start:row_stop
         seq_i = real_i - 1  # position in the template sequence
         i = real_i - row_start + 1  # position in this iteration
         ii = i - offset + 1 # position in `prev` matching i
-        score = typemin(Float64)
+        scores[1] = typemin(Float64)
         if i > 1
             # insertion
-            score = max(score, prev_scores[1] + log_ins)
+            scores[1] = max(scores[1], scores[2] + log_ins)
         end
         if prev_start < real_i <= (prev_stop + 1)
             # (mis)match
-            score = max(score, prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]))
+            scores[1] = max(scores[1], prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]))
         end
         if prev_start <= real_i <= prev_stop
             # deletion
-            score = max(score, prev[ii] + log_del)
+            scores[1] = max(scores[1], prev[ii] + log_del)
         end
         if allow_codon_indels
             if i > 3
                 # insertion
-                score = max(score, prev_scores[3] + log_codon_ins)
+                scores[1] = max(scores[1], scores[4] + log_codon_ins)
             end
             if prev_start <= real_i <= prev_stop
                 # deletion
-                score = max(score, prev[ii] + log_codon_del)
+                scores[1] = max(scores[1], prev[ii] + log_codon_del)
             end
         end
-        result = max(result, score + Bcol[i])
+        result = max(result, scores[1] + Bcol[i])
+        scores[2:4] = scores[1:3]
     end
     return result
 end
