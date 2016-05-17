@@ -277,9 +277,11 @@ macro process_mutation(m)
                                     As[si], Bs[si], log_ins, log_del, bandwidth,
                                     false, log_codon_ins, log_codon_del)
         end
-        score += score_mutation($m, template, reference, reference_log_p,
-                                A_t, B_t, log_ref_ins, log_ref_del, bandwidth,
-                                true, log_codon_ins, log_codon_del)
+        if use_ref
+            score += score_mutation($m, template, reference, reference_log_p,
+                                    A_t, B_t, log_ref_ins, log_ref_del, bandwidth,
+                                    true, log_codon_ins, log_codon_del)
+        end
         if score > current_score
             push!(candidates, CandMutation($m, score))
         end
@@ -287,6 +289,7 @@ macro process_mutation(m)
 end
 
 function getcands(template::AbstractString, current_score::Float64,
+                  use_ref::Bool,
                   reference::AbstractString,
                   reference_log_p::Vector{Float64},
                   A_t::BandedArray{Float64},
@@ -373,11 +376,16 @@ function quiver2(reference::AbstractString,
           for (s, p) in zip(seqs, lps)]
     Bs = [backward(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    A_t = forward_codon(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                        true, log_codon_ins, log_codon_del)
-    B_t = backward_codon(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                         true, log_codon_ins, log_codon_del)
-    current_score = A_t[end, end] + sum([A[end, end] for A in As])
+    current_score = sum([A[end, end] for A in As])
+    A_t = BandedArray(Float64, (1, 1), 1)
+    B_t = BandedArray(Float64, (1, 1), 1)
+    if use_ref
+        A_t = forward_codon(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                            true, log_codon_ins, log_codon_del)
+        B_t = backward_codon(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                             true, log_codon_ins, log_codon_del)
+        current_score += A_t[end, end]
+    end
     current_template = template
     if verbose
         print(STDERR, "initial score: $current_score\n")
@@ -399,6 +407,7 @@ function quiver2(reference::AbstractString,
         end
 
         candidates = getcands(current_template, current_score,
+                              use_ref,
                               reference, reference_log_p, A_t, B_t,
                               seqs, lps, As, Bs,
                               log_ins, log_del, bandwidth,
@@ -434,10 +443,12 @@ function quiver2(reference::AbstractString,
                                                         for c in chosen_cands])
             As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
-            A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                                true, log_codon_ins, log_codon_del)
-            temp_score = A_t[end, end] + sum([A[end, end] for A in As])
-
+            temp_score = sum([A[end, end] for A in As])
+            if use_ref
+                A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                                    true, log_codon_ins, log_codon_del)
+                temp_score += A_t[end, end]
+            end
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
             if temp_score < chosen_cands[1].score
@@ -464,14 +475,21 @@ function quiver2(reference::AbstractString,
         if recompute_As
             As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
-            A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                                true, log_codon_ins, log_codon_del)
+            if use_ref
+                A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                                    true, log_codon_ins, log_codon_del)
+            end
         end
         Bs = [backward(current_template, s, p, log_ins, log_del, bandwidth)
               for (s, p) in zip(seqs, lps)]
-        B_t = backward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                             true, log_codon_ins, log_codon_del)
-        current_score = A_t[end, end] + sum([A[end, end] for A in As])
+        if use_ref
+            B_t = backward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                                 true, log_codon_ins, log_codon_del)
+        end
+        current_score = sum([A[end, end] for A in As])
+        if use_ref
+            current_score += A_t[end, end]
+        end
         if verbose
             print(STDERR, "  score: $current_score\n")
         end

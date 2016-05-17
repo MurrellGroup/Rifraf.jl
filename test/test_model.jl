@@ -118,7 +118,7 @@ function test_quiver2()
                                      log_ps,
                                      log10(ins_ratio * mean_error_rate),
                                      log10(del_ratio * mean_error_rate),
-                                     use_ref=true,
+                                     use_ref=false,
                                      bandwidth=3, min_dist=9, batch=5,
                                      max_iters=100,
                                      verbose=false)
