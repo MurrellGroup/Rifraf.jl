@@ -102,37 +102,40 @@ end
 function test_quiver2()
     # TODO: can't guarantee this test actually passes, since it is random
     mean_error_rate = 0.1
-    max_error_rate = 0.2
+    max_error_rate = 0.1
     sub_ratio = 1.0 / 7.0
     ins_ratio = 3.0 / 7.0
     del_ratio = 3.0 / 7.0
-    for i in 1:100
-        reference, template, template_log_p, reads, log_ps = sample(20, 30, max_error_rate,
+    n = 100
+    n_mismatch = 0
+    n_wrong_length = 0
+    n_out_frame = 0
+    for i in 1:n
+        reference, template, template_log_p, reads, log_ps = sample(30, 30, max_error_rate,
                                                                     sub_ratio, ins_ratio, del_ratio)
         initial_template = reads[1]
         result, info = Model.quiver2(reference, initial_template, reads,
                                      log_ps,
                                      log10(ins_ratio * mean_error_rate),
                                      log10(del_ratio * mean_error_rate),
-                                     use_ref=false,
-                                     bandwidth=3, min_dist=9, batch=10,
+                                     use_ref=true,
+                                     bandwidth=3, min_dist=9, batch=5,
+                                     max_iters=100,
                                      verbose=false)
-        # @test length(result) % 3 == 0
-        # @test result == template
-        if result != template
-            if length(result) != length(template)
-                print("$i: lengths did not match. $(length(result)) != $(length(template))\n")
-            else
-                idx = 0
-                for j in 1:length(result)
-                    if result[j] != template[j]
-                        idx = j
-                        break
-                    end
-                end
-                print("$i: $idx / $(length(result))\n")
-            end
+        if length(result) % 3 != 0
+            n_out_frame += 1
+        elseif length(result) != length(template)
+            n_wrong_length += 1
+        elseif result != template
+            n_mismatch += 1
         end
+
+    end
+    if n_mismatch > 0 || n_wrong_length > 0 || n_out_frame > 0
+        print("out of frame: $(n_out_frame) / $(n)\n")
+        print("wrong length: $(n_wrong_length) / $(n)\n")
+        print("mismatched  : $(n_mismatch) / $(n)\n")
+        @test false
     end
 end
 

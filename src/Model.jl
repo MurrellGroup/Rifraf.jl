@@ -345,12 +345,14 @@ function quiver2(reference::AbstractString,
     log_ref_ins = 0.0
     log_ref_del = 0.0
     if use_ref
-        log_codon_ins = -0.1
-        log_codon_del = -0.1
-        log_mismatch = -0.1
-        log_ref_ins = -99999.9
-        log_ref_del = -99999.9
+        log_codon_ins = -1.0
+        log_codon_del = -1.0
+        log_mismatch = -1.0
+        log_ref_ins = -1.0
+        log_ref_del = -1.0
     end
+    min_log_ref_ins = typemin(Float64)
+    min_log_ref_del = typemin(Float64)
 
     if batch < 0
         batch = length(sequences)
@@ -473,6 +475,8 @@ function quiver2(reference::AbstractString,
         if verbose
             print(STDERR, "  score: $current_score\n")
         end
+        log_ref_ins = min(log_ref_ins * 2, min_log_ref_ins)
+        log_ref_del = min(log_ref_del * 2, min_log_ref_del)
     end
     info = Dict("converged" => converged,
                 "batch_iterations" => batch_iterations,
