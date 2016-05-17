@@ -195,8 +195,6 @@ function score_mutation(mutation::Union{Insertion,Substitution},
             end
         end
         result = max(result, score + Bcol[i])
-        print("$prev_scores\n")
-        prev_scores[:] = [score, prev_scores[1], prev_scores[2]]
     end
     return result
 end
