@@ -193,6 +193,7 @@ function sample(nseqs::Int, len::Int,
 
     seqs = DNASequence[]
     log_ps = Vector{Float64}[]
+    error_rates = Float64[]
 
     for i = 1:nseqs
         error_rate = Distributions.rand(error_d) * max_error_rate
@@ -201,8 +202,9 @@ function sample(nseqs::Int, len::Int,
                                           error_std, codon=false)
         push!(seqs, seq)
         push!(log_ps, log_p)
+        push!(error_rates, error_rate)
     end
-    return DNASequence(reference), DNASequence(template), template_log_p, seqs, log_ps
+    return DNASequence(reference), DNASequence(template), template_log_p, seqs, log_ps, error_rates
 end
 
 """Write template into FASTA and sequences into FASTQ."""
