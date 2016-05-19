@@ -62,6 +62,7 @@ function test_random_mutations()
     sub_ratio = 2 / 10
     ins_ratio = 4 / 10
     del_ratio = 4 / 10
+    error_std = 0.01
     log_ins = log10(error_rate * ins_ratio)
     log_del = log10(error_rate * del_ratio)
     for i = 1:100
@@ -69,67 +70,75 @@ function test_random_mutations()
         template_seq = random_seq(template_len)
         template = convert(AbstractString, template_seq)
         bioseq, log_p = sample_from_template(template_seq, error_rate,
-                                      sub_ratio, ins_ratio, del_ratio)
+                                             sub_ratio, ins_ratio, del_ratio, error_std)
         seq = convert(AbstractString, bioseq)
         bandwidth = max(2 * abs(length(template) - length(seq)), 5)
         T = [Mutations.Substitution, Mutations.Insertion, Mutations.Deletion][rand(1:3)]
-        maxpos = (T == Mutations.Insertion ? length(template) + 1: length(template))
+        minpos = (T == Mutations.Insertion ? 0 : 1)
+        pos = rand(minpos:length(template))
         if T == Mutations.Deletion
-            mutation = T(rand(1:maxpos))
+            mutation = T(pos)
         else
-            mutation = T(rand(1:maxpos), rbase())
+            mutation = T(pos, rbase())
         end
-        new_template = Model.update_template(template, mutation)
+        new_template = Mutations.update_template(template, mutation)
+        M = Model.forward(new_template, seq, log_p, log_ins, log_del, bandwidth)
         A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
         B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
-        M = Model.forward(new_template, seq, log_p, log_ins, log_del, bandwidth)
         score = Model.score_mutation(mutation, template, seq, log_p,
                                      A, B, log_ins, log_del, bandwidth, false, 0.0, 0.0)
         @test_approx_eq score M[end, end]
     end
 end
 
-function test_apply_mutations()
-    template = "ACG"
-    mutations = [Mutations.Insertion(1, 'T'),
-                 Mutations.Deletion(3),
-                 Mutations.Substitution(2, 'T')]
-    expected = "TAT"
-    result = Model.apply_mutations(template, mutations)
-    @test result == expected
-end
-
 function test_quiver2()
     # TODO: can't guarantee this test actually passes, since it is random
+    n_seqs=30
+    ref_len=30
+    template_error_rate = 0.1
+    t_sub_part = 8.0
+    t_ins_part = 1.0
+    t_del_part = 1.0
+
     mean_error_rate = 0.1
     max_error_rate = 0.1
     sub_ratio = 1.0 / 7.0
     ins_ratio = 3.0 / 7.0
     del_ratio = 3.0 / 7.0
+    error_std = 0.01
+
     n = 100
     n_mismatch = 0
     n_wrong_length = 0
     n_out_frame = 0
-    for i in 1:n
-        reference, template, template_log_p, reads, log_ps = sample(30, 30, max_error_rate,
-                                                                    sub_ratio, ins_ratio, del_ratio)
-        initial_template = reads[1]
-        result, info = Model.quiver2(reference, initial_template, reads,
-                                     log_ps,
-                                     log10(ins_ratio * mean_error_rate),
-                                     log10(del_ratio * mean_error_rate),
-                                     use_ref=false,
-                                     bandwidth=3, min_dist=9, batch=5,
-                                     max_iters=100,
-                                     verbose=false)
-        if length(result) % 3 != 0
-            n_out_frame += 1
-        elseif length(result) != length(template)
-            n_wrong_length += 1
-        elseif result != template
-            n_mismatch += 1
-        end
 
+    for i in 1:n
+        # for use_ref in [true, false]
+        for use_ref in [false]
+            reference, template, template_log_p, reads, log_ps, error_rates = sample(n_seqs, ref_len,
+                                                                                     template_error_rate,
+                                                                                     t_sub_part, t_ins_part, t_del_part,
+                                                                                     max_error_rate,
+                                                                                     sub_ratio, ins_ratio, del_ratio,
+                                                                                     error_std=error_std,
+                                                                                     error_rate_alpha=3.0, error_rate_beta=1.0)
+            initial_template = reads[1]
+            result, info = Model.quiver2(reference, initial_template, reads,
+                                         log_ps,
+                                         log10(ins_ratio * mean_error_rate),
+                                         log10(del_ratio * mean_error_rate),
+                                         use_ref=use_ref,
+                                         bandwidth=3, min_dist=9, batch=5,
+                                         max_iters=100,
+                                         verbose=false)
+            if length(result) % 3 != 0
+                n_out_frame += 1
+            elseif length(result) != length(template)
+                n_wrong_length += 1
+            elseif result != template
+                n_mismatch += 1
+            end
+        end
     end
     if n_mismatch > 0 || n_wrong_length > 0 || n_out_frame > 0
         print("out of frame: $(n_out_frame) / $(n)\n")
@@ -146,5 +155,4 @@ test_perfect_backward()
 test_imperfect_forward()
 test_equal_ranges()
 test_random_mutations()
-test_apply_mutations()
 test_quiver2()

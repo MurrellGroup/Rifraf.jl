@@ -13,6 +13,7 @@ module Model
 
 using Bio.Seq
 
+using Quiver2.Sample
 using Quiver2.BandedArrays
 using Quiver2.Mutations
 
@@ -76,7 +77,7 @@ function forward_codon(t::AbstractString, s::AbstractString, log_p::Vector{Float
                                   log_codon_ins, log_codon_del)
         end
     end
-    return result
+    return result::BandedArray{Float64}
 end
 
 function forward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
@@ -128,22 +129,22 @@ end
     end
 end
 
-function score_mutation(mutation::Deletion, template::AbstractString,
+function score_mutation(mutation::Union{Deletion,CodonDeletion},
+                        template::AbstractString,
                         seq::AbstractString, log_p::Vector{Float64},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
                         log_ins::Float64, log_del::Float64, bandwidth::Int,
                         allow_codon_indels::Bool,
                         log_codon_ins::Float64, log_codon_del::Float64)
-    aj = mutation.pos      # column before base to delete (new last column before change)
-    bj = mutation.pos + 1  # column after base to delete
+    offset = typeof(mutation) == Deletion ? 1 : 3
+    aj = mutation.pos           # column before base to delete (new last column before change)
+    bj = mutation.pos + offset  # column after bases to delete
     Acol = sparsecol(A, aj)
     Bcol = sparsecol(B, bj)
     (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj),
                                               row_range(B, bj))
-
     asub = sub(Acol, amin:amax)
     bsub = sub(Bcol, bmin:bmax)
-
     return summax(asub, bsub)
 end
 
@@ -154,24 +155,38 @@ function score_mutation(mutation::Union{Insertion,Substitution},
                         log_ins::Float64, log_del::Float64, bandwidth::Int,
                         allow_codon_indels::Bool,
                         log_codon_ins::Float64, log_codon_del::Float64)
-    col_offset = (typeof(mutation) == Insertion ? 0 : 1)
-    bj = mutation.pos + col_offset  # column after base to mutate or insert
+    bj = mutation.pos + 1 # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
-    aj = mutation.pos + col_offset  # column of base to mutate or insert (new last column before change)
-    prev::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(A, mutation.pos)
-    prev_start, prev_stop = row_range(A, mutation.pos)  # row range of column before base to mutate or insert
-    row_start, row_stop = row_range(A, aj)  # row range of column to mutate or insert
+    b_start, b_stop = row_range(B, bj)  # row range of B column
+
+    ajprev = mutation.pos + (typeof(mutation) == Substitution ? 0 : 1)  # index of last unchanged column in A
+    aj = mutation.pos + 1  # index of new column to compute
+    prev_start, prev_stop = row_range(A, ajprev)  # row range of column before base to mutate or insert
+
+    ajprev3 = ajprev - 2
+    prev_start::Int
+    prev_stop::Int
+    if ajprev3 > 0
+        prev3_start, prev3_stop = row_range(A, ajprev3)
+    end
+
+    row_start, row_stop = row_range(A, aj)  # row range of column to compute
     offset = 1 - (row_start - prev_start)
     result::Float64 = typemin(Float64)
+
+    if (row_start != b_start || row_stop != b_stop)
+        error("Acol does not align to Bcol")
+    end
+
     # for efficiency, do not allocate and compute complete column of
     # A. Just keep last four positions.
     # `scores[1]` is the score of the current entry
     # `scores[4]` is the score of the entry one codon above the current entry
     scores = [0.0, 0.0, 0.0, 0.0]
     for real_i in row_start:row_stop
-        seq_i = real_i - 1  # position in the template sequence
+        seq_i = real_i - 1  # position in the sequence
         i = real_i - row_start + 1  # position in this iteration
-        ii = i - offset + 1 # position in `prev` matching i
+        prev_i = i - offset + 1 # position in `prev` matching i
         scores[1] = typemin(Float64)
         if i > 1
             # insertion
@@ -179,77 +194,27 @@ function score_mutation(mutation::Union{Insertion,Substitution},
         end
         if prev_start < real_i <= (prev_stop + 1)
             # (mis)match
-            scores[1] = max(scores[1], prev[ii - 1] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]))
+            scores[1] = max(scores[1], A[real_i - 1, ajprev] + (mutation.base == seq[seq_i] ? 0.0 : log_p[seq_i]))
         end
         if prev_start <= real_i <= prev_stop
             # deletion
-            scores[1] = max(scores[1], prev[ii] + log_del)
+            scores[1] = max(scores[1], A[real_i, ajprev] + log_del)
         end
         if allow_codon_indels
             if i > 3
                 # insertion
                 scores[1] = max(scores[1], scores[4] + log_codon_ins)
             end
-            if prev_start <= real_i <= prev_stop
+            if ajprev3 > 0 && (prev3_start <= real_i <= prev3_stop) && inband(A, real_i, ajprev3)
                 # deletion
-                scores[1] = max(scores[1], prev[ii] + log_codon_del)
+                scores[1] = max(scores[1], A[real_i, ajprev-2] + log_codon_del)
             end
         end
-        result = max(result, scores[1] + Bcol[i])
+        b_i = i  #  this is okay because we've chosen aj so it has the same range as bj
+        result = max(result, scores[1] + Bcol[b_i])
         scores[2:4] = scores[1:3]
     end
     return result
-end
-
-function update_template(template::AbstractString,
-                         mutation::Substitution)
-    return string(template[1:(mutation.pos - 1)],
-                  mutation.base,
-                  template[(mutation.pos + 1):end])
-end
-
-function update_template(template::AbstractString,
-                         mutation::Insertion)
-    return string(template[1:(mutation.pos - 1)],
-                  mutation.base,
-                  template[(mutation.pos):end])
-end
-
-function update_template(template::AbstractString,
-                         mutation::Deletion)
-    return string(template[1:(mutation.pos - 1)],
-                  template[(mutation.pos + 1):end])
-end
-
-function apply_mutations(template::AbstractString,
-                         mutations::Vector{Mutation})
-    # check that mutations all have different positions. this is too
-    # strict, since there are some combinations of mutations affecting
-    # the same spot that are unambiguous, but combined with `min_dist`
-    # it is fine.
-    if length(Set([m.pos for m in mutations])) != length(mutations)
-        error("Cannot have multiple mutations affecting the same position")
-    end
-    remaining = [m for m in mutations]
-
-    while length(remaining) > 0
-        m = pop!(remaining)
-        template = update_template(template, m)
-        o = Dict(Insertion => 1, Deletion => -1, Substitution => 0)[typeof(m)]
-        for i in 1:length(remaining)
-            m2 = remaining[i]
-            if m2.pos >= m.pos
-                T = typeof(m2)
-                if T == Deletion
-                    remaining[i] = T(m2.pos + o)
-                else
-                    remaining[i] = T(m2.pos + o, m2.base)
-                end
-            end
-        end
-    end
-
-    return template
 end
 
 function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
@@ -259,7 +224,7 @@ function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
         if any(Bool[(abs(c.mutation.pos - p) < min_dist) for p in posns])
             continue
         end
-        push!(posns, c.mutation.pos)
+        union!(posns, affected_positions(c.mutation))
         push!(final_cands, c)
     end
     return final_cands
@@ -301,8 +266,14 @@ function getcands(template::AbstractString, current_score::Float64,
                   log_ins::Float64, log_del::Float64, bandwidth::Int,
                   log_ref_ins::Float64, log_ref_del::Float64,
                   log_codon_ins::Float64, log_codon_del::Float64)
+    len = length(template)
     candidates = CandMutation[]
-    for j in 1:length(template)
+    # insertion at beginning
+    for base in "ACGT"
+        mi = Insertion(0, base)
+        @process_mutation mi
+    end
+    for j in 1:len
         for base in "ACGT"
             mi = Insertion(j, base)
             @process_mutation mi
@@ -315,10 +286,17 @@ function getcands(template::AbstractString, current_score::Float64,
         md = Deletion(j)
         @process_mutation md
     end
-    # insertion after last
-    for base in "ACGT"
-        mi = Insertion(length(template) + 1, base)
-        @process_mutation mi
+    if use_ref
+        mci = CodonInsertion(0, random_codon())
+        @process_mutation mci
+        for j in 1:len
+            mci = CodonInsertion(j, random_codon())
+            @process_mutation mci
+            if j < len - 1
+                mcd = CodonDeletion(j)
+                @process_mutation mcd
+            end
+        end
     end
     return candidates
 end

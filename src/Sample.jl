@@ -5,7 +5,7 @@ using Distributions
 
 using Quiver2.QIO
 
-export rbase, mutate_base, random_seq, sample_from_template, sample, BetaAlt
+export rbase, mutate_base, random_codon, random_seq, sample_from_template, sample, BetaAlt
 
 function rbase()
     bases = [DNA_A, DNA_C, DNA_G, DNA_T]
@@ -19,6 +19,11 @@ function mutate_base(base::DNANucleotide)
     end
     return result
 end
+
+function random_codon()
+    return (rbase(), rbase(), rbase())
+end
+
 
 function random_seq(n)
     return DNASequence([rbase() for i in 1:n])
