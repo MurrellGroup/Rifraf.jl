@@ -8,11 +8,9 @@ function test_apply_mutations()
                          Mutations.Insertion(3, 'C'),
                          Mutations.Deletion(3),
                          Mutations.Substitution(2, 'T')]
-    orig = deepcopy(mutations)
     expected = "TATC"
     result = Mutations.apply_mutations(template, mutations)
     @test result == expected
-    @test mutatinos == orig
 end
 
 function test_apply_codon_mutations()

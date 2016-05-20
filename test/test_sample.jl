@@ -12,9 +12,10 @@ begin
         sub_ratio = 1
         ins_ratio = 3
         del_ratio = 3
+        error_std = 0.001
         seq, logp = sample_from_template(template, error_rate,
-                                         sub_ratio, ins_ratio, del_ratio;
-                                         beta=-1.0, codon=true)
+                                         sub_ratio, ins_ratio, del_ratio,
+                                         error_std, codon=true)
         @test length(seq) % 3 == 0
     end
 end
