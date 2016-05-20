@@ -511,7 +511,7 @@ function quiver2(reference::AbstractString,
                               log_ins, log_del, bandwidth,
                               log_ref_ins, log_ref_del,
                               log_codon_ins, log_codon_del)
-        recompute_As = false
+        recompute_As = true
         if length(candidates) == 0
             push!(mutations, 0)
             if length(current_template) % 3 == 0 || !use_ref
@@ -521,7 +521,6 @@ function quiver2(reference::AbstractString,
                     end
                     # start full runs
                     batch = length(sequences)
-                    recompute_As = true
                     # TODO: instead of turning off batch mode, try increasing batch size
                     # TODO: is there some fast way to detect convergence w/o full run?
                     # TODO: try multiple iterations before changing/disabling batch
@@ -534,7 +533,6 @@ function quiver2(reference::AbstractString,
                     println(STDERR, "no candidates found. enabling reference.")
                 end
                 enable_ref = true
-                recompute_As = true
             elseif log_ref_ins > min_log_ref_ins || log_ref_del > min_log_ref_del
                 if verbose > 1
                     println(STDERR, "no candidates found. increasing indel penalties.")
@@ -576,7 +574,9 @@ function quiver2(reference::AbstractString,
                 current_template = apply_mutations(old_template,
                                                    Mutation[c.mutation
                                                             for c in chosen_cands])
-                recompute_As = true
+            else
+                # no need to recompute unless batch changes
+                recompute_As = false
             end
             push!(mutations, length(chosen_cands))
         end
