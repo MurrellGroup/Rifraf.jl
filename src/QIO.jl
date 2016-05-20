@@ -2,7 +2,7 @@ module QIO
 
 using Bio.Seq
 
-export write_fasta, read_fastq, write_fastq, read_template, write_template
+export write_fasta, read_fastq, write_fastq, read_single, write_single
 
 function write_fasta(filename, seqs)
     stream = open(filename, "w")
@@ -36,7 +36,7 @@ function write_fastq(filename, seqs, log_ps)
     close(stream)
 end
 
-function read_template(filename)
+function read_single(filename)
     stream = open(filename, FASTA)
     entry = Seq.FASTADNASeqRecord()
     while read!(stream, entry)
@@ -44,10 +44,10 @@ function read_template(filename)
     end
 end
 
-function write_template(filename, template)
-    template_record = Seq.FASTASeqRecord("template", template, Seq.FASTAMetadata(""))
+function write_single(filename, seq; name::AbstractString="seq")
+    record = Seq.FASTASeqRecord(name, seq, Seq.FASTAMetadata(""))
     fasta_stream = open(filename, "w")
-    write(fasta_stream, template_record)
+    write(fasta_stream, record)
     close(fasta_stream)
 end
 

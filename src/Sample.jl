@@ -214,15 +214,15 @@ end
 
 """Write template into FASTA and sequences into FASTQ."""
 function write_samples(filename, reference, template, seqs, log_ps)
-    write_template(string(filename, "-reference.fasta"), template)
-    write_template(string(filename, "-template.fasta"), template)
+    write_single(string(filename, "-reference.fasta"), reference, name="reference")
+    write_single(string(filename, "-template.fasta"), template, name="template")
     write_fastq(string(filename, "-sequences.fastq"), seqs, log_ps)
 end
 
 """Read template from FASTA and sequences from FASTQ."""
 function read_samples(filename)
-    reference = read_template(string(filename, "-reference.fasta"))
-    template = read_template(string(filename, "-template.fasta"))
+    reference = read_single(string(filename, "-reference.fasta"))
+    template = read_single(string(filename, "-template.fasta"))
     seqs, log_ps = read_fastq(string(filename, "-sequences.fastq"))
     return reference, template, seqs, log_ps
 end
