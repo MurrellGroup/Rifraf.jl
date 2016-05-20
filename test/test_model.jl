@@ -57,7 +57,7 @@ function test_equal_ranges()
     @test Model.equal_ranges((1, 5), (4, 5)) == ((4, 5), (1, 2))
 end
 
-function test_random_mutations()
+function test_random_mutation(mutation, template_len)
     error_rate = 0.1
     sub_ratio = 2 / 10
     ins_ratio = 4 / 10
@@ -65,29 +65,67 @@ function test_random_mutations()
     error_std = 0.01
     log_ins = log10(error_rate * ins_ratio)
     log_del = log10(error_rate * del_ratio)
-    for i = 1:100
+    template_seq = random_seq(template_len)
+    template = convert(AbstractString, template_seq)
+    bioseq, log_p = sample_from_template(template_seq, error_rate,
+                                         sub_ratio, ins_ratio, del_ratio, error_std)
+    seq = convert(AbstractString, bioseq)
+    bandwidth = max(3 * abs(length(template) - length(seq)), 5)
+    new_template = Mutations.update_template(template, mutation)
+    M = Model.forward(new_template, seq, log_p, log_ins, log_del, bandwidth)
+
+    i = mutation.pos + 2
+    A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
+    B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
+    score = Model.score_mutation(mutation, template, seq, log_p,
+                                 A, B, log_ins, log_del, bandwidth, false, 0.0, 0.0)
+    @test_approx_eq score M[end, end]
+    # TODO: test that inband values are equal in A and Acols.
+end
+
+function test_random_substitutions()
+    for i = 1:30
         template_len = rand(10:20)
-        template_seq = random_seq(template_len)
-        template = convert(AbstractString, template_seq)
-        bioseq, log_p = sample_from_template(template_seq, error_rate,
-                                             sub_ratio, ins_ratio, del_ratio, error_std)
-        seq = convert(AbstractString, bioseq)
-        bandwidth = max(2 * abs(length(template) - length(seq)), 5)
-        T = [Mutations.Substitution, Mutations.Insertion, Mutations.Deletion][rand(1:3)]
-        minpos = (T == Mutations.Insertion ? 0 : 1)
-        pos = rand(minpos:length(template))
-        if T == Mutations.Deletion
-            mutation = T(pos)
-        else
-            mutation = T(pos, rbase())
-        end
-        new_template = Mutations.update_template(template, mutation)
-        M = Model.forward(new_template, seq, log_p, log_ins, log_del, bandwidth)
-        A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
-        B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
-        score = Model.score_mutation(mutation, template, seq, log_p,
-                                     A, B, log_ins, log_del, bandwidth, false, 0.0, 0.0)
-        @test_approx_eq score M[end, end]
+        pos = rand(1:template_len)
+        mutation = Mutations.Substitution(pos, rbase())
+        test_random_mutation(mutation, template_len)
+    end
+end
+
+function test_random_insertions()
+    for i = 1:30
+        template_len = rand(10:20)
+        pos = rand(0:template_len)
+        mutation = Mutations.Insertion(pos, rbase())
+        test_random_mutation(mutation, template_len)
+    end
+end
+
+function test_random_codon_insertions()
+    for i = 1:30
+        template_len = rand(10:20)
+        pos = rand(0:template_len)
+        mutation = Mutations.CodonInsertion(pos, random_codon())
+        test_random_mutation(mutation, template_len)
+    end
+end
+
+function test_random_deletions()
+    for i = 1:30
+        template_len = rand(10:20)
+        pos = rand(1:template_len)
+        mutation = Mutations.Deletion(pos)
+        test_random_mutation(mutation, template_len)
+    end
+end
+
+
+function test_random_codon_deletions()
+    for i = 1:30
+        template_len = rand(10:20)
+        pos = rand(1:(template_len - 2))
+        mutation = Mutations.CodonDeletion(pos)
+        test_random_mutation(mutation, template_len)
     end
 end
 
@@ -113,8 +151,7 @@ function test_quiver2()
     n_out_frame = 0
 
     for i in 1:n
-        # for use_ref in [true, false]
-        for use_ref in [false]
+        for use_ref in [true, false]
             reference, template, template_log_p, reads, log_ps, error_rates = sample(n_seqs, ref_len,
                                                                                      template_error_rate,
                                                                                      t_sub_part, t_ins_part, t_del_part,
@@ -141,9 +178,9 @@ function test_quiver2()
         end
     end
     if n_mismatch > 0 || n_wrong_length > 0 || n_out_frame > 0
-        print("out of frame: $(n_out_frame) / $(n)\n")
-        print("wrong length: $(n_wrong_length) / $(n)\n")
-        print("mismatched  : $(n_mismatch) / $(n)\n")
+        print("out of frame           : $(n_out_frame) / $(n)\n")
+        print("in frame, wrong length : $(n_wrong_length) / $(n)\n")
+        print("mismatched             : $(n_mismatch) / $(n)\n")
         @test false
     end
 end
@@ -154,5 +191,9 @@ test_perfect_forward()
 test_perfect_backward()
 test_imperfect_forward()
 test_equal_ranges()
-test_random_mutations()
+test_random_substitutions()
+test_random_insertions()
+test_random_codon_insertions()
+test_random_deletions()
+test_random_codon_deletions()
 test_quiver2()

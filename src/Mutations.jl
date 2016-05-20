@@ -73,19 +73,6 @@ function are_unambiguous(ms::Vector{Mutation})
     return ins_good && others_good
 end
 
-base_shift_dict = Dict(Insertion => 1,
-                       CodonInsertion => 3,
-                       Deletion => -1,
-                       CodonDeletion => -3,
-                       Substitution => 0)
-
-"""
-How many bases to shift mutations after this one.
-"""
-function base_shift(m::Mutation)
-    return base_shift_dict[typeof(m)]
-end
-
 function update_template(template::AbstractString,
                          mutation::Substitution)
     return string(template[1:(mutation.pos - 1)],
@@ -119,6 +106,19 @@ function update_template(template::AbstractString,
                   template[(mutation.pos + 3):end])
 end
 
+base_shift_dict = Dict(Insertion => 1,
+                       CodonInsertion => 3,
+                       Deletion => -1,
+                       CodonDeletion => -3,
+                       Substitution => 0)
+
+"""
+How many bases to shift mutations after this one.
+"""
+function base_shift(m::Mutation)
+    return base_shift_dict[typeof(m)]
+end
+
 
 type AmbiguousMutationsError <: Exception end
 
@@ -128,7 +128,7 @@ function apply_mutations(template::AbstractString,
     if !are_unambiguous(mutations)
         throw(AmbiguousMutationsError())
     end
-    remaining = [m for m in mutations]
+    remaining = deepcopy(mutations)
     while length(remaining) > 0
         m = pop!(remaining)
         template = update_template(template, m)

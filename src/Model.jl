@@ -159,8 +159,9 @@ function score_mutation(mutation::Union{Insertion,Substitution},
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     b_start, b_stop = row_range(B, bj)  # row range of B column
 
-    ajprev = mutation.pos + (typeof(mutation) == Substitution ? 0 : 1)  # index of last unchanged column in A
     aj = mutation.pos + 1  # index of new column to compute
+
+    ajprev = mutation.pos + (typeof(mutation) == Substitution ? 0 : 1)  # index of last unchanged column in A
     prev_start, prev_stop = row_range(A, ajprev)  # row range of column before base to mutate or insert
 
     ajprev3 = ajprev - 2
@@ -216,6 +217,132 @@ function score_mutation(mutation::Union{Insertion,Substitution},
     end
     return result
 end
+
+
+function compute_subcol(row_start, row_stop,
+                        prev, prev_start, prev_stop,
+                        prev3, prev3_start, prev3_stop,
+                        has_prev3,
+                        base, seq, log_p,
+                        log_ins, log_del,
+                        allow_codon_indels,
+                        log_codon_ins, log_codon_del)
+    col = typemin(Float64) * ones(row_stop - row_start + 1)
+    offset = 1 - (row_start - prev_start)
+    for i in 1:length(col)
+        real_i = i + row_start - 1
+        seq_i = real_i - 1  # position in the sequence
+        prev_i = i - offset + 1 # position in `prev` matching i
+        if i > 1
+            # insertion
+            col[i] = max(col[i], col[i-1] + log_ins)
+        end
+        if prev_start < real_i <= (prev_stop + 1)
+            # (mis)match
+            col[i] = max(col[i], prev[prev_i-1] + (base == seq[seq_i] ? 0.0 : log_p[seq_i]))
+        end
+        if prev_start <= real_i <= prev_stop
+            # deletion
+            col[i] = max(col[i], prev[prev_i] + log_del)
+        end
+        if allow_codon_indels
+            if i > 3
+                # insertion
+                col[i] = max(col[i], col[i-3] + log_codon_ins)
+            end
+            if has_prev3 && prev3_start <= real_i <= prev3_stop
+                # deletion
+                prev3_i = real_i - prev3_start + 1
+                col[i] = max(col[i], prev3[prev3_i] + log_codon_del)
+            end
+        end
+    end
+    return col
+end
+
+function score_mutation(mutation::CodonInsertion,
+                        template::AbstractString,
+                        seq::AbstractString, log_p::Vector{Float64},
+                        A::BandedArray{Float64}, B::BandedArray{Float64},
+                        log_ins::Float64, log_del::Float64, bandwidth::Int,
+                        allow_codon_indels::Bool,
+                        log_codon_ins::Float64, log_codon_del::Float64)
+    bj = mutation.pos + 1 # column after base to mutate or insert
+    Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
+    b_start, b_stop = row_range(B, bj)  # row range of B column
+
+    aj = mutation.pos + 1  # index of new column to compute
+    row_start, row_stop = row_range(A, aj)  # row range of column to compute
+    if (row_start != b_start || row_stop != b_stop)
+        error("Acol does not align to Bcol")
+    end
+    nrows = row_stop - row_start + 1
+    Acols = Array(Float64, (nrows, 3))
+
+    ajprev = aj
+    prev::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(A, ajprev)
+    prev_start, prev_stop = row_range(A, ajprev)  # row range of column before base to mutate or insert
+
+    has_prev3 = false
+    ajprev3 = ajprev - 2
+    prev3::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = prev
+    prev3_start::Int = -1
+    prev3_stop::Int = -1
+    if ajprev3 > 0
+        has_prev3 = true
+        prev3 = sparsecol(A, ajprev3)
+        prev3_start, prev3_stop = row_range(A, ajprev3)
+    end
+
+    Acols[:, 1] = compute_subcol(row_start, row_stop,
+                                 prev, prev_start, prev_stop,
+                                 prev3, prev3_start, prev3_stop,
+                                 has_prev3,
+                                 mutation.bases[1], seq, log_p,
+                                 log_ins,
+                                 log_del,
+                                 allow_codon_indels,
+                                 log_codon_ins,
+                                 log_codon_del)
+
+    ajprev3 = ajprev - 1
+    if ajprev3 > 0
+        has_prev3 = true
+        prev3 = sparsecol(A, ajprev3)
+        prev3_start, prev3_stop = row_range(A, ajprev3)
+    end
+    Acols[:, 2] = compute_subcol(row_start, row_stop,
+                                 Acols[:, 1], row_start, row_stop,
+                                 prev3, prev3_start, prev3_stop,
+                                 has_prev3,
+                                 mutation.bases[2], seq, log_p,
+                                 log_ins,
+                                 log_del,
+                                 allow_codon_indels,
+                                 log_codon_ins,
+                                 log_codon_del)
+
+    ajprev3 = ajprev
+    if ajprev3 > 0
+        has_prev3 = true
+        prev3 = sparsecol(A, ajprev3)
+        prev3_start, prev3_stop = row_range(A, ajprev3)
+    end
+    Acols[:, 3] = compute_subcol(row_start, row_stop,
+                                 Acols[:, 2], row_start, row_stop,
+                                 prev3, prev3_start, prev3_stop,
+                                 has_prev3,
+                                 mutation.bases[3], seq, log_p,
+                                 log_ins,
+                                 log_del,
+                                 allow_codon_indels,
+                                 log_codon_ins,
+                                 log_codon_del)
+
+    result = maximum(Acols[:, end] + Bcol)
+    return result
+end
+
 
 function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
     final_cands = CandMutation[]
@@ -309,7 +436,7 @@ function quiver2(reference::AbstractString,
                  log_ins::Float64, log_del::Float64;
                  use_ref::Bool=true,
                  bandwidth::Int=10, min_dist::Int=9,
-                 batch::Int=10,
+                 batch::Int=10, do_full::Bool=false,
                  max_iters::Int=100, verbose::Bool=false)
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
@@ -326,9 +453,9 @@ function quiver2(reference::AbstractString,
     log_ref_ins = 0.0
     log_ref_del = 0.0
     if use_ref
-        log_codon_ins = -1.0
-        log_codon_del = -1.0
-        log_mismatch = -1.0
+        log_codon_ins = -9.0
+        log_codon_del = -9.0
+        log_mismatch = -3.0
         log_ref_ins = -1.0
         log_ref_del = -1.0
     end
@@ -394,18 +521,27 @@ function quiver2(reference::AbstractString,
         recompute_As = false
         if length(candidates) == 0
             push!(mutations, 0)
-            if batch < length(sequences)
-                if verbose
-                    print(STDERR, "no candidates found. switching off batch mode.\n")
+            if length(current_template) % 3 == 0
+                if batch < length(sequences) && do_full
+                    if verbose
+                        print(STDERR, "no candidates found. switching off batch mode.\n")
+                    end
+                    # start full runs
+                    batch = length(sequences)
+                    recompute_As = true
+                    # TODO: instead of turning off batch mode, try increasing batch size
+                    # TODO: is there some fast way to detect convergence w/o full run?
+                    # TODO: try multiple iterations before changing/disabling batch
+                else
+                    converged = true
+                    break
                 end
-                # start full runs
-                batch = length(sequences)
-                recompute_As = true
-                # TODO: instead of turning off batch mode, try increasing batch size
-                # TODO: is there some fast way to detect convergence w/o full run?
-                # TODO: try multiple iterations before changing/disabling batch
+            elseif log_ref_ins > min_log_ref_ins || log_ref_del > min_log_ref_del
+                # increase indel penalty
+                log_ref_ins = min(log_ref_ins * 2, min_log_ref_ins)
+                log_ref_del = min(log_ref_del * 2, min_log_ref_del)
             else
-                converged = true
+                # give up
                 break
             end
         else
@@ -432,6 +568,7 @@ function quiver2(reference::AbstractString,
             if temp_score < chosen_cands[1].score
                 if verbose
                     print(STDERR, "  rejecting multiple candidates in favor of best\n")
+                    print(STDERR, "  $(chosen_cands[1])\n")
                 end
                 chosen_cands = CandMutation[chosen_cands[1]]
                 current_template = apply_mutations(old_template,
@@ -470,9 +607,8 @@ function quiver2(reference::AbstractString,
         end
         if verbose
             print(STDERR, "  score: $current_score\n")
+            print(STDERR, "  consensus: $(length(current_template))\n")
         end
-        log_ref_ins = min(log_ref_ins * 2, min_log_ref_ins)
-        log_ref_del = min(log_ref_del * 2, min_log_ref_del)
     end
     info = Dict("converged" => converged,
                 "batch_iterations" => batch_iterations,
