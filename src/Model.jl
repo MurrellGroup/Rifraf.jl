@@ -430,13 +430,12 @@ function getcands(template::AbstractString, current_score::Float64,
 end
 
 
-function quiver2(reference::AbstractString,
-                 template::AbstractString,
+function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
                  log_ps::Vector{Vector{Float64}},
                  log_ins::Float64, log_del::Float64;
+                 reference::AbstractString="",
                  codon_moves::Bool=true,
-                 use_ref::Bool=true,
                  log_codon_ins::Float64=-9.0,
                  log_codon_del::Float64=-9.0,
                  log_mismatch::Float64=-3.0,
@@ -496,8 +495,8 @@ function quiver2(reference::AbstractString,
     A_t = BandedArray(Float64, (1, 1), 1)
     B_t = BandedArray(Float64, (1, 1), 1)
 
-    # ignore reference until first convergence
-    enable_ref = false
+    use_ref = length(reference) > 0
+    enable_ref = false  # ignore reference until first convergence
     reference_log_p = log_mismatch * ones(length(reference))
 
     current_template = template
@@ -661,17 +660,18 @@ end
 Alternate quiver2() using BioJulia types.
 
 """
-function quiver2{T<:NucleotideSequence}(reference::DNASequence,
-                                        template::DNASequence,
+function quiver2{T<:NucleotideSequence}(template::DNASequence,
                                         sequences::Vector{T},
                                         log_ps::Vector{Vector{Float64}},
                                         log_ins::Float64, log_del::Float64;
+                                        reference::DNASequence=DNASequence(""),
                                         kwargs...)
     new_reference = convert(AbstractString, reference)
     new_template = convert(AbstractString, template)
     new_sequences = ASCIIString[convert(AbstractString, s) for s in sequences]
-    result, info = quiver2(new_reference, new_template, new_sequences, log_ps,
+    result, info = quiver2(new_template, new_sequences, log_ps,
                            log_ins, log_del;
+                           reference=new_reference,
                            kwargs...)
     return DNASequence(result), info
 end
