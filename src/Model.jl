@@ -449,6 +449,22 @@ function quiver2(reference::AbstractString,
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
     end
+    if log_ins >= 0 ||
+        log_del >= 0 ||
+        log_codon_ins >= 0 ||
+        log_codon_del >= 0 ||
+        log_mismatch >= 0 ||
+        log_ref_ins >= 0 ||
+        log_ref_del >= 0
+        error("penalties must be < 0")
+    end
+
+    if cooling_rate <= 1
+        error("cooling rate must be > 1")
+    end
+    if max_iters < 1
+        error("invalid max iters: $max_iters")
+    end
 
     if verbose > 1
         println(STDERR, "computing initial alignments")
@@ -457,7 +473,7 @@ function quiver2(reference::AbstractString,
     min_log_ref_ins = typemin(Float64)
     min_log_ref_del = typemin(Float64)
 
-    if batch < 0
+    if batch < 0 || batch > length(sequences)
         batch = length(sequences)
     end
     batch = min(batch, length(sequences))
@@ -469,8 +485,6 @@ function quiver2(reference::AbstractString,
         seqs = sequences
         lps = log_ps
     end
-
-    reference_log_p = log_mismatch * ones(length(reference))
 
     As = [forward(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
@@ -484,6 +498,7 @@ function quiver2(reference::AbstractString,
 
     # ignore reference until first convergence
     enable_ref = false
+    reference_log_p = log_mismatch * ones(length(reference))
 
     current_template = template
     if verbose > 1
