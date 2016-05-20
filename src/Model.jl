@@ -414,6 +414,7 @@ function getcands(template::AbstractString, current_score::Float64,
         @process_mutation md
     end
     if use_ref
+        # TODO: make these optional, and test whether they are actually necessary
         mci = CodonInsertion(0, random_codon())
         @process_mutation mci
         for j in 1:len
@@ -435,30 +436,23 @@ function quiver2(reference::AbstractString,
                  log_ps::Vector{Vector{Float64}},
                  log_ins::Float64, log_del::Float64;
                  use_ref::Bool=true,
+                 log_codon_ins::Float64=-9.0,
+                 log_codon_del::Float64=-9.0,
+                 log_mismatch::Float64=-3.0,
+                 log_ref_ins::Float64=-9.0,
+                 log_ref_del::Float64=-9.0,
+                 cooling_rate::Float64=100.0,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, do_full::Bool=false,
-                 max_iters::Int=100, verbose::Bool=false)
+                 max_iters::Int=100, verbose::Int=0)
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
     end
 
-    if verbose
-        print(STDERR, "computing initial alignments\n")
+    if verbose > 1
+        println(STDERR, "computing initial alignments")
     end
 
-    # TODO: do not hardcode
-    log_codon_ins = 0.0
-    log_codon_del = 0.0
-    log_mismatch = 0.0
-    log_ref_ins = 0.0
-    log_ref_del = 0.0
-    if use_ref
-        log_codon_ins = -9.0
-        log_codon_del = -9.0
-        log_mismatch = -3.0
-        log_ref_ins = -1.0
-        log_ref_del = -1.0
-    end
     min_log_ref_ins = typemin(Float64)
     min_log_ref_del = typemin(Float64)
 
@@ -482,18 +476,17 @@ function quiver2(reference::AbstractString,
     Bs = [backward(template, s, p, log_ins, log_del, bandwidth)
           for (s, p) in zip(seqs, lps)]
     current_score = sum([A[end, end] for A in As])
+
+    # will need these later, but do not compute them on the first iteration
     A_t = BandedArray(Float64, (1, 1), 1)
     B_t = BandedArray(Float64, (1, 1), 1)
-    if use_ref
-        A_t = forward_codon(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                            true, log_codon_ins, log_codon_del)
-        B_t = backward_codon(template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                             true, log_codon_ins, log_codon_del)
-        current_score += A_t[end, end]
-    end
+
+    # ignore reference until first convergence
+    enable_ref = false
+
     current_template = template
-    if verbose
-        print(STDERR, "initial score: $current_score\n")
+    if verbose > 1
+        println(STDERR, "initial score: $current_score")
     end
     converged = false
     mutations = Int[]
@@ -501,18 +494,18 @@ function quiver2(reference::AbstractString,
     full_iterations = 0
     for i in 1:max_iters
         if batch < length(sequences)
-            batch_iterations +=1
+            batch_iterations += 1
         else
             full_iterations += 1
         end
         old_template = current_template
         old_score = current_score
-        if verbose
-            print(STDERR, "iteration $i\n")
+        if verbose > 1
+            println(STDERR, "iteration $i")
         end
 
         candidates = getcands(current_template, current_score,
-                              use_ref,
+                              enable_ref,
                               reference, reference_log_p, A_t, B_t,
                               seqs, lps, As, Bs,
                               log_ins, log_del, bandwidth,
@@ -521,10 +514,10 @@ function quiver2(reference::AbstractString,
         recompute_As = false
         if length(candidates) == 0
             push!(mutations, 0)
-            if length(current_template) % 3 == 0
+            if length(current_template) % 3 == 0 || !use_ref
                 if batch < length(sequences) && do_full
-                    if verbose
-                        print(STDERR, "no candidates found. switching off batch mode.\n")
+                    if verbose > 0
+                        println(STDERR, "converged. switching off batch mode and continuing.")
                     end
                     # start full runs
                     batch = length(sequences)
@@ -536,20 +529,30 @@ function quiver2(reference::AbstractString,
                     converged = true
                     break
                 end
+            elseif !enable_ref
+                if verbose > 0
+                    println(STDERR, "no candidates found. enabling reference.")
+                end
+                enable_ref = true
+                recompute_As = true
             elseif log_ref_ins > min_log_ref_ins || log_ref_del > min_log_ref_del
-                # increase indel penalty
-                log_ref_ins = min(log_ref_ins * 2, min_log_ref_ins)
-                log_ref_del = min(log_ref_del * 2, min_log_ref_del)
+                if verbose > 1
+                    println(STDERR, "no candidates found. increasing indel penalties.")
+                end
+                log_ref_ins = max(log_ref_ins * cooling_rate, min_log_ref_ins)
+                log_ref_del = max(log_ref_del * cooling_rate, min_log_ref_del)
             else
-                # give up
+                if verbose > 0
+                    println(STDERR, "no candidates found, and penalties cannot change. giving up.\n")
+                end
                 break
             end
         else
-            if verbose
+            if verbose > 1
                 print(STDERR, "  found $(length(candidates)) candidate mutations.\n")
             end
             chosen_cands = choose_candidates(candidates, min_dist)
-            if verbose
+            if verbose > 1
                 print(STDERR, "  filtered to $(length(chosen_cands)) candidate mutations\n")
             end
             current_template = apply_mutations(old_template,
@@ -558,7 +561,7 @@ function quiver2(reference::AbstractString,
             As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
             temp_score = sum([A[end, end] for A in As])
-            if use_ref
+            if enable_ref
                 A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
                                     true, log_codon_ins, log_codon_del)
                 temp_score += A_t[end, end]
@@ -566,9 +569,8 @@ function quiver2(reference::AbstractString,
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
             if temp_score < chosen_cands[1].score
-                if verbose
+                if verbose > 1
                     print(STDERR, "  rejecting multiple candidates in favor of best\n")
-                    print(STDERR, "  $(chosen_cands[1])\n")
                 end
                 chosen_cands = CandMutation[chosen_cands[1]]
                 current_template = apply_mutations(old_template,
@@ -590,29 +592,38 @@ function quiver2(reference::AbstractString,
         if recompute_As
             As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
                   for (s, p) in zip(seqs, lps)]
-            if use_ref
+            if enable_ref
                 A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
                                     true, log_codon_ins, log_codon_del)
             end
         end
         Bs = [backward(current_template, s, p, log_ins, log_del, bandwidth)
               for (s, p) in zip(seqs, lps)]
-        if use_ref
+        if enable_ref
             B_t = backward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
                                  true, log_codon_ins, log_codon_del)
         end
         current_score = sum([A[end, end] for A in As])
-        if use_ref
+        if enable_ref
             current_score += A_t[end, end]
         end
-        if verbose
+        if verbose > 1
             print(STDERR, "  score: $current_score\n")
-            print(STDERR, "  consensus: $(length(current_template))\n")
         end
     end
+    if verbose > 0
+        print(STDERR, "done. converged: $converged\n")
+    end
+    n_iters = batch_iterations + full_iterations
+    exceeded = n_iters >= max_iters
+    if use_ref && length(current_template) % 3 != 0 && !exceeded && log_ref_ins > min_log_ref_ins && log_ref_del > min_log_ref_del
+        error("this should never happen.")
+    end
+
     info = Dict("converged" => converged,
                 "batch_iterations" => batch_iterations,
                 "full_iterations" => full_iterations,
+                "exceeded_max_iterations" => exceeded,
                 "mutations" => mutations,
                 )
     return current_template, info
@@ -628,8 +639,15 @@ function quiver2{T<:NucleotideSequence}(reference::DNASequence,
                                         log_ps::Vector{Vector{Float64}},
                                         log_ins::Float64, log_del::Float64;
                                         use_ref::Bool=true,
+                                        log_codon_ins::Float64=-9.0,
+                                        log_codon_del::Float64=-9.0,
+                                        log_mismatch::Float64=-3.0,
+                                        log_ref_ins::Float64=-9.0,
+                                        log_ref_del::Float64=-9.0,
+                                        cooling_rate::Float64=100.0,
                                         bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
-                                        max_iters::Int=100, verbose::Bool=false)
+                                        do_full::Bool=false,
+                                        max_iters::Int=100, verbose::Int=0)
     new_reference = convert(AbstractString, reference)
     new_template = convert(AbstractString, template)
     new_sequences = ASCIIString[convert(AbstractString, s) for s in sequences]
@@ -637,6 +655,7 @@ function quiver2{T<:NucleotideSequence}(reference::DNASequence,
                            log_ins, log_del,
                            use_ref=use_ref,
                            bandwidth=bandwidth, min_dist=min_dist, batch=batch,
+                           do_full=do_full,
                            max_iters=max_iters, verbose=verbose)
     return DNASequence(result), info
 end

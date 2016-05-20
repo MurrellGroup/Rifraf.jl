@@ -138,20 +138,20 @@ function test_quiver2()
     t_ins_part = 1.0
     t_del_part = 1.0
 
-    mean_error_rate = 0.1
-    max_error_rate = 0.1
+    mean_error_rate = 0.05
+    max_error_rate = 0.05
     sub_ratio = 1.0 / 7.0
     ins_ratio = 3.0 / 7.0
     del_ratio = 3.0 / 7.0
     error_std = 0.01
 
     n = 100
-    n_mismatch = 0
+    n_wrong = 0
     n_wrong_length = 0
     n_out_frame = 0
 
-    for i in 1:n
-        for use_ref in [true, false]
+    for use_ref in [true, false]
+        for i in 1:n
             reference, template, template_log_p, reads, log_ps, error_rates = sample(n_seqs, ref_len,
                                                                                      template_error_rate,
                                                                                      t_sub_part, t_ins_part, t_del_part,
@@ -166,22 +166,24 @@ function test_quiver2()
                                          log10(del_ratio * mean_error_rate),
                                          use_ref=use_ref,
                                          bandwidth=3, min_dist=9, batch=5,
-                                         max_iters=100,
-                                         verbose=false)
+                                         max_iters=100)
             if length(result) % 3 != 0
                 n_out_frame += 1
-            elseif length(result) != length(template)
+            end
+            if length(result) != length(template)
                 n_wrong_length += 1
-            elseif result != template
-                n_mismatch += 1
+            end
+            if result != template
+                n_wrong += 1
             end
         end
-    end
-    if n_mismatch > 0 || n_wrong_length > 0 || n_out_frame > 0
-        print("out of frame           : $(n_out_frame) / $(n)\n")
-        print("in frame, wrong length : $(n_wrong_length) / $(n)\n")
-        print("mismatched             : $(n_mismatch) / $(n)\n")
-        @test false
+        if n_wrong > 0
+            println("use reference: $use_ref")
+            println("wrong length : $(n_wrong_length) / $(n)")
+            println("out of frame : $(n_out_frame) / $(n)")
+            println("wrong        : $(n_wrong) / $(n)")
+            @test false
+        end
     end
 end
 
