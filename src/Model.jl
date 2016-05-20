@@ -381,7 +381,7 @@ macro process_mutation(m)
 end
 
 function getcands(template::AbstractString, current_score::Float64,
-                  use_ref::Bool,
+                  use_ref, codon_moves::Bool,
                   reference::AbstractString,
                   reference_log_p::Vector{Float64},
                   A_t::BandedArray{Float64},
@@ -413,7 +413,7 @@ function getcands(template::AbstractString, current_score::Float64,
         md = Deletion(j)
         @process_mutation md
     end
-    if use_ref
+    if use_ref && codon_moves
         # TODO: make these optional, and test whether they are actually necessary
         mci = CodonInsertion(0, random_codon())
         @process_mutation mci
@@ -435,6 +435,7 @@ function quiver2(reference::AbstractString,
                  sequences::Vector{ASCIIString},
                  log_ps::Vector{Vector{Float64}},
                  log_ins::Float64, log_del::Float64;
+                 codon_moves::Bool=true,
                  use_ref::Bool=true,
                  log_codon_ins::Float64=-9.0,
                  log_codon_del::Float64=-9.0,
@@ -491,6 +492,7 @@ function quiver2(reference::AbstractString,
     converged = false
     n_single_mutations = Int[]
     n_codon_mutations = Int[]
+    consensus_lengths = Int[]
     n_iterations = 0
     n_full_iterations = 0
     n_ref_iterations = 0
@@ -509,7 +511,7 @@ function quiver2(reference::AbstractString,
         end
 
         candidates = getcands(current_template, current_score,
-                              enable_ref,
+                              enable_ref, codon_moves,
                               reference, reference_log_p, A_t, B_t,
                               seqs, lps, As, Bs,
                               log_ins, log_del, bandwidth,
@@ -588,6 +590,7 @@ function quiver2(reference::AbstractString,
             push!(n_codon_mutations, n_codon)
             push!(n_single_mutations, length(chosen_cands) - n_codon)
         end
+        push!(consensus_lengths, length(current_template))
         if batch < length(sequences)
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
@@ -634,6 +637,7 @@ function quiver2(reference::AbstractString,
                 "exceeded_max_iterations" => exceeded,
                 "n_single_mutations" => n_single_mutations,
                 "n_codon_mutations" => n_codon_mutations,
+                "consensus_lengths" => consensus_lengths,
                 )
     return current_template, info
 end
@@ -647,25 +651,13 @@ function quiver2{T<:NucleotideSequence}(reference::DNASequence,
                                         sequences::Vector{T},
                                         log_ps::Vector{Vector{Float64}},
                                         log_ins::Float64, log_del::Float64;
-                                        use_ref::Bool=true,
-                                        log_codon_ins::Float64=-9.0,
-                                        log_codon_del::Float64=-9.0,
-                                        log_mismatch::Float64=-3.0,
-                                        log_ref_ins::Float64=-9.0,
-                                        log_ref_del::Float64=-9.0,
-                                        cooling_rate::Float64=100.0,
-                                        bandwidth::Int=10, min_dist::Int=9, batch::Int=10,
-                                        do_full::Bool=false,
-                                        max_iters::Int=100, verbose::Int=0)
+                                        kwargs...)
     new_reference = convert(AbstractString, reference)
     new_template = convert(AbstractString, template)
     new_sequences = ASCIIString[convert(AbstractString, s) for s in sequences]
     result, info = quiver2(new_reference, new_template, new_sequences, log_ps,
-                           log_ins, log_del,
-                           use_ref=use_ref,
-                           bandwidth=bandwidth, min_dist=min_dist, batch=batch,
-                           do_full=do_full,
-                           max_iters=max_iters, verbose=verbose)
+                           log_ins, log_del;
+                           kwargs...)
     return DNASequence(result), info
 end
 
