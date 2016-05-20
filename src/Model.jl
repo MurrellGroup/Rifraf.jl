@@ -489,14 +489,18 @@ function quiver2(reference::AbstractString,
         println(STDERR, "initial score: $current_score")
     end
     converged = false
-    mutations = Int[]
-    batch_iterations = 0
-    full_iterations = 0
+    n_single_mutations = Int[]
+    n_codon_mutations = Int[]
+    n_iterations = 0
+    n_full_iterations = 0
+    n_ref_iterations = 0
     for i in 1:max_iters
-        if batch < length(sequences)
-            batch_iterations += 1
-        else
-            full_iterations += 1
+        n_iterations += 1
+        if batch == length(sequences)
+            n_full_iterations += 1
+        end
+        if enable_ref
+            n_ref_iterations += 1
         end
         old_template = current_template
         old_score = current_score
@@ -513,7 +517,8 @@ function quiver2(reference::AbstractString,
                               log_codon_ins, log_codon_del)
         recompute_As = true
         if length(candidates) == 0
-            push!(mutations, 0)
+            push!(n_single_mutations, 0)
+            push!(n_codon_mutations, 0)
             if length(current_template) % 3 == 0 || !use_ref
                 if batch < length(sequences) && do_full
                     if verbose > 0
@@ -578,7 +583,10 @@ function quiver2(reference::AbstractString,
                 # no need to recompute unless batch changes
                 recompute_As = false
             end
-            push!(mutations, length(chosen_cands))
+            n_codon = length(filter(c -> (typeof(c.mutation) == CodonInsertion || typeof(c.mutation) == CodonDeletion),
+                                    chosen_cands))
+            push!(n_codon_mutations, n_codon)
+            push!(n_single_mutations, length(chosen_cands) - n_codon)
         end
         if batch < length(sequences)
             indices = rand(1:length(sequences), batch)
@@ -614,17 +622,18 @@ function quiver2(reference::AbstractString,
     if verbose > 0
         print(STDERR, "done. converged: $converged\n")
     end
-    n_iters = batch_iterations + full_iterations
-    exceeded = n_iters >= max_iters
+    exceeded = n_iterations >= max_iters
     if use_ref && length(current_template) % 3 != 0 && !exceeded && log_ref_ins > min_log_ref_ins && log_ref_del > min_log_ref_del
         error("this should never happen.")
     end
 
     info = Dict("converged" => converged,
-                "batch_iterations" => batch_iterations,
-                "full_iterations" => full_iterations,
+                "n_iterations" => n_iterations,
+                "n_full_iterations" => n_full_iterations,
+                "n_reference_iterations" => n_ref_iterations,
                 "exceeded_max_iterations" => exceeded,
-                "mutations" => mutations,
+                "n_single_mutations" => n_single_mutations,
+                "n_codon_mutations" => n_codon_mutations,
                 )
     return current_template, info
 end
