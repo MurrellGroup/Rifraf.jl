@@ -11,6 +11,11 @@ import Quiver2.QIO
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
+        "--reference"
+        help = "single file, or a pattern to find reference files; must match inputs after sorting"
+        arg_type = AbstractString
+        default = ""
+
         "--prefix"
         help = "prepended to each filename to make label"
         arg_type = AbstractString
@@ -35,6 +40,10 @@ function parse_commandline()
         arg_type = Int
         default = 10
 
+        "--do-full"
+        help = "switch off batch mode after convergence"
+        action = :store_true
+
         "--max-iters"
         help = "maximum iterations before giving up"
         arg_type = Int
@@ -42,7 +51,8 @@ function parse_commandline()
 
         "--verbose", "-v"
         help = "print progress"
-        action = :store_true
+        arg_type = Int
+        default = 0
 
         "log_ins"
         help = "log10 insertion probability"
@@ -61,19 +71,26 @@ function parse_commandline()
     return parse_args(s)
 end
 
-@everywhere function dofile(file, args)
-    if args["verbose"]
-        print(STDERR, "reading sequences from '$(file)'\n")
+@everywhere function dofile(file, reffile, args)
+    if args["verbose"] > 0
+        println(STDERR, "reading sequences from '$(file)'")
+        if length(reffile) > 0
+            println(STDERR, "reading reference from '$(reffile)'")
+        end
     end
+    reference = length(reffile) > 0 ? read_single(reffile) : DNASequence("")
+
     sequences, log_ps = read_fastq(file)
     template = sequences[1]
-    if args["verbose"]
-        print(STDERR, "starting run\n")
+    if args["verbose"] > 0
+        println(STDERR, "starting run")
     end
     consensus, info = quiver2(template, sequences, log_ps,
-                              args["log_ins"], args["log_del"],
+                              args["log_ins"], args["log_del"];
+                              reference=reference,
                               bandwidth=args["bandwidth"], min_dist=args["min-dist"],
-                              batch=args["batch"], max_iters=args["max-iters"],
+                              batch=args["batch"], do_full=args["do-full"],
+                              max_iters=args["max-iters"],
                               verbose=args["verbose"])
     return consensus
 end
@@ -105,15 +122,31 @@ function main()
     if length(infiles) == 0
        return
     end
+    infiles = sort(infiles)
     names = [splitext(basename(f))[1] for f in infiles]
     if length(Set(names)) != length(names)
         error("Files do not have unique names")
     end
 
-    @everywhere function f(x)
-        return dofile(x, args)
+    refpattern = args["reference"]
+    reffiles = []
+    if length(refpattern) > 0
+        if isfile(refpattern)
+            reffiles = [refpattern for i in 1:length(infiles)]
+        else
+            dir, pattern = splitdir(refpattern)
+            reffiles = glob(pattern, dir)
+            if length(reffiles) != length(infiles)
+                error("Wrong number of reference files")
+            end
+            reffiles = sort(reffiles)
+        end
+    else
+        reffiles = ["" for i in 1:length(infiles)]
     end
-    results = pmap((f, a) -> dofile(f, a), infiles, [args for i in 1:length(infiles)])
+
+    repeated_args = [args for i in 1:length(infiles)]
+    results = pmap((f, r, a) -> dofile(f, r, a), infiles, reffiles, repeated_args)
 
     plen = 0
     slen = 0
@@ -124,6 +157,9 @@ function main()
 
     prefix = args["prefix"]
     for i=1:length(results)
+        if typeof(results[i]) == RemoteException
+            throw(results[i])
+        end
         name = names[i]
         if args["keep-unique-name"]
             name = name[plen + 1:end - slen]
