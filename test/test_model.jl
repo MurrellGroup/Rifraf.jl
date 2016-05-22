@@ -1,3 +1,5 @@
+using Bio.Seq
+
 using Quiver2.BandedArrays
 using Quiver2.Sample
 using Quiver2.Model
@@ -129,17 +131,49 @@ function test_random_codon_deletions()
     end
 end
 
+function test_is_inframe()
+    reference = "AAAGGGTTT"
+    ref_log_p = ones(length(reference))
+    ref_log_p = -2.0 * ones(length(reference))
+    log_ins = -5.0
+    log_del = -5.0
+    codon_ins = -2.0
+    codon_del = -2.0
+    bandwidth = 6
+
+    template = "AAACCCGGGTTT"
+    @test Quiver2.Model.is_inframe(false, template, reference,
+                                   ref_log_p, log_ins, log_del,
+                                   bandwidth,
+                                   true,
+                                   codon_ins, codon_del)
+
+    template = "AAACCCGGGTTTT"
+    @test !Quiver2.Model.is_inframe(false, template, reference,
+                                    ref_log_p, log_ins, log_del,
+                                    bandwidth,
+                                    true,
+                                    codon_ins, codon_del)
+
+    template = "AAA"
+    @test Quiver2.Model.is_inframe(true, template, reference,
+                                   ref_log_p, log_ins, log_del,
+                                   bandwidth,
+                                   true,
+                                   codon_ins, codon_del)
+end
+
 function test_quiver2()
     # TODO: can't guarantee this test actually passes, since it is random
-    n_seqs=30
-    ref_len=30
+    n_seqs=10
+    ref_len=90
     template_error_rate = 0.1
     t_sub_part = 8.0
     t_ins_part = 1.0
     t_del_part = 1.0
 
-    mean_error_rate = 0.05
-    max_error_rate = 0.05
+    mean_error_rate = 0.01
+    max_error_rate = 0.01
     sub_ratio = 1.0 / 7.0
     ins_ratio = 3.0 / 7.0
     del_ratio = 3.0 / 7.0
@@ -150,44 +184,48 @@ function test_quiver2()
     n_wrong_length = 0
     n_out_frame = 0
 
-    for use_ref in [true, false]
-        for i in 1:n
-            reference, template, template_log_p, reads, log_ps, error_rates = sample(n_seqs, ref_len,
-                                                                                     template_error_rate,
-                                                                                     t_sub_part, t_ins_part, t_del_part,
-                                                                                     max_error_rate,
-                                                                                     sub_ratio, ins_ratio, del_ratio,
-                                                                                     error_std=error_std,
-                                                                                     error_rate_alpha=3.0, error_rate_beta=1.0)
-            initial_template = reads[1]
-            result, info = Model.quiver2(reference, initial_template, reads,
-                                         log_ps,
-                                         log10(ins_ratio * mean_error_rate),
-                                         log10(del_ratio * mean_error_rate),
-                                         use_ref=use_ref,
-                                         bandwidth=3, min_dist=9, batch=5,
-                                         max_iters=100)
-            if length(result) % 3 != 0
-                n_out_frame += 1
-            end
-            if length(result) != length(template)
-                n_wrong_length += 1
-            end
-            if result != template
-                n_wrong += 1
-            end
+    for i in 1:n
+        use_ref = rand([true, false])
+        allow_stutters = rand([true, false])
+        reference, template, template_log_p, reads, log_ps, error_rates =
+            sample(n_seqs, ref_len,
+                   template_error_rate,
+                   t_sub_part, t_ins_part, t_del_part,
+                   max_error_rate,
+                   sub_ratio, ins_ratio, del_ratio,
+                   error_std=error_std,
+                   error_rate_alpha=3.0, error_rate_beta=1.0)
+        if !use_ref
+            reference = DNASequence("")
         end
-        if n_wrong > 0
-            println("use reference: $use_ref")
-            println("wrong length : $(n_wrong_length) / $(n)")
-            println("out of frame : $(n_out_frame) / $(n)")
-            println("wrong        : $(n_wrong) / $(n)")
-            @test false
+        initial_template = reads[1]
+        result, info = Model.quiver2(initial_template, reads,
+                                     log_ps,
+                                     log10(ins_ratio * mean_error_rate),
+                                     log10(del_ratio * mean_error_rate);
+                                     reference=reference,
+                                     allow_stutters=allow_stutters,
+                                     bandwidth=3, min_dist=9, batch=5,
+                                     max_iters=100)
+        if length(result) % 3 != 0
+            n_out_frame += 1
         end
+        if length(result) != length(template)
+            n_wrong_length += 1
+        end
+        if result != template
+            n_wrong += 1
+        end
+    end
+    if n_wrong > 0
+        println("wrong length : $(n_wrong_length) / $(n)")
+        println("out of frame : $(n_out_frame) / $(n)")
+        println("wrong        : $(n_wrong) / $(n)")
+        @test false
     end
 end
 
-srand(1)
+srand(12345)
 
 test_perfect_forward()
 test_perfect_backward()
@@ -198,4 +236,5 @@ test_random_insertions()
 test_random_codon_insertions()
 test_random_deletions()
 test_random_codon_deletions()
+test_is_inframe()
 test_quiver2()

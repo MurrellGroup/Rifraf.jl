@@ -19,44 +19,91 @@ using Quiver2.Mutations
 
 export quiver2
 
+
+@enum DPMove match=1 ins=2 del=3 codon_ins=4 codon_del=5
+
+const offsets = ([-1, -1],
+                 [-1, 0],
+                 [0, -1],
+                 [-3, 0],
+                 [0, -3])
+
+
+function update_helper(A::BandedArray{Float64}, i::Int, j::Int, move::DPMove,
+                       penalty::Float64, final_score::Float64, final_move::DPMove)
+    offset = offsets[Int(move)]
+    i = i + offset[1]
+    j = j + offset[2]
+    if inband(A, i, j)
+        score = A[i, j] + penalty
+        if score > final_score
+            return score, move
+        end
+    end
+    return final_score, final_move
+end
+
+
 function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
                 log_p::Float64, log_ins::Float64, log_del::Float64,
                 allow_codon_indels::Bool,
                 log_codon_ins::Float64, log_codon_del::Float64)
-    score = typemin(Float64)
-    if inband(A, i - 1, j)
-        # insertion
-        score = max(score, A[i - 1, j] + log_ins)
-    end
-    if inband(A, i, j - 1)
-        # deletion
-        score = max(score, A[i, j - 1] + log_del)
-    end
-    if inband(A, i - 1, j - 1)
-        score = max(score, A[i - 1, j - 1] +( s_base == t_base ? 0.0 : log_p))
-    end
+    result = (typemin(Float64), match)
+    log_match = (s_base == t_base ? 0.0 : log_p)
+    result = update_helper(A, i, j, match, log_match, result...)
+    result = update_helper(A, i, j, ins, log_ins, result...)
+    result = update_helper(A, i, j, del, log_del, result...)
     if allow_codon_indels
-        if i > 3  && inband(A, i - 3, j)
-            # codon insertion
-            score = max(score, A[i - 3, j] + log_codon_ins)
+        if i > 3
+            result = update_helper(A, i, j, codon_ins, log_codon_ins, result...)
         end
-        if j > 3 && inband(A, i, j - 3)
-            # codon deletion
-            score = max(score, A[i, j - 3] + log_codon_del)
+        if j > 3
+            result = update_helper(A, i, j, codon_del, log_codon_del, result...)
         end
     end
-    return score
+    return result
 end
 
-"""
-F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
-"""
-function forward_codon(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                       log_ins::Float64, log_del::Float64, bandwidth::Int,
-                       allow_codon_indels::Bool,
-                       log_codon_ins::Float64, log_codon_del::Float64)
+function backtrace(moves::BandedArray{Int}, t::AbstractString, s::AbstractString)
+    aligned_t = Char[]
+    aligned_s = Char[]
+    i, j = moves.shape
+    while i > 1 || j > 1
+        m = moves[i, j]
+        move = DPMove(m)
+        si = i - 1
+        tj = j - 1
+        if move == match
+            push!(aligned_t, t[tj])
+            push!(aligned_s, s[si])
+        elseif move == ins
+            push!(aligned_t, '-')
+            push!(aligned_s, s[si])
+        elseif move == del
+            push!(aligned_t, t[tj])
+            push!(aligned_s, '-')
+        elseif move == codon_ins
+            append!(aligned_t, ['-', '-', '-'])
+            append!(aligned_s, [s[si], s[si-1], s[si-2]])
+        elseif move == codon_del
+            append!(aligned_t, [t[tj], t[tj-1], t[tj-2]])
+            append!(aligned_s, ['-', '-', '-'])
+        end
+        offset = offsets[m]
+        i += offset[1]
+        j += offset[2]
+    end
+    return join(reverse(aligned_t)), join(reverse(aligned_s))
+end
+
+
+function prepare_array(t::AbstractString, s::AbstractString,
+                       log_p::Vector{Float64},
+                       log_ins::Float64, log_del::Float64,
+                       bandwidth::Int)
+    # FIXME: consider codon moves in initialization
     if length(s) != length(log_p)
         error("sequence length does not match quality score length")
     end
@@ -67,14 +114,66 @@ function forward_codon(t::AbstractString, s::AbstractString, log_p::Vector{Float
     for j = 2:min(size(result)[2], result.h_offset + bandwidth + 1)
         result[1, j] = log_del * (j - 1)
     end
+    return result
+end
+
+
+""" Does some work as forward_codon, but also keeps track of moves
+does backtracing to find best alignment.
+
+"""
+function align(t::AbstractString, s::AbstractString,
+               log_p::Vector{Float64},
+               log_ins::Float64, log_del::Float64, bandwidth::Int,
+               allow_codon_indels::Bool,
+               log_codon_ins::Float64, log_codon_del::Float64)
+    # FIXME: code duplication with forward_codon(). This is done in a
+    # seperate function to keep return type stable and avoid
+    # allocating the `moves` array unnecessarily.
+    result = prepare_array(t, s, log_p, log_ins, log_del, bandwidth)
+    moves = BandedArray(Int, result.shape, bandwidth)
+    for i = 2:min(size(moves)[1], moves.v_offset + bandwidth + 1)
+        moves[i, 1] = Int(ins)
+    end
+    for j = 2:min(size(moves)[2], moves.h_offset + bandwidth + 1)
+        moves[1, j] = Int(del)
+    end
+
     for j = 2:size(result)[2]
         start, stop = row_range(result, j)
         start = max(start, 2)
         for i = start:stop
-            result[i, j] = update(result, i, j, s[i-1], t[j-1],
-                                  log_p[i-1], log_ins, log_del,
-                                  allow_codon_indels,
-                                  log_codon_ins, log_codon_del)
+            x = update(result, i, j, s[i-1], t[j-1],
+                       log_p[i-1], log_ins, log_del,
+                       allow_codon_indels,
+                       log_codon_ins, log_codon_del)
+            result[i, j] = x[1]
+            moves[i, j] = x[2]
+        end
+    end
+    return backtrace(moves, t, s)
+end
+
+
+"""
+F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
+
+"""
+function forward_codon(t::AbstractString, s::AbstractString,
+                       log_p::Vector{Float64},
+                       log_ins::Float64, log_del::Float64, bandwidth::Int,
+                       allow_codon_indels::Bool,
+                       log_codon_ins::Float64, log_codon_del::Float64)
+    result = prepare_array(t, s, log_p, log_ins, log_del, bandwidth)
+    for j = 2:size(result)[2]
+        start, stop = row_range(result, j)
+        start = max(start, 2)
+        for i = start:stop
+            x = update(result, i, j, s[i-1], t[j-1],
+                       log_p[i-1], log_ins, log_del,
+                       allow_codon_indels,
+                       log_codon_ins, log_codon_del)
+            result[i, j] = x[1]
         end
     end
     return result::BandedArray{Float64}
@@ -430,6 +529,43 @@ function getcands(template::AbstractString, current_score::Float64,
 end
 
 
+function only_codon_gaps(s::AbstractString)
+    cur_gap_len = 0
+    for i in 1:length(s)
+        if s[i] == '-'
+            cur_gap_len += 1
+        else
+            if cur_gap_len % 3 != 0
+                return false
+            end
+            cur_gap_len = 0
+        end
+    end
+    return cur_gap_len % 3 == 0
+end
+
+
+function is_inframe(allow_stutters::Bool,
+                    template::AbstractString,
+                    reference::AbstractString,
+                    ref_log_p::Vector{Float64},
+                    log_ref_ins::Float64, log_ref_del::Float64,
+                    bandwidth::Int,
+                    allow_codon_indels::Bool,
+                    log_codon_ins::Float64, log_codon_del::Float64)
+    if allow_stutters
+        return length(template) % 3 == 0
+    end
+    alignment = align(template, reference, ref_log_p,
+                      log_ref_ins, log_ref_del,
+                      bandwidth, allow_codon_indels,
+                      log_codon_ins, log_codon_del)
+    t_aln = alignment[1]
+    r_aln = alignment[2]
+    return only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
+end
+
+
 function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
                  log_ps::Vector{Vector{Float64}},
@@ -441,6 +577,7 @@ function quiver2(template::AbstractString,
                  log_mismatch::Float64=-3.0,
                  log_ref_ins::Float64=-9.0,
                  log_ref_del::Float64=-9.0,
+                 allow_stutters::Bool=false,
                  cooling_rate::Float64=100.0,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, do_full::Bool=false,
@@ -475,14 +612,13 @@ function quiver2(template::AbstractString,
     if batch < 0 || batch > length(sequences)
         batch = length(sequences)
     end
+    seqs = sequences
+    lps = log_ps
     batch = min(batch, length(sequences))
     if batch < length(sequences)
         indices = rand(1:length(sequences), batch)
         seqs = sequences[indices]
         lps = log_ps[indices]
-    else
-        seqs = sequences
-        lps = log_ps
     end
 
     As = [forward(template, s, p, log_ins, log_del, bandwidth)
@@ -535,7 +671,10 @@ function quiver2(template::AbstractString,
         if length(candidates) == 0
             push!(n_single_mutations, 0)
             push!(n_codon_mutations, 0)
-            if length(current_template) % 3 == 0 || !use_ref
+            if !use_ref || is_inframe(allow_stutters,
+                                      current_template, reference, reference_log_p,
+                                      log_ref_ins, log_ref_del, bandwidth,
+                                      true, log_codon_ins, log_codon_del)
                 if batch < length(sequences) && do_full
                     if verbose > 0
                         println(STDERR, "converged. switching off batch mode and continuing.")
@@ -581,7 +720,8 @@ function quiver2(template::AbstractString,
                   for (s, p) in zip(seqs, lps)]
             temp_score = sum([A[end, end] for A in As])
             if enable_ref
-                A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
+                A_t = forward_codon(current_template, reference, reference_log_p,
+                                    log_ref_ins, log_ref_del, bandwidth,
                                     true, log_codon_ins, log_codon_del)
                 temp_score += A_t[end, end]
             end
@@ -640,9 +780,6 @@ function quiver2(template::AbstractString,
         print(STDERR, "done. converged: $converged\n")
     end
     exceeded = n_iterations >= max_iters
-    if use_ref && length(current_template) % 3 != 0 && !exceeded && log_ref_ins > min_log_ref_ins && log_ref_del > min_log_ref_del
-        error("this should never happen.")
-    end
 
     info = Dict("converged" => converged,
                 "n_iterations" => n_iterations,
