@@ -45,7 +45,7 @@ function restore(y, lower, upper)
     return y * (upper - lower) + lower
 end
 
-"""A beta distribution parametrized by mean and standar deviation."""
+"""A beta distribution parametrized by mean and standard deviation."""
 type BetaAlt <: Sampleable{Univariate,Continuous}
     mean::Float64
     std::Float64
