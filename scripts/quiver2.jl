@@ -85,14 +85,13 @@ end
     if args["verbose"] > 0
         println(STDERR, "starting run")
     end
-    consensus, info = quiver2(template, sequences, log_ps,
-                              args["log_ins"], args["log_del"];
-                              reference=reference,
-                              bandwidth=args["bandwidth"], min_dist=args["min-dist"],
-                              batch=args["batch"], do_full=args["do-full"],
-                              max_iters=args["max-iters"],
-                              verbose=args["verbose"])
-    return consensus
+    return quiver2(template, sequences, log_ps,
+                   args["log_ins"], args["log_del"];
+                   reference=reference,
+                   bandwidth=args["bandwidth"], min_dist=args["min-dist"],
+                   batch=args["batch"], do_full=args["do-full"],
+                   max_iters=args["max-iters"],
+                   verbose=args["verbose"])
 end
 
 function common_prefix(strings)
@@ -155,17 +154,26 @@ function main()
 	slen = length(common_suffix(names))
     end
 
+    n_failed = 0
     prefix = args["prefix"]
     for i=1:length(results)
         if typeof(results[i]) == RemoteException
             throw(results[i])
         end
-        name = names[i]
-        if args["keep-unique-name"]
-            name = name[plen + 1:end - slen]
+        consensus, info = results[i]
+        if info["converged"]
+            name = names[i]
+            if args["keep-unique-name"]
+                name = name[plen + 1:end - slen]
+            end
+            label = string(prefix, name)
+            write(STDOUT, Seq.FASTASeqRecord(label, consensus, Seq.FASTAMetadata("")))
+        else
+            n_failed += 1
         end
-        label = string(prefix, name)
-        write(STDOUT, Seq.FASTASeqRecord(label, results[i], Seq.FASTAMetadata("")))
+    end
+    if args["verbose"] > 0
+        println(STDERR, "done. processed $(length(results)). $n_failed failed to converge.")
     end
 end
 
