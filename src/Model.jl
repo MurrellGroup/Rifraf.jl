@@ -40,6 +40,7 @@ type State
     B_t::BandedArray{Float64}
     As::Vector{BandedArray{Float64}}
     Bs::Vector{BandedArray{Float64}}
+    moves::Vector{BandedArray{Int}}
     stage::Stage
     converged::Bool
 end
@@ -116,7 +117,7 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
 end
 
 
-function backtrace(moves::BandedArray{Int}, t::AbstractString, s::AbstractString)
+function backtrace(t::AbstractString, s::AbstractString, moves::BandedArray{Int})
     aligned_t = Char[]
     aligned_s = Char[]
     i, j = moves.shape
@@ -172,11 +173,11 @@ end
 does backtracing to find best alignment.
 
 """
-function align(t::AbstractString, s::AbstractString,
-               log_p::Vector{Float64},
-               penalties::Penalties,
-               bandwidth::Int,
-               allow_codon_indels::Bool)
+function forward_moves(t::AbstractString, s::AbstractString,
+                       log_p::Vector{Float64},
+                       penalties::Penalties,
+                       bandwidth::Int,
+                       allow_codon_indels::Bool)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
@@ -200,7 +201,7 @@ function align(t::AbstractString, s::AbstractString,
             moves[i, j] = x[2]
         end
     end
-    return backtrace(moves, t, s)
+    return result, moves
 end
 
 
@@ -479,6 +480,29 @@ function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
     return final_cands
 end
 
+
+function get_codon_insertions(template::AbstractString,
+                              sequence::AbstractString,
+                              moves::BandedArray{Int})
+    t, s = backtrace(template, sequence, moves)
+    results = CodonInsertion[]
+    bases = Char[]
+    column = 0
+    for i in 1:length(t)
+        if t[i] == '-'
+            push!(bases, s[i])
+            if length(bases) > 2
+                push!(results, CodonInsertion(column, (bases[end-2:end]...)))
+            end
+        else
+            bases = Char[]
+            column += 1
+        end
+    end
+    return results
+end
+
+
 # This macro is used in getcands() for performance reasons, to avoid
 # using a variable of type `Mutation`.
 #
@@ -537,16 +561,18 @@ function getcands(state::State,
         end
     end
     if state.stage == refinement_stage
-        # TODO: propose best codons
-        mci = CodonInsertion(0, random_codon())
-        @process_mutation mci
-        for j in 1:len
-            mci = CodonInsertion(j, random_codon())
-            @process_mutation mci
-            if j < len - 1
-                mcd = CodonDeletion(j)
-                @process_mutation mcd
+        for i in 1:length(state.moves)
+            codon_insertions = get_codon_insertions(state.template,
+                                                    sequences[i],
+                                                    state.moves[i])
+            for j in 1:length(codon_insertions)
+                mci = codon_insertions[j]
+                @process_mutation mci
             end
+        end
+        for j in 1:(len-2)
+            mcd = CodonDeletion(j)
+            @process_mutation mcd
         end
     end
     return candidates
@@ -575,14 +601,19 @@ function is_inframe(check_alignment::Bool,
                     ref_log_p::Vector{Float64},
                     penalties::Penalties,
                     bandwidth::Int)
+    has_right_length = length(template) % 3 == 0
     if !check_alignment
-        return length(template) % 3 == 0
+        return has_right_length
     end
-    alignment = align(template, reference, ref_log_p,
-                      penalties, bandwidth, true)
-    t_aln = alignment[1]
-    r_aln = alignment[2]
-    return only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
+    M, moves = forward_moves(template, reference,
+                             ref_log_p, penalties,
+                             bandwidth, true)
+    t_aln, r_aln = backtrace(template, reference, moves)
+    result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
+    if result && !has_right_length
+        error("template length is not a multiple of three")
+    end
+    return result
 end
 
 
@@ -592,12 +623,13 @@ function initial_state(template, seqs, lps, penalties, bandwidth)
     Bs = [backward(template, s, p, penalties, bandwidth)
           for (s, p) in zip(seqs, lps)]
     score = sum([A[end, end] for A in As])
+    moves = BandedArray{Int}[]
 
     # will need these later, but do not compute them on the first iteration
     A_t = BandedArray(Float64, (1, 1), 1)
     B_t = BandedArray(Float64, (1, 1), 1)
 
-    return State(score, template, A_t, B_t, As, Bs, initial_stage, false)
+    return State(score, template, A_t, B_t, As, Bs, moves, initial_stage, false)
 end
 
 
@@ -727,14 +759,23 @@ function quiver2(template::AbstractString,
             state.template = apply_mutations(old_template,
                                              Mutation[c.mutation
                                                       for c in chosen_cands])
-            state.As = [forward(state.template, s, p, penalties, bandwidth)
-                        for (s, p) in zip(seqs, lps)]
-            temp_score = sum([A[end, end] for A in state.As])
+            if state.stage == refinement_stage
+                pairs = [forward_moves(state.template, s, p, penalties, bandwidth, false)
+                         for (s, p) in zip(seqs, lps)]
+                state.As = [pair[1] for pair in pairs]
+                state.moves = [pair[2] for pair in pairs]
+                temp_score = sum([A[end, end] for A in state.As])
+            else
+                state.As = [forward(state.template, s, p, penalties, bandwidth)
+                            for (s, p) in zip(seqs, lps)]
+                temp_score = sum([A[end, end] for A in state.As])
+            end
             if state.stage > initial_stage
                 state.A_t = forward(state.template, reference, reference_log_p,
                                     ref_penalties, bandwidth, allow_codon_indels=true)
                 temp_score += state.A_t[end, end]
             end
+
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
             if temp_score < chosen_cands[1].score
@@ -762,8 +803,15 @@ function quiver2(template::AbstractString,
             recompute_As = true
         end
         if recompute_As
-            state.As = [forward(state.template, s, p, penalties, bandwidth)
-                        for (s, p) in zip(seqs, lps)]
+            if state.stage == refinement_stage
+                pairs = [forward_moves(state.template, s, p, penalties, bandwidth, false)
+                         for (s, p) in zip(seqs, lps)]
+                state.As = [pair[1] for pair in pairs]
+                state.moves = [pair[2] for pair in pairs]
+            else
+                state.As = [forward(state.template, s, p, penalties, bandwidth)
+                            for (s, p) in zip(seqs, lps)]
+            end
             if state.stage > initial_stage
                 state.A_t = forward(state.template, reference, reference_log_p, ref_penalties,
                                     bandwidth, allow_codon_indels=true)
