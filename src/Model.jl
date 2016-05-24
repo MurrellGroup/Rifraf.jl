@@ -17,7 +17,58 @@ using Quiver2.Sample
 using Quiver2.BandedArrays
 using Quiver2.Mutations
 
-export quiver2
+export quiver2, Penalties
+
+# initial_stage:
+#   - do not use reference.
+#   - propose mutations and single indels.
+# frame_correction_stage:
+#   - use reference.
+#   - propose single indels and mutations.
+#   - increase reference single indel penalties.
+# refinement_stage:
+#   - use reference.
+#   - propose mutations and codon indels.
+#   - maximize reference single indel penalties.
+
+@enum Stage initial_stage=1 frame_correction_stage=2 refinement_stage=3
+
+type State
+    score::Float64
+    template::AbstractString
+    A_t::BandedArray{Float64}
+    B_t::BandedArray{Float64}
+    As::Vector{BandedArray{Float64}}
+    Bs::Vector{BandedArray{Float64}}
+    stage::Stage
+    converged::Bool
+end
+
+
+immutable Penalties
+    ins::Float64
+    del::Float64
+    codon_ins::Float64
+    codon_del::Float64
+end
+
+
+function Penalties(ins, del, codon_ins, codon_del)
+    if ins >= 0 || del >= 0 || codon_ins >= 0 || codon_del >= 0
+        error("penalties must be < 0")
+    end
+    return Penalties()
+end
+
+
+function Penalties(ins, del)
+    return Penalties(ins, del, typemin(Float64), typemin(Float64))
+end
+
+
+
+const default_penalties = Penalties(-2.0, -2.0)
+const default_ref_penalties = Penalties(-9.0, -9.0, -9.0, -9.0)
 
 
 @enum DPMove match=1 ins=2 del=3 codon_ins=4 codon_del=5
@@ -46,20 +97,19 @@ end
 
 function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
-                log_p::Float64, log_ins::Float64, log_del::Float64,
-                allow_codon_indels::Bool,
-                log_codon_ins::Float64, log_codon_del::Float64)
+                log_p::Float64, penalties::Penalties,
+                allow_codon_indels::Bool)
     result = (typemin(Float64), match)
     log_match = (s_base == t_base ? 0.0 : log_p)
     result = update_helper(A, i, j, match, log_match, result...)
-    result = update_helper(A, i, j, ins, log_ins, result...)
-    result = update_helper(A, i, j, del, log_del, result...)
+    result = update_helper(A, i, j, ins, penalties.ins, result...)
+    result = update_helper(A, i, j, del, penalties.del, result...)
     if allow_codon_indels
         if i > 3
-            result = update_helper(A, i, j, codon_ins, log_codon_ins, result...)
+            result = update_helper(A, i, j, codon_ins, penalties.codon_ins, result...)
         end
         if j > 3
-            result = update_helper(A, i, j, codon_del, log_codon_del, result...)
+            result = update_helper(A, i, j, codon_del, penalties.codon_del, result...)
         end
     end
     return result
@@ -101,7 +151,7 @@ end
 
 function prepare_array(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
-                       log_ins::Float64, log_del::Float64,
+                       penalties::Penalties,
                        bandwidth::Int)
     # FIXME: consider codon moves in initialization
     if length(s) != length(log_p)
@@ -109,10 +159,10 @@ function prepare_array(t::AbstractString, s::AbstractString,
     end
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
-        result[i, 1] = log_ins * (i - 1)
+        result[i, 1] = penalties.ins * (i - 1)
     end
     for j = 2:min(size(result)[2], result.h_offset + bandwidth + 1)
-        result[1, j] = log_del * (j - 1)
+        result[1, j] = penalties.del * (j - 1)
     end
     return result
 end
@@ -124,13 +174,13 @@ does backtracing to find best alignment.
 """
 function align(t::AbstractString, s::AbstractString,
                log_p::Vector{Float64},
-               log_ins::Float64, log_del::Float64, bandwidth::Int,
-               allow_codon_indels::Bool,
-               log_codon_ins::Float64, log_codon_del::Float64)
+               penalties::Penalties,
+               bandwidth::Int,
+               allow_codon_indels::Bool)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
-    result = prepare_array(t, s, log_p, log_ins, log_del, bandwidth)
+    result = prepare_array(t, s, log_p, penalties, bandwidth)
     moves = BandedArray(Int, result.shape, bandwidth)
     for i = 2:min(size(moves)[1], moves.v_offset + bandwidth + 1)
         moves[i, 1] = Int(ins)
@@ -144,9 +194,8 @@ function align(t::AbstractString, s::AbstractString,
         start = max(start, 2)
         for i = start:stop
             x = update(result, i, j, s[i-1], t[j-1],
-                       log_p[i-1], log_ins, log_del,
-                       allow_codon_indels,
-                       log_codon_ins, log_codon_del)
+                       log_p[i-1], penalties,
+                       allow_codon_indels)
             result[i, j] = x[1]
             moves[i, j] = x[2]
         end
@@ -159,51 +208,41 @@ end
 F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
-function forward_codon(t::AbstractString, s::AbstractString,
-                       log_p::Vector{Float64},
-                       log_ins::Float64, log_del::Float64, bandwidth::Int,
-                       allow_codon_indels::Bool,
-                       log_codon_ins::Float64, log_codon_del::Float64)
-    result = prepare_array(t, s, log_p, log_ins, log_del, bandwidth)
+function forward(t::AbstractString, s::AbstractString,
+                 log_p::Vector{Float64},
+                 penalties::Penalties,
+                 bandwidth::Int;
+                 allow_codon_indels::Bool=false)
+    result = prepare_array(t, s, log_p, penalties, bandwidth)
     for j = 2:size(result)[2]
         start, stop = row_range(result, j)
         start = max(start, 2)
         for i = start:stop
             x = update(result, i, j, s[i-1], t[j-1],
-                       log_p[i-1], log_ins, log_del,
-                       allow_codon_indels,
-                       log_codon_ins, log_codon_del)
+                       log_p[i-1], penalties,
+                       allow_codon_indels)
             result[i, j] = x[1]
         end
     end
     return result::BandedArray{Float64}
 end
 
-function forward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                 log_ins::Float64, log_del::Float64, bandwidth::Int)
-    return forward_codon(t, s, log_p, log_ins, log_del, bandwidth, false, 0.0, 0.0)
-end
 
 """
 B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
-function backward_codon(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                        log_ins::Float64, log_del::Float64, bandwidth::Int,
-                        allow_codon_indels::Bool,
-                        log_codon_ins::Float64, log_codon_del::Float64)
+function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
+                  penalties::Penalties,
+                  bandwidth::Int;
+                  allow_codon_indels::Bool=false)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
     t = reverse(t)
-    result = forward_codon(t, s, log_p, log_ins, log_del, bandwidth,
-                           allow_codon_indels, log_codon_ins, log_codon_del)
+    result = forward(t, s, log_p, penalties, bandwidth; allow_codon_indels=allow_codon_indels)
     return flip(result)
 end
 
-function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
-                  log_ins::Float64, log_del::Float64, bandwidth::Int)
-    return backward_codon(t, s, log_p, log_ins, log_del, bandwidth, false, 0.0, 0.0)
-end
 
 function equal_ranges(a_range::Tuple{Int64,Int64},
                       b_range::Tuple{Int64,Int64})
@@ -229,12 +268,8 @@ end
 end
 
 function score_mutation(mutation::Union{Deletion,CodonDeletion},
-                        template::AbstractString,
-                        seq::AbstractString, log_p::Vector{Float64},
                         A::BandedArray{Float64}, B::BandedArray{Float64},
-                        log_ins::Float64, log_del::Float64, bandwidth::Int,
-                        allow_codon_indels::Bool,
-                        log_codon_ins::Float64, log_codon_del::Float64)
+                        args...)
     offset = typeof(mutation) == Deletion ? 1 : 3
     aj = mutation.pos           # column before base to delete (new last column before change)
     bj = mutation.pos + offset  # column after bases to delete
@@ -248,12 +283,11 @@ function score_mutation(mutation::Union{Deletion,CodonDeletion},
 end
 
 function score_mutation(mutation::Union{Insertion,Substitution},
+                        A::BandedArray{Float64}, B::BandedArray{Float64},
                         template::AbstractString,
                         seq::AbstractString, log_p::Vector{Float64},
-                        A::BandedArray{Float64}, B::BandedArray{Float64},
-                        log_ins::Float64, log_del::Float64, bandwidth::Int,
-                        allow_codon_indels::Bool,
-                        log_codon_ins::Float64, log_codon_del::Float64)
+                        penalties::Penalties,
+                        allow_codon_indels::Bool)
     bj = mutation.pos + 1 # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     b_start, b_stop = row_range(B, bj)  # row range of B column
@@ -290,7 +324,7 @@ function score_mutation(mutation::Union{Insertion,Substitution},
         scores[1] = typemin(Float64)
         if i > 1
             # insertion
-            scores[1] = max(scores[1], scores[2] + log_ins)
+            scores[1] = max(scores[1], scores[2] + penalties.ins)
         end
         if prev_start < real_i <= (prev_stop + 1)
             # (mis)match
@@ -298,16 +332,16 @@ function score_mutation(mutation::Union{Insertion,Substitution},
         end
         if prev_start <= real_i <= prev_stop
             # deletion
-            scores[1] = max(scores[1], A[real_i, ajprev] + log_del)
+            scores[1] = max(scores[1], A[real_i, ajprev] + penalties.del)
         end
         if allow_codon_indels
             if i > 3
                 # insertion
-                scores[1] = max(scores[1], scores[4] + log_codon_ins)
+                scores[1] = max(scores[1], scores[4] + penalties.codon_ins)
             end
             if ajprev3 > 0 && (prev3_start <= real_i <= prev3_stop) && inband(A, real_i, ajprev3)
                 # deletion
-                scores[1] = max(scores[1], A[real_i, ajprev-2] + log_codon_del)
+                scores[1] = max(scores[1], A[real_i, ajprev-2] + penalties.codon_del)
             end
         end
         b_i = i  #  this is okay because we've chosen aj so it has the same range as bj
@@ -323,9 +357,8 @@ function compute_subcol(row_start, row_stop,
                         prev3, prev3_start, prev3_stop,
                         has_prev3,
                         base, seq, log_p,
-                        log_ins, log_del,
-                        allow_codon_indels,
-                        log_codon_ins, log_codon_del)
+                        penalties,
+                        allow_codon_indels)
     col = typemin(Float64) * ones(row_stop - row_start + 1)
     offset = 1 - (row_start - prev_start)
     for i in 1:length(col)
@@ -334,7 +367,7 @@ function compute_subcol(row_start, row_stop,
         prev_i = i - offset + 1 # position in `prev` matching i
         if i > 1
             # insertion
-            col[i] = max(col[i], col[i-1] + log_ins)
+            col[i] = max(col[i], col[i-1] + penalties.ins)
         end
         if prev_start < real_i <= (prev_stop + 1)
             # (mis)match
@@ -342,17 +375,17 @@ function compute_subcol(row_start, row_stop,
         end
         if prev_start <= real_i <= prev_stop
             # deletion
-            col[i] = max(col[i], prev[prev_i] + log_del)
+            col[i] = max(col[i], prev[prev_i] + penalties.del)
         end
         if allow_codon_indels
             if i > 3
                 # insertion
-                col[i] = max(col[i], col[i-3] + log_codon_ins)
+                col[i] = max(col[i], col[i-3] + penalties.codon_ins)
             end
             if has_prev3 && prev3_start <= real_i <= prev3_stop
                 # deletion
                 prev3_i = real_i - prev3_start + 1
-                col[i] = max(col[i], prev3[prev3_i] + log_codon_del)
+                col[i] = max(col[i], prev3[prev3_i] + penalties.codon_del)
             end
         end
     end
@@ -360,12 +393,11 @@ function compute_subcol(row_start, row_stop,
 end
 
 function score_mutation(mutation::CodonInsertion,
+                        A::BandedArray{Float64}, B::BandedArray{Float64},
                         template::AbstractString,
                         seq::AbstractString, log_p::Vector{Float64},
-                        A::BandedArray{Float64}, B::BandedArray{Float64},
-                        log_ins::Float64, log_del::Float64, bandwidth::Int,
-                        allow_codon_indels::Bool,
-                        log_codon_ins::Float64, log_codon_del::Float64)
+                        penalties::Penalties,
+                        allow_codon_indels::Bool)
     bj = mutation.pos + 1 # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     b_start, b_stop = row_range(B, bj)  # row range of B column
@@ -398,11 +430,8 @@ function score_mutation(mutation::CodonInsertion,
                                  prev3, prev3_start, prev3_stop,
                                  has_prev3,
                                  mutation.bases[1], seq, log_p,
-                                 log_ins,
-                                 log_del,
-                                 allow_codon_indels,
-                                 log_codon_ins,
-                                 log_codon_del)
+                                 penalties,
+                                 allow_codon_indels)
 
     ajprev3 = ajprev - 1
     if ajprev3 > 0
@@ -415,11 +444,8 @@ function score_mutation(mutation::CodonInsertion,
                                  prev3, prev3_start, prev3_stop,
                                  has_prev3,
                                  mutation.bases[2], seq, log_p,
-                                 log_ins,
-                                 log_del,
-                                 allow_codon_indels,
-                                 log_codon_ins,
-                                 log_codon_del)
+                                 penalties,
+                                 allow_codon_indels)
 
     ajprev3 = ajprev
     if ajprev3 > 0
@@ -432,11 +458,8 @@ function score_mutation(mutation::CodonInsertion,
                                  prev3, prev3_start, prev3_stop,
                                  has_prev3,
                                  mutation.bases[3], seq, log_p,
-                                 log_ins,
-                                 log_del,
-                                 allow_codon_indels,
-                                 log_codon_ins,
-                                 log_codon_del)
+                                 penalties,
+                                 allow_codon_indels)
 
     result = maximum(Acols[:, end] + Bcol)
     return result
@@ -464,56 +487,57 @@ macro process_mutation(m)
     return quote
         score = 0.0
         for si in 1:length(sequences)
-            score += score_mutation($m, template, sequences[si], log_ps[si],
-                                    As[si], Bs[si], log_ins, log_del, bandwidth,
-                                    false, log_codon_ins, log_codon_del)
+            score += score_mutation($m, state.As[si], state.Bs[si], state.template,
+                                    sequences[si], log_ps[si],
+                                    penalties, false)
         end
-        if use_ref
-            score += score_mutation($m, template, reference, reference_log_p,
-                                    A_t, B_t, log_ref_ins, log_ref_del, bandwidth,
-                                    true, log_codon_ins, log_codon_del)
+        if state.stage > initial_stage
+            score += score_mutation($m, state.A_t, state.B_t, state.template,
+                                    reference, reference_log_p,
+                                    ref_penalties, true)
+
         end
-        if score > current_score
+        if score > state.score
             push!(candidates, CandMutation($m, score))
         end
     end
 end
 
-function getcands(template::AbstractString, current_score::Float64,
-                  use_ref, codon_moves::Bool,
-                  reference::AbstractString,
-                  reference_log_p::Vector{Float64},
-                  A_t::BandedArray{Float64},
-                  B_t::BandedArray{Float64},
+function getcands(state::State,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
-                  As::Vector{BandedArray{Float64}},
-                  Bs::Vector{BandedArray{Float64}},
-                  log_ins::Float64, log_del::Float64, bandwidth::Int,
-                  log_ref_ins::Float64, log_ref_del::Float64,
-                  log_codon_ins::Float64, log_codon_del::Float64)
-    len = length(template)
+                  penalties::Penalties,
+                  reference::AbstractString,
+                  reference_log_p::Vector{Float64},
+                  ref_penalties::Penalties,
+                  bandwidth::Int)
+    len = length(state.template)
     candidates = CandMutation[]
     # insertion at beginning
-    for base in "ACGT"
-        mi = Insertion(0, base)
-        @process_mutation mi
+    if state.stage != refinement_stage
+        for base in "ACGT"
+            mi = Insertion(0, base)
+            @process_mutation mi
+        end
     end
     for j in 1:len
         for base in "ACGT"
-            mi = Insertion(j, base)
-            @process_mutation mi
-            if template[j] == base
-                continue
+            if state.stage != refinement_stage
+                mi = Insertion(j, base)
+                @process_mutation mi
             end
-            ms = Substitution(j, base)
-            @process_mutation ms
+            if state.template[j] != base
+                ms = Substitution(j, base)
+                @process_mutation ms
+            end
         end
-        md = Deletion(j)
-        @process_mutation md
+        if state.stage != refinement_stage
+            md = Deletion(j)
+            @process_mutation md
+        end
     end
-    if use_ref && codon_moves
-        # TODO: make these optional, and test whether they are actually necessary
+    if state.stage == refinement_stage
+        # TODO: propose best codons
         mci = CodonInsertion(0, random_codon())
         @process_mutation mci
         for j in 1:len
@@ -545,54 +569,52 @@ function only_codon_gaps(s::AbstractString)
 end
 
 
-function is_inframe(allow_stutters::Bool,
+function is_inframe(check_alignment::Bool,
                     template::AbstractString,
                     reference::AbstractString,
                     ref_log_p::Vector{Float64},
-                    log_ref_ins::Float64, log_ref_del::Float64,
-                    bandwidth::Int,
-                    allow_codon_indels::Bool,
-                    log_codon_ins::Float64, log_codon_del::Float64)
-    if allow_stutters
+                    penalties::Penalties,
+                    bandwidth::Int)
+    if !check_alignment
         return length(template) % 3 == 0
     end
     alignment = align(template, reference, ref_log_p,
-                      log_ref_ins, log_ref_del,
-                      bandwidth, allow_codon_indels,
-                      log_codon_ins, log_codon_del)
+                      penalties, bandwidth, true)
     t_aln = alignment[1]
     r_aln = alignment[2]
     return only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
 end
 
 
+function initial_state(template, seqs, lps, penalties, bandwidth)
+    As = [forward(template, s, p, penalties, bandwidth)
+          for (s, p) in zip(seqs, lps)]
+    Bs = [backward(template, s, p, penalties, bandwidth)
+          for (s, p) in zip(seqs, lps)]
+    score = sum([A[end, end] for A in As])
+
+    # will need these later, but do not compute them on the first iteration
+    A_t = BandedArray(Float64, (1, 1), 1)
+    B_t = BandedArray(Float64, (1, 1), 1)
+
+    return State(score, template, A_t, B_t, As, Bs, initial_stage, false)
+end
+
+
 function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
-                 log_ps::Vector{Vector{Float64}},
-                 log_ins::Float64, log_del::Float64;
+                 log_ps::Vector{Vector{Float64}};
                  reference::AbstractString="",
-                 codon_moves::Bool=true,
-                 log_codon_ins::Float64=-9.0,
-                 log_codon_del::Float64=-9.0,
-                 log_mismatch::Float64=-3.0,
-                 log_ref_ins::Float64=-9.0,
-                 log_ref_del::Float64=-9.0,
-                 allow_stutters::Bool=false,
+                 penalties::Penalties=default_penalties,
+                 ref_penalties::Penalties=default_ref_penalties,
+                 ref_mismatch::Float64=-3.0,
+                 check_alignment::Bool=true,
                  cooling_rate::Float64=100.0,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, do_full::Bool=false,
                  max_iters::Int=100, verbose::Int=0)
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
-    end
-    if log_ins >= 0 ||
-        log_del >= 0 ||
-        log_codon_ins >= 0 ||
-        log_codon_del >= 0 ||
-        log_mismatch >= 0 ||
-        log_ref_ins >= 0 ||
-        log_ref_del >= 0
-        error("penalties must be < 0")
     end
 
     if cooling_rate <= 1
@@ -606,104 +628,93 @@ function quiver2(template::AbstractString,
         println(STDERR, "computing initial alignments")
     end
 
-    min_log_ref_ins = typemin(Float64)
-    min_log_ref_del = typemin(Float64)
+    if ref_mismatch >= 0
+        error("reference mismatch penalty must be less than 0")
+    end
 
     if batch < 0 || batch > length(sequences)
         batch = length(sequences)
     end
     seqs = sequences
     lps = log_ps
-    batch = min(batch, length(sequences))
     if batch < length(sequences)
         indices = rand(1:length(sequences), batch)
         seqs = sequences[indices]
         lps = log_ps[indices]
     end
 
-    As = [forward(template, s, p, log_ins, log_del, bandwidth)
-          for (s, p) in zip(seqs, lps)]
-    Bs = [backward(template, s, p, log_ins, log_del, bandwidth)
-          for (s, p) in zip(seqs, lps)]
-    current_score = sum([A[end, end] for A in As])
+    state = initial_state(template, seqs, lps, penalties, bandwidth)
+    empty_ref = length(reference) == 0
+    reference_log_p = ref_mismatch * ones(length(reference))
 
-    # will need these later, but do not compute them on the first iteration
-    A_t = BandedArray(Float64, (1, 1), 1)
-    B_t = BandedArray(Float64, (1, 1), 1)
+    min_ref_ins = typemin(Float64)
+    min_ref_del = typemin(Float64)
 
-    use_ref = length(reference) > 0
-    enable_ref = false  # ignore reference until first convergence
-    reference_log_p = log_mismatch * ones(length(reference))
-
-    current_template = template
     if verbose > 1
-        println(STDERR, "initial score: $current_score")
+        println(STDERR, "initial score: $(state.score)")
     end
-    converged = false
-    n_single_mutations = Int[]
-    n_codon_mutations = Int[]
+    n_mutations = Vector{Int}[]
     consensus_lengths = Int[]
-    n_iterations = 0
-    n_full_iterations = 0
-    n_ref_iterations = 0
+
+    stage_iterations = zeros(Int, Int(typemax(Stage)))
     for i in 1:max_iters
-        n_iterations += 1
-        if batch == length(sequences)
-            n_full_iterations += 1
-        end
-        if enable_ref
-            n_ref_iterations += 1
-        end
-        old_template = current_template
-        old_score = current_score
+        stage_iterations[Int(state.stage)] += 1
+        old_template = state.template
+        old_score = state.score
         if verbose > 1
             println(STDERR, "iteration $i")
         end
 
-        candidates = getcands(current_template, current_score,
-                              enable_ref, codon_moves,
-                              reference, reference_log_p, A_t, B_t,
-                              seqs, lps, As, Bs,
-                              log_ins, log_del, bandwidth,
-                              log_ref_ins, log_ref_del,
-                              log_codon_ins, log_codon_del)
+        candidates = getcands(state, seqs, lps, penalties,
+                              reference, reference_log_p, ref_penalties,
+                              bandwidth)
+
         recompute_As = true
         if length(candidates) == 0
-            push!(n_single_mutations, 0)
-            push!(n_codon_mutations, 0)
-            if !use_ref || is_inframe(allow_stutters,
-                                      current_template, reference, reference_log_p,
-                                      log_ref_ins, log_ref_del, bandwidth,
-                                      true, log_codon_ins, log_codon_del)
-                if batch < length(sequences) && do_full
-                    if verbose > 0
-                        println(STDERR, "converged. switching off batch mode and continuing.")
-                    end
-                    # start full runs
-                    batch = length(sequences)
-                    # TODO: instead of turning off batch mode, try increasing batch size
-                    # TODO: is there some fast way to detect convergence w/o full run?
-                    # TODO: try multiple iterations before changing/disabling batch
-                else
-                    converged = true
+            push!(n_mutations, zeros(Int, Int(typemax(DPMove))))
+            inframe = false
+            if !empty_ref
+                inframe = is_inframe(check_alignment, state.template,
+                                     reference, reference_log_p,
+                                     ref_penalties, bandwidth)
+            end
+            if state.stage == initial_stage
+                if empty_ref
+                    state.converged = true
                     break
                 end
-            elseif !enable_ref
-                if verbose > 0
-                    println(STDERR, "no candidates found. enabling reference.")
+                if inframe
+                    state.stage = refinement_stage
+                    ref_penalties = Penalties(min_ref_ins,
+                                              min_ref_del,
+                                              ref_penalties.codon_ins,
+                                              ref_penalties.codon_del)
+                else
+                    state.stage = frame_correction_stage
                 end
-                enable_ref = true
-            elseif log_ref_ins > min_log_ref_ins || log_ref_del > min_log_ref_del
-                if verbose > 1
-                    println(STDERR, "no candidates found. increasing indel penalties.")
+            elseif state.stage == frame_correction_stage
+                if inframe
+                    state.stage = refinement_stage
+                    ref_penalties = Penalties(min_ref_ins,
+                                              min_ref_del,
+                                              ref_penalties.codon_ins,
+                                              ref_penalties.codon_del)
+                elseif ref_penalties.ins > min_ref_ins || ref_penalties.del > min_ref_del
+                    ref_penalties = Penalties(max(ref_penalties.ins * cooling_rate, min_ref_ins),
+                                              max(ref_penalties.del * cooling_rate, min_ref_del),
+                                              ref_penalties.codon_ins,
+                                              ref_penalties.codon_del)
+                else
+                    # cannot increase penalties any more. give up.
+                    break
                 end
-                log_ref_ins = max(log_ref_ins * cooling_rate, min_log_ref_ins)
-                log_ref_del = max(log_ref_del * cooling_rate, min_log_ref_del)
-            else
-                if verbose > 0
-                    println(STDERR, "no candidates found, and penalties cannot change. giving up.\n")
+            elseif state.stage == refinement_stage
+                if inframe
+                    state.converged = true
                 end
                 break
+            else
+                error("unknown stage: $(state.stage)")
             end
         else
             if verbose > 1
@@ -713,17 +724,16 @@ function quiver2(template::AbstractString,
             if verbose > 1
                 print(STDERR, "  filtered to $(length(chosen_cands)) candidate mutations\n")
             end
-            current_template = apply_mutations(old_template,
-                                               Mutation[c.mutation
-                                                        for c in chosen_cands])
-            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
-                  for (s, p) in zip(seqs, lps)]
-            temp_score = sum([A[end, end] for A in As])
-            if enable_ref
-                A_t = forward_codon(current_template, reference, reference_log_p,
-                                    log_ref_ins, log_ref_del, bandwidth,
-                                    true, log_codon_ins, log_codon_del)
-                temp_score += A_t[end, end]
+            state.template = apply_mutations(old_template,
+                                             Mutation[c.mutation
+                                                      for c in chosen_cands])
+            state.As = [forward(state.template, s, p, penalties, bandwidth)
+                        for (s, p) in zip(seqs, lps)]
+            temp_score = sum([A[end, end] for A in state.As])
+            if state.stage > initial_stage
+                state.A_t = forward(state.template, reference, reference_log_p,
+                                    ref_penalties, bandwidth, allow_codon_indels=true)
+                temp_score += state.A_t[end, end]
             end
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
@@ -732,65 +742,64 @@ function quiver2(template::AbstractString,
                     print(STDERR, "  rejecting multiple candidates in favor of best\n")
                 end
                 chosen_cands = CandMutation[chosen_cands[1]]
-                current_template = apply_mutations(old_template,
-                                                   Mutation[c.mutation
-                                                            for c in chosen_cands])
+                state.template = apply_mutations(old_template,
+                                                 Mutation[c.mutation
+                                                          for c in chosen_cands])
             else
                 # no need to recompute unless batch changes
                 recompute_As = false
             end
-            n_codon = length(filter(c -> (typeof(c.mutation) == CodonInsertion || typeof(c.mutation) == CodonDeletion),
-                                    chosen_cands))
-            push!(n_codon_mutations, n_codon)
-            push!(n_single_mutations, length(chosen_cands) - n_codon)
+            mutation_counts = [length(filter(c -> (typeof(c.mutation) == t),
+                                             chosen_cands))
+                               for t in [Substitution, Insertion, Deletion, CodonInsertion, CodonDeletion]]
+            push!(n_mutations, mutation_counts)
         end
-        push!(consensus_lengths, length(current_template))
+        push!(consensus_lengths, length(state.template))
         if batch < length(sequences)
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
             lps = log_ps[indices]
             recompute_As = true
-        else
-            seqs = sequences
-            lps = log_ps
         end
         if recompute_As
-            As = [forward(current_template, s, p, log_ins, log_del, bandwidth)
-                  for (s, p) in zip(seqs, lps)]
-            if enable_ref
-                A_t = forward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                                    true, log_codon_ins, log_codon_del)
+            state.As = [forward(state.template, s, p, penalties, bandwidth)
+                        for (s, p) in zip(seqs, lps)]
+            if state.stage > initial_stage
+                state.A_t = forward(state.template, reference, reference_log_p, ref_penalties,
+                                    bandwidth, allow_codon_indels=true)
             end
         end
-        Bs = [backward(current_template, s, p, log_ins, log_del, bandwidth)
-              for (s, p) in zip(seqs, lps)]
-        if enable_ref
-            B_t = backward_codon(current_template, reference, reference_log_p, log_ref_ins, log_ref_del, bandwidth,
-                                 true, log_codon_ins, log_codon_del)
+        state.Bs = [backward(state.template, s, p, penalties, bandwidth)
+                    for (s, p) in zip(seqs, lps)]
+        if state.stage > initial_stage
+            state.B_t = backward(state.template, reference, reference_log_p, ref_penalties, bandwidth,
+                                 allow_codon_indels=true)
         end
-        current_score = sum([A[end, end] for A in As])
-        if enable_ref
-            current_score += A_t[end, end]
+        state.score = sum([A[end, end] for A in state.As])
+        if state.stage > initial_stage
+            state.score += state.A_t[end, end]
         end
+        if state.score == typemin(Float64)
+            println(state.A_t[end, end])
+        end
+
         if verbose > 1
-            print(STDERR, "  score: $current_score\n")
+            print(STDERR, "  score: $(state.score)\n")
         end
     end
     if verbose > 0
-        print(STDERR, "done. converged: $converged\n")
+        print(STDERR, "done. converged: $state.converged\n")
     end
-    exceeded = n_iterations >= max_iters
+    push!(consensus_lengths, length(state.template))
+    exceeded = sum(stage_iterations) >= max_iters
 
-    info = Dict("converged" => converged,
-                "n_iterations" => n_iterations,
-                "n_full_iterations" => n_full_iterations,
-                "n_reference_iterations" => n_ref_iterations,
+    info = Dict("converged" => state.converged,
+                "stage_iterations" => stage_iterations,
                 "exceeded_max_iterations" => exceeded,
-                "n_single_mutations" => n_single_mutations,
-                "n_codon_mutations" => n_codon_mutations,
+                "n_mutations" => n_mutations,
                 "consensus_lengths" => consensus_lengths,
                 )
-    return current_template, info
+    return state.template, info
 end
 
 """
@@ -799,15 +808,13 @@ Alternate quiver2() using BioJulia types.
 """
 function quiver2{T<:NucleotideSequence}(template::DNASequence,
                                         sequences::Vector{T},
-                                        log_ps::Vector{Vector{Float64}},
-                                        log_ins::Float64, log_del::Float64;
+                                        log_ps::Vector{Vector{Float64}};
                                         reference::DNASequence=DNASequence(""),
                                         kwargs...)
     new_reference = convert(AbstractString, reference)
     new_template = convert(AbstractString, template)
     new_sequences = ASCIIString[convert(AbstractString, s) for s in sequences]
-    result, info = quiver2(new_template, new_sequences, log_ps,
-                           log_ins, log_del;
+    result, info = quiver2(new_template, new_sequences, log_ps;
                            reference=new_reference,
                            kwargs...)
     return DNASequence(result), info

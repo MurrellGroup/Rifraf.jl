@@ -7,14 +7,15 @@ using Quiver2.Mutations
 
 using Base.Test
 
+
+
 function test_perfect_forward()
-    log_ins = -5.0
-    log_del = -10.0
+    penalties = Penalties(-5.0, -10.0)
     bandwidth = 1
     template = "AA"
     seq = "AA"
     log_p = fill(-3.0, length(seq))
-    A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
+    A = Model.forward(template, seq, log_p, penalties, bandwidth)
     # transpose because of column-major order
     expected = transpose(reshape([[0.0, -10.0, 0.0];
                                   [-5.0, 0.0, -10.0];
@@ -24,31 +25,29 @@ function test_perfect_forward()
 end
 
 function test_perfect_backward()
-    log_del = -10.0
-    log_ins = -5.0
+    penalties = Penalties(-5.0, -10.0)
     bandwidth = 1
     template = "AA"
     seq = "AT"
     log_p = fill(-3.0, length(seq))
-    B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
-    expected = transpose(reshape([[-3, -5, 0];
-                                  [-13, -3, -5];
-                                  [0, -10, 0]],
+    B = Model.backward(template, seq, log_p, penalties, bandwidth)
+    expected = transpose(reshape([[-3.0, -5.0, 0.0];
+                                  [-13.0, -3.0, -5.0];
+                                  [0.0, -10.0, 0.0]],
                                  (3, 3)))
     @test full(B) == expected
 end
 
 function test_imperfect_forward()
-    log_del = -10.0
-    log_ins = -5.0
+    penalties = Penalties(-5.0, -10.0)
     bandwidth = 1
     template = "AA"
     seq = "AT"
     log_p = fill(-3.0, length(seq))
-    A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
-    expected = transpose(reshape([[  0, -10, 0];
-                                  [ -5,  0,  -10];
-                                  [0, -5,  -3]],
+    A = Model.forward(template, seq, log_p, penalties, bandwidth)
+    expected = transpose(reshape([[0.0, -10.0, 0.0];
+                                  [-5.0, 0.0, -10.0];
+                                  [0.0, -5.0, -3.0]],
                                  (3, 3)))
     @test full(A) == expected
 end
@@ -65,8 +64,8 @@ function test_random_mutation(mutation, template_len)
     ins_ratio = 4 / 10
     del_ratio = 4 / 10
     error_std = 0.01
-    log_ins = log10(error_rate * ins_ratio)
-    log_del = log10(error_rate * del_ratio)
+    penalties = Penalties(log10(error_rate * ins_ratio),
+                          log10(error_rate * del_ratio))
     template_seq = random_seq(template_len)
     template = convert(AbstractString, template_seq)
     bioseq, log_p = sample_from_template(template_seq, error_rate,
@@ -74,13 +73,13 @@ function test_random_mutation(mutation, template_len)
     seq = convert(AbstractString, bioseq)
     bandwidth = max(3 * abs(length(template) - length(seq)), 5)
     new_template = Mutations.update_template(template, mutation)
-    M = Model.forward(new_template, seq, log_p, log_ins, log_del, bandwidth)
+    M = Model.forward(new_template, seq, log_p, penalties, bandwidth)
 
     i = mutation.pos + 2
-    A = Model.forward(template, seq, log_p, log_ins, log_del, bandwidth)
-    B = Model.backward(template, seq, log_p, log_ins, log_del, bandwidth)
-    score = Model.score_mutation(mutation, template, seq, log_p,
-                                 A, B, log_ins, log_del, bandwidth, false, 0.0, 0.0)
+    A = Model.forward(template, seq, log_p, penalties, bandwidth)
+    B = Model.backward(template, seq, log_p, penalties, bandwidth)
+    score = Model.score_mutation(mutation, A, B, template, seq, log_p,
+                                 penalties, false)
     @test_approx_eq score M[end, end]
     # TODO: test that inband values are equal in A and Acols.
 end
@@ -135,39 +134,28 @@ function test_is_inframe()
     reference = "AAAGGGTTT"
     ref_log_p = ones(length(reference))
     ref_log_p = -2.0 * ones(length(reference))
-    log_ins = -5.0
-    log_del = -5.0
-    codon_ins = -2.0
-    codon_del = -2.0
+
+    penalties = Penalties(-5.0, -5.0, -2.0, -2.0)
     bandwidth = 6
 
     template = "AAACCCGGGTTT"
-    @test Quiver2.Model.is_inframe(false, template, reference,
-                                   ref_log_p, log_ins, log_del,
-                                   bandwidth,
-                                   true,
-                                   codon_ins, codon_del)
+    @test Quiver2.Model.is_inframe(true, template, reference,
+                                   ref_log_p, penalties, bandwidth)
 
     template = "AAACCCGGGTTTT"
-    @test !Quiver2.Model.is_inframe(false, template, reference,
-                                    ref_log_p, log_ins, log_del,
-                                    bandwidth,
-                                    true,
-                                    codon_ins, codon_del)
+    @test !Quiver2.Model.is_inframe(true, template, reference,
+                                    ref_log_p, penalties, bandwidth)
 
     template = "AAA"
-    @test Quiver2.Model.is_inframe(true, template, reference,
-                                   ref_log_p, log_ins, log_del,
-                                   bandwidth,
-                                   true,
-                                   codon_ins, codon_del)
+    @test Quiver2.Model.is_inframe(false, template, reference,
+                                   ref_log_p, penalties, bandwidth)
 end
 
 function test_quiver2()
     # TODO: can't guarantee this test actually passes, since it is random
     n_seqs=10
     ref_len=90
-    template_error_rate = 0.1
+    template_error_rate = 0.03
     t_sub_part = 8.0
     t_ins_part = 1.0
     t_del_part = 1.0
@@ -184,9 +172,13 @@ function test_quiver2()
     n_wrong_length = 0
     n_out_frame = 0
 
+    penalties = Penalties(log10(ins_ratio * mean_error_rate),
+                          log10(del_ratio * mean_error_rate))
+
+
     for i in 1:n
         use_ref = rand([true, false])
-        allow_stutters = rand([true, false])
+        check_alignment = rand([true, false])
         reference, template, template_log_p, reads, log_ps, error_rates =
             sample(n_seqs, ref_len,
                    template_error_rate,
@@ -200,11 +192,10 @@ function test_quiver2()
         end
         initial_template = reads[1]
         result, info = Model.quiver2(initial_template, reads,
-                                     log_ps,
-                                     log10(ins_ratio * mean_error_rate),
-                                     log10(del_ratio * mean_error_rate);
+                                     log_ps;
                                      reference=reference,
-                                     allow_stutters=allow_stutters,
+                                     penalties=penalties,
+                                     check_alignment=check_alignment,
                                      bandwidth=3, min_dist=9, batch=5,
                                      max_iters=100)
         if length(result) % 3 != 0
