@@ -85,9 +85,10 @@ end
     if args["verbose"] > 0
         println(STDERR, "starting run")
     end
+    penalties = Penalties(args["log_ins"], args["log_del"])
     return quiver2(template, sequences, log_ps,
-                   args["log_ins"], args["log_del"];
                    reference=reference,
+                   penalties=penalties,
                    bandwidth=args["bandwidth"], min_dist=args["min-dist"],
                    batch=args["batch"], do_full=args["do-full"],
                    max_iters=args["max-iters"],
