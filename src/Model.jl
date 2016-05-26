@@ -3,15 +3,13 @@
 # TODO: annealing schedule for log_ins and log_del penalties for
 # aligning template to reference
 
-# TODO: backtrace or sample reference alignments. If they contain
-# length-1 or length-2 indels, increase penalty and keep running.
-
 # FIXME: swap log_ins and log_del penalties for aligning template to
 # reference
 
 module Model
 
 using Bio.Seq
+using DataStructures
 
 using Quiver2.Sample
 using Quiver2.BandedArrays
@@ -21,14 +19,14 @@ export quiver2, Penalties
 
 # initial_stage:
 #   - do not use reference.
-#   - propose mutations and single indels.
+#   - propose mismatches and single indels.
 # frame_correction_stage:
 #   - use reference.
-#   - propose single indels and mutations.
+#   - propose mismatches and single indels.
 #   - increase reference single indel penalties.
 # refinement_stage:
 #   - use reference.
-#   - propose mutations and codon indels.
+#   - propose mismatches and codon indels.
 #   - maximize reference single indel penalties.
 
 @enum Stage initial_stage=1 frame_correction_stage=2 refinement_stage=3
@@ -40,7 +38,6 @@ type State
     B_t::BandedArray{Float64}
     As::Vector{BandedArray{Float64}}
     Bs::Vector{BandedArray{Float64}}
-    moves::Vector{BandedArray{Int}}
     stage::Stage
     converged::Bool
 end
@@ -101,7 +98,10 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
                 log_p::Float64, penalties::Penalties,
                 allow_codon_indels::Bool)
     result = (typemin(Float64), match)
-    log_match = (s_base == t_base ? 0.0 : log_p)
+    log_match = 0.0
+    if t_base != 'N'
+        log_match = (s_base == t_base ? 0.0 : log_p)
+    end
     result = update_helper(A, i, j, match, log_match, result...)
     result = update_helper(A, i, j, ins, penalties.ins, result...)
     result = update_helper(A, i, j, del, penalties.del, result...)
@@ -201,7 +201,7 @@ function forward_moves(t::AbstractString, s::AbstractString,
             moves[i, j] = x[2]
         end
     end
-    return result, moves
+    return moves
 end
 
 
@@ -426,6 +426,7 @@ function score_mutation(mutation::CodonInsertion,
         prev3_start, prev3_stop = row_range(A, ajprev3)
     end
 
+    # FIXME: code duplication
     Acols[:, 1] = compute_subcol(row_start, row_stop,
                                  prev, prev_start, prev_stop,
                                  prev3, prev3_start, prev3_stop,
@@ -478,28 +479,6 @@ function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
         push!(final_cands, c)
     end
     return final_cands
-end
-
-
-function get_codon_insertions(template::AbstractString,
-                              sequence::AbstractString,
-                              moves::BandedArray{Int})
-    t, s = backtrace(template, sequence, moves)
-    results = CodonInsertion[]
-    bases = Char[]
-    column = 0
-    for i in 1:length(t)
-        if t[i] == '-'
-            push!(bases, s[i])
-            if length(bases) > 2
-                push!(results, CodonInsertion(column, (bases[end-2:end]...)))
-            end
-        else
-            bases = Char[]
-            column += 1
-        end
-    end
-    return results
 end
 
 
@@ -561,18 +540,13 @@ function getcands(state::State,
         end
     end
     if state.stage == refinement_stage
-        for i in 1:length(state.moves)
-            codon_insertions = get_codon_insertions(state.template,
-                                                    sequences[i],
-                                                    state.moves[i])
-            for j in 1:length(codon_insertions)
-                mci = codon_insertions[j]
-                @process_mutation mci
+        for j in 1:len
+            mci = CodonInsertion(j, ('N', 'N', 'N'))
+            @process_mutation mci
+            if j < len - 1
+                mcd = CodonDeletion(j)
+                @process_mutation mcd
             end
-        end
-        for j in 1:(len-2)
-            mcd = CodonDeletion(j)
-            @process_mutation mcd
         end
     end
     return candidates
@@ -605,9 +579,9 @@ function is_inframe(check_alignment::Bool,
     if !check_alignment
         return has_right_length
     end
-    M, moves = forward_moves(template, reference,
-                             ref_log_p, penalties,
-                             bandwidth, true)
+    moves = forward_moves(template, reference,
+                          ref_log_p, penalties,
+                          bandwidth, true)
     t_aln, r_aln = backtrace(template, reference, moves)
     result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
     if result && !has_right_length
@@ -623,13 +597,95 @@ function initial_state(template, seqs, lps, penalties, bandwidth)
     Bs = [backward(template, s, p, penalties, bandwidth)
           for (s, p) in zip(seqs, lps)]
     score = sum([A[end, end] for A in As])
-    moves = BandedArray{Int}[]
 
     # will need these later, but do not compute them on the first iteration
     A_t = BandedArray(Float64, (1, 1), 1)
     B_t = BandedArray(Float64, (1, 1), 1)
 
-    return State(score, template, A_t, B_t, As, Bs, moves, initial_stage, false)
+    return State(score, template, A_t, B_t, As, Bs, initial_stage, false)
+end
+
+
+function recompute!(state::State, seqs::Vector{ASCIIString},
+                    lps::Vector{Vector{Float64}},
+                    penalties::Penalties,
+                    reference::AbstractString,
+                    reference_log_p,
+                    ref_penalties::Penalties,
+                    bandwidth::Int, recompute_As::Bool, recompute_Bs::Bool)
+    if recompute_As
+        state.As = [forward(state.template, s, p, penalties, bandwidth)
+                    for (s, p) in zip(seqs, lps)]
+        if state.stage > initial_stage
+            state.A_t = forward(state.template, reference, reference_log_p, ref_penalties,
+                                bandwidth, allow_codon_indels=true)
+        end
+    end
+    if recompute_Bs
+        state.Bs = [backward(state.template, s, p, penalties, bandwidth)
+                    for (s, p) in zip(seqs, lps)]
+        if state.stage > initial_stage
+            state.B_t = backward(state.template, reference, reference_log_p, ref_penalties, bandwidth,
+                                 allow_codon_indels=true)
+        end
+    end
+    state.score = sum([A[end, end] for A in state.As])
+    if state.stage > initial_stage
+        state.score += state.A_t[end, end]
+    end
+end
+
+
+function best_base(counter::DataStructures.Accumulator{Char, Int})
+    if '-' in keys(counter)
+        pop!('-', counter)
+    end
+    c = rbase()
+    if length(counter) > 0
+        c, n = maximum(counter)
+    end
+    return c
+end
+
+
+function interleave(xs, ys)
+    if length(xs) != length(ys) + 2
+        error("`xs` must have two more elements than `ys`")
+    end
+    result = []
+    for i in 1:length(ys)
+        push!(result, xs[i])
+        push!(result, ys[i])
+    end
+    push!(result, xs[end])
+    return result
+end
+
+
+function replace_ns!(state::State, seqs::Vector{ASCIIString},
+                    log_ps::Vector{Vector{Float64}}, penalties::Penalties,
+                    bandwidth::Int)
+    positions = []
+    for i in 1:length(state.template)
+        if state.template[i] == 'N'
+            push!(positions, i)
+        end
+    end
+    counters = [counter(Char) for i in positions]
+    for (s, p) in zip(seqs, lps)
+        moves = forward_moves(state.state.template, s, p, penalties, bandwidth, false)
+        t_aln, s_aln = backtrace(state.template, s, moves)
+        posn = 0
+        for i in 1:length(t_aln)
+            if t_aln[i] == 'N'
+                posn += 1
+                push!(counters[posn], s_aln[i])
+            end
+        end
+    end
+    bases = [best_base(c) for c in counters]
+    parts = split(state.template, 'N')
+    state.template = join(interleave(parts, bases))
 end
 
 
@@ -759,26 +815,12 @@ function quiver2(template::AbstractString,
             state.template = apply_mutations(old_template,
                                              Mutation[c.mutation
                                                       for c in chosen_cands])
-            if state.stage == refinement_stage
-                pairs = [forward_moves(state.template, s, p, penalties, bandwidth, false)
-                         for (s, p) in zip(seqs, lps)]
-                state.As = [pair[1] for pair in pairs]
-                state.moves = [pair[2] for pair in pairs]
-                temp_score = sum([A[end, end] for A in state.As])
-            else
-                state.As = [forward(state.template, s, p, penalties, bandwidth)
-                            for (s, p) in zip(seqs, lps)]
-                temp_score = sum([A[end, end] for A in state.As])
-            end
-            if state.stage > initial_stage
-                state.A_t = forward(state.template, reference, reference_log_p,
-                                    ref_penalties, bandwidth, allow_codon_indels=true)
-                temp_score += state.A_t[end, end]
-            end
-
+            recompute!(state, seqs, lps,
+                       penalties, reference, reference_log_p, ref_penalties,
+                       bandwidth, true, false)
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
-            if temp_score < chosen_cands[1].score
+            if state.score < chosen_cands[1].score
                 if verbose > 1
                     print(STDERR, "  rejecting multiple candidates in favor of best\n")
                 end
@@ -802,35 +844,19 @@ function quiver2(template::AbstractString,
             lps = log_ps[indices]
             recompute_As = true
         end
-        if recompute_As
-            if state.stage == refinement_stage
-                pairs = [forward_moves(state.template, s, p, penalties, bandwidth, false)
-                         for (s, p) in zip(seqs, lps)]
-                state.As = [pair[1] for pair in pairs]
-                state.moves = [pair[2] for pair in pairs]
-            else
-                state.As = [forward(state.template, s, p, penalties, bandwidth)
-                            for (s, p) in zip(seqs, lps)]
+        recompute!(state, seqs, lps, penalties,
+                   reference, reference_log_p, ref_penalties,
+                   bandwidth, recompute_As, true)
+        if 'N' in state.template
+            if state.stage != refinement_stage
+                error("'N' only allowed in template during refinement stage")
             end
-            if state.stage > initial_stage
-                state.A_t = forward(state.template, reference, reference_log_p, ref_penalties,
-                                    bandwidth, allow_codon_indels=true)
-            end
+            # replace 'N' with best base from alignments and recompute everything
+            replace_ns!(state, seqs, lps, penalties, bandwidth)
+            recompute!(state, seqs, lps, penalties,
+                       reference, reference_log_p, ref_penalties,
+                       bandwidth, true, true)
         end
-        state.Bs = [backward(state.template, s, p, penalties, bandwidth)
-                    for (s, p) in zip(seqs, lps)]
-        if state.stage > initial_stage
-            state.B_t = backward(state.template, reference, reference_log_p, ref_penalties, bandwidth,
-                                 allow_codon_indels=true)
-        end
-        state.score = sum([A[end, end] for A in state.As])
-        if state.stage > initial_stage
-            state.score += state.A_t[end, end]
-        end
-        if state.score == typemin(Float64)
-            println(state.A_t[end, end])
-        end
-
         if verbose > 1
             print(STDERR, "  score: $(state.score)\n")
         end

@@ -130,29 +130,6 @@ function test_random_codon_deletions()
     end
 end
 
-function test_get_codon_insertions()
-    penalties = Penalties(-2.0, -2.0)
-    bandwidth = 3
-    allow_codon_indels = false
-    t = "AAATTT"
-
-    s = "CCCAAACCCTTT"
-    lp = -4.0 * ones(length(s))
-    A, moves = Quiver2.Model.forward_moves(t, s, lp, penalties,
-                                           bandwidth, allow_codon_indels)
-    results = Quiver2.Model.get_codon_insertions(t, s, moves)
-    @test length(results) == 2
-    @test results[1].pos == 0
-    @test results[2].pos == 3
-    @test results[1].bases == results[2].bases == ('C', 'C', 'C')
-
-    s = t
-    lp = -4.0 * ones(length(s))
-    A, moves = Quiver2.Model.forward_moves(t, t, lp, penalties,
-                                           bandwidth, allow_codon_indels)
-    results = Quiver2.Model.get_codon_insertions(t, s, moves)
-    @test length(results) == 0
-end
 
 function test_is_inframe()
     reference = "AAAGGGTTT"
@@ -251,6 +228,5 @@ test_random_insertions()
 test_random_codon_insertions()
 test_random_deletions()
 test_random_codon_deletions()
-test_get_codon_insertions()
 test_is_inframe()
 test_quiver2()
