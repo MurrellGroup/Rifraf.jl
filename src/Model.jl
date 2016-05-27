@@ -22,14 +22,11 @@ export quiver2, Penalties
 #   - propose mismatches and single indels.
 # frame_correction_stage:
 #   - use reference.
-#   - propose mismatches and single indels.
+#   - propose all mutations
 #   - increase reference single indel penalties.
-# refinement_stage:
-#   - use reference.
-#   - propose mismatches and codon indels.
-#   - maximize reference single indel penalties.
 
-@enum Stage initial_stage=1 frame_correction_stage=2 refinement_stage=3
+
+@enum Stage initial_stage=1 frame_correction_stage=2
 
 type State
     score::Float64
@@ -517,29 +514,23 @@ function getcands(state::State,
     len = length(state.template)
     candidates = CandMutation[]
     # insertion at beginning
-    if state.stage != refinement_stage
-        for base in "ACGT"
-            mi = Insertion(0, base)
-            @process_mutation mi
-        end
+    for base in "ACGT"
+        mi = Insertion(0, base)
+        @process_mutation mi
     end
     for j in 1:len
         for base in "ACGT"
-            if state.stage != refinement_stage
-                mi = Insertion(j, base)
-                @process_mutation mi
-            end
+            mi = Insertion(j, base)
+            @process_mutation mi
             if state.template[j] != base
                 ms = Substitution(j, base)
                 @process_mutation ms
             end
         end
-        if state.stage != refinement_stage
-            md = Deletion(j)
-            @process_mutation md
-        end
+        md = Deletion(j)
+        @process_mutation md
     end
-    if state.stage == refinement_stage
+    if state.stage > initial_stage
         for j in 1:len
             mci = CodonInsertion(j, ('N', 'N', 'N'))
             @process_mutation mci
@@ -573,17 +564,21 @@ function is_inframe(check_alignment::Bool,
                     template::AbstractString,
                     reference::AbstractString,
                     ref_log_p::Vector{Float64},
-                    penalties::Penalties,
+                    ref_penalties::Penalties,
                     bandwidth::Int)
     has_right_length = length(template) % 3 == 0
     if !check_alignment
         return has_right_length
     end
     moves = forward_moves(template, reference,
-                          ref_log_p, penalties,
+                          ref_log_p, ref_penalties,
                           bandwidth, true)
     t_aln, r_aln = backtrace(template, reference, moves)
     result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
+    if !result && has_right_length
+        println("has right length but has non-codon gaps")
+        println(ref_penalties)
+    end
     if result && !has_right_length
         error("template length is not a multiple of three")
     end
@@ -598,7 +593,6 @@ function initial_state(template, seqs, lps, penalties, bandwidth)
           for (s, p) in zip(seqs, lps)]
     score = sum([A[end, end] for A in As])
 
-    # will need these later, but do not compute them on the first iteration
     A_t = BandedArray(Float64, (1, 1), 1)
     B_t = BandedArray(Float64, (1, 1), 1)
 
@@ -759,48 +753,40 @@ function quiver2(template::AbstractString,
 
         recompute_As = true
         if length(candidates) == 0
+            if verbose > 1
+                println(STDERR, "no candidates found")
+            end
             push!(n_mutations, zeros(Int, Int(typemax(DPMove))))
-            inframe = false
-            if !empty_ref
-                inframe = is_inframe(check_alignment, state.template,
-                                     reference, reference_log_p,
-                                     ref_penalties, bandwidth)
+            if !empty_ref && is_inframe(check_alignment, state.template,
+                                        reference, reference_log_p,
+                                        ref_penalties, bandwidth)
+                state.converged = true
+                break
             end
             if state.stage == initial_stage
                 if empty_ref
                     state.converged = true
                     break
                 end
-                if inframe
-                    state.stage = refinement_stage
-                    ref_penalties = Penalties(min_ref_ins,
-                                              min_ref_del,
-                                              ref_penalties.codon_ins,
-                                              ref_penalties.codon_del)
-                else
-                    state.stage = frame_correction_stage
+                if verbose > 1
+                    println(STDERR, "moving to frame correction stage")
                 end
+                state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
-                if inframe
-                    state.stage = refinement_stage
-                    ref_penalties = Penalties(min_ref_ins,
-                                              min_ref_del,
-                                              ref_penalties.codon_ins,
-                                              ref_penalties.codon_del)
-                elseif ref_penalties.ins > min_ref_ins || ref_penalties.del > min_ref_del
+                if ref_penalties.ins > min_ref_ins || ref_penalties.del > min_ref_del
+                    if verbose > 1
+                        println(STDERR, "increasing penalty")
+                    end
                     ref_penalties = Penalties(max(ref_penalties.ins * cooling_rate, min_ref_ins),
                                               max(ref_penalties.del * cooling_rate, min_ref_del),
                                               ref_penalties.codon_ins,
                                               ref_penalties.codon_del)
                 else
-                    # cannot increase penalties any more. give up.
+                    if verbose > 1
+                        println(STDERR, "cannot increase penalties. giving up.")
+                    end
                     break
                 end
-            elseif state.stage == refinement_stage
-                if inframe
-                    state.converged = true
-                end
-                break
             else
                 error("unknown stage: $(state.stage)")
             end
@@ -848,8 +834,8 @@ function quiver2(template::AbstractString,
                    reference, reference_log_p, ref_penalties,
                    bandwidth, recompute_As, true)
         if 'N' in state.template
-            if state.stage != refinement_stage
-                error("'N' only allowed in template during refinement stage")
+            if state.stage == initial_stage
+                error("'N' not allowed in template during initial stage")
             end
             # replace 'N' with best base from alignments and recompute everything
             replace_ns!(state, seqs, lps, penalties, bandwidth)
