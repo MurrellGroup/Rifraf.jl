@@ -560,6 +560,13 @@ function only_codon_gaps(s::AbstractString)
 end
 
 
+function align(t, s, log_p, penalties, bandwidth, allow_codon_indels)
+    moves = forward_moves(t, s, log_p, penalties,
+                          bandwidth, allow_codon_indels)
+    return backtrace(t, s, moves)
+end
+
+
 function is_inframe(check_alignment::Bool,
                     template::AbstractString,
                     reference::AbstractString,
@@ -570,15 +577,9 @@ function is_inframe(check_alignment::Bool,
     if !check_alignment
         return has_right_length
     end
-    moves = forward_moves(template, reference,
-                          ref_log_p, ref_penalties,
-                          bandwidth, true)
-    t_aln, r_aln = backtrace(template, reference, moves)
+    t_aln, r_aln = align(template, reference, ref_log_p,
+                         ref_penalties, bandwidth, true)
     result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
-    if !result && has_right_length
-        println("has right length but has non-codon gaps")
-        println(ref_penalties)
-    end
     if result && !has_right_length
         error("template length is not a multiple of three")
     end
@@ -667,8 +668,8 @@ function replace_ns!(state::State, seqs::Vector{ASCIIString},
     end
     counters = [counter(Char) for i in positions]
     for (s, p) in zip(seqs, lps)
-        moves = forward_moves(state.state.template, s, p, penalties, bandwidth, false)
-        t_aln, s_aln = backtrace(state.template, s, moves)
+        t_aln, s_aln = align(state.state.template, s, p,
+                             penalties, bandwidth, false)
         posn = 0
         for i in 1:length(t_aln)
             if t_aln[i] == 'N'
