@@ -24,9 +24,11 @@ export quiver2, Penalties
 #   - use reference.
 #   - propose all mutations
 #   - increase reference single indel penalties.
+# refinement stage:
+#   - do not use reference
+#   - propose subsitutions only
 
-
-@enum Stage initial_stage=1 frame_correction_stage=2
+@enum Stage initial_stage=1 frame_correction_stage=2 refinement_stage=3
 
 type State
     score::Float64
@@ -491,7 +493,7 @@ macro process_mutation(m)
                                     sequences[si], log_ps[si],
                                     penalties, false)
         end
-        if state.stage > initial_stage
+        if state.stage == frame_correction_stage
             score += score_mutation($m, state.A_t, state.B_t, state.template,
                                     reference, reference_log_p,
                                     ref_penalties, true)
@@ -513,24 +515,35 @@ function getcands(state::State,
                   bandwidth::Int)
     len = length(state.template)
     candidates = CandMutation[]
-    # insertion at beginning
-    for base in "ACGT"
-        mi = Insertion(0, base)
-        @process_mutation mi
-    end
+    # substitutions
     for j in 1:len
         for base in "ACGT"
-            mi = Insertion(j, base)
-            @process_mutation mi
             if state.template[j] != base
                 ms = Substitution(j, base)
                 @process_mutation ms
             end
         end
-        md = Deletion(j)
-        @process_mutation md
     end
-    if state.stage > initial_stage
+    if state.stage == initial_stage ||
+        state.stage == frame_correction_stage
+        # single indels
+        for base in "ACGT"
+            mi = Insertion(0, base)
+            @process_mutation mi
+        end
+        for j in 1:len
+            for base in "ACGT"
+                mi = Insertion(j, base)
+                @process_mutation mi
+            end
+            md = Deletion(j)
+            @process_mutation md
+        end
+    end
+    if state.stage == frame_correction_stage
+        # codon indels
+        mci = CodonInsertion(0, ('N', 'N', 'N'))
+        @process_mutation mci
         for j in 1:len
             mci = CodonInsertion(j, ('N', 'N', 'N'))
             @process_mutation mci
@@ -567,16 +580,12 @@ function align(t, s, log_p, penalties, bandwidth, allow_codon_indels)
 end
 
 
-function is_inframe(check_alignment::Bool,
-                    template::AbstractString,
-                    reference::AbstractString,
-                    ref_log_p::Vector{Float64},
-                    ref_penalties::Penalties,
-                    bandwidth::Int)
+function no_single_indels(template::AbstractString,
+                           reference::AbstractString,
+                           ref_log_p::Vector{Float64},
+                           ref_penalties::Penalties,
+                           bandwidth::Int)
     has_right_length = length(template) % 3 == 0
-    if !check_alignment
-        return has_right_length
-    end
     t_aln, r_aln = align(template, reference, ref_log_p,
                          ref_penalties, bandwidth, true)
     result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
@@ -611,7 +620,7 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
     if recompute_As
         state.As = [forward(state.template, s, p, penalties, bandwidth)
                     for (s, p) in zip(seqs, lps)]
-        if state.stage > initial_stage
+        if state.stage == frame_correction_stage
             state.A_t = forward(state.template, reference, reference_log_p, ref_penalties,
                                 bandwidth, allow_codon_indels=true)
         end
@@ -619,13 +628,13 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
     if recompute_Bs
         state.Bs = [backward(state.template, s, p, penalties, bandwidth)
                     for (s, p) in zip(seqs, lps)]
-        if state.stage > initial_stage
+        if state.stage == frame_correction_stage
             state.B_t = backward(state.template, reference, reference_log_p, ref_penalties, bandwidth,
                                  allow_codon_indels=true)
         end
     end
     state.score = sum([A[end, end] for A in state.As])
-    if state.stage > initial_stage
+    if state.stage == frame_correction_stage
         state.score += state.A_t[end, end]
     end
 end
@@ -691,7 +700,6 @@ function quiver2(template::AbstractString,
                  penalties::Penalties=default_penalties,
                  ref_penalties::Penalties=default_ref_penalties,
                  ref_mismatch::Float64=-3.0,
-                 check_alignment::Bool=true,
                  cooling_rate::Float64=100.0,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, do_full::Bool=false,
@@ -745,7 +753,7 @@ function quiver2(template::AbstractString,
         old_template = state.template
         old_score = state.score
         if verbose > 1
-            println(STDERR, "iteration $i")
+            println(STDERR, "iteration $i - $(state.stage)")
         end
 
         candidates = getcands(state, seqs, lps, penalties,
@@ -755,28 +763,23 @@ function quiver2(template::AbstractString,
         recompute_As = true
         if length(candidates) == 0
             if verbose > 1
-                println(STDERR, "no candidates found")
+                println(STDERR, "  no candidates found")
             end
             push!(n_mutations, zeros(Int, Int(typemax(DPMove))))
-            if !empty_ref && is_inframe(check_alignment, state.template,
-                                        reference, reference_log_p,
-                                        ref_penalties, bandwidth)
-                state.converged = true
-                break
-            end
             if state.stage == initial_stage
                 if empty_ref
                     state.converged = true
                     break
                 end
-                if verbose > 1
-                    println(STDERR, "moving to frame correction stage")
-                end
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
-                if ref_penalties.ins > min_ref_ins || ref_penalties.del > min_ref_del
+                if no_single_indels(state.template,
+                                      reference, reference_log_p,
+                                      ref_penalties, bandwidth)
+                    state.stage = refinement_stage
+                elseif ref_penalties.ins > min_ref_ins || ref_penalties.del > min_ref_del
                     if verbose > 1
-                        println(STDERR, "increasing penalty")
+                        println(STDERR, "  alignment to reference had single indels. increasing penalty.")
                     end
                     ref_penalties = Penalties(max(ref_penalties.ins * cooling_rate, min_ref_ins),
                                               max(ref_penalties.del * cooling_rate, min_ref_del),
@@ -784,20 +787,23 @@ function quiver2(template::AbstractString,
                                               ref_penalties.codon_del)
                 else
                     if verbose > 1
-                        println(STDERR, "cannot increase penalties. giving up.")
+                        println(STDERR, "  cannot increase penalties. giving up.")
                     end
                     break
                 end
+            elseif state.stage == refinement_stage
+                state.converged = true
+                break
             else
                 error("unknown stage: $(state.stage)")
             end
         else
             if verbose > 1
-                print(STDERR, "  found $(length(candidates)) candidate mutations.\n")
+                println(STDERR, "  found $(length(candidates)) candidate mutations.")
             end
             chosen_cands = choose_candidates(candidates, min_dist)
             if verbose > 1
-                print(STDERR, "  filtered to $(length(chosen_cands)) candidate mutations\n")
+                println(STDERR, "  filtered to $(length(chosen_cands)) candidate mutations")
             end
             state.template = apply_mutations(old_template,
                                              Mutation[c.mutation
@@ -809,7 +815,7 @@ function quiver2(template::AbstractString,
             # note: this may not always be correct, because score_mutation() is not exact
             if state.score < chosen_cands[1].score
                 if verbose > 1
-                    print(STDERR, "  rejecting multiple candidates in favor of best\n")
+                    println(STDERR, "  rejecting multiple candidates in favor of best")
                 end
                 chosen_cands = CandMutation[chosen_cands[1]]
                 state.template = apply_mutations(old_template,
@@ -835,8 +841,8 @@ function quiver2(template::AbstractString,
                    reference, reference_log_p, ref_penalties,
                    bandwidth, recompute_As, true)
         if 'N' in state.template
-            if state.stage == initial_stage
-                error("'N' not allowed in template during initial stage")
+            if state.stage != frame_correction_stage
+                error("'N' not allowed in template during this stage")
             end
             # replace 'N' with best base from alignments and recompute everything
             replace_ns!(state, seqs, lps, penalties, bandwidth)
@@ -845,11 +851,11 @@ function quiver2(template::AbstractString,
                        bandwidth, true, true)
         end
         if verbose > 1
-            print(STDERR, "  score: $(state.score)\n")
+            println(STDERR, "  score: $(state.score)")
         end
     end
     if verbose > 0
-        print(STDERR, "done. converged: $state.converged\n")
+        println(STDERR, "done. converged: $state.converged")
     end
     push!(consensus_lengths, length(state.template))
     exceeded = sum(stage_iterations) >= max_iters

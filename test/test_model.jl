@@ -8,7 +8,6 @@ using Quiver2.Mutations
 using Base.Test
 
 
-
 function test_perfect_forward()
     penalties = Penalties(-5.0, -10.0)
     bandwidth = 1
@@ -131,7 +130,7 @@ function test_random_codon_deletions()
 end
 
 
-function test_is_inframe()
+function test_no_single_indels()
     reference = "AAAGGGTTT"
     ref_log_p = ones(length(reference))
     ref_log_p = -2.0 * ones(length(reference))
@@ -140,16 +139,16 @@ function test_is_inframe()
     bandwidth = 6
 
     template = "AAACCCGGGTTT"
-    @test Quiver2.Model.is_inframe(true, template, reference,
-                                   ref_log_p, penalties, bandwidth)
+    @test Quiver2.Model.no_single_indels(template, reference,
+                                         ref_log_p, penalties, bandwidth)
 
     template = "AAACCCGGGTTTT"
-    @test !Quiver2.Model.is_inframe(true, template, reference,
-                                    ref_log_p, penalties, bandwidth)
+    @test !Quiver2.Model.no_single_indels(template, reference,
+                                          ref_log_p, penalties, bandwidth)
 
     template = "AAA"
-    @test Quiver2.Model.is_inframe(false, template, reference,
-                                   ref_log_p, penalties, bandwidth)
+    @test Quiver2.Model.no_single_indels(template, reference,
+                                         ref_log_p, penalties, bandwidth)
 end
 
 function test_quiver2()
@@ -179,7 +178,6 @@ function test_quiver2()
 
     for i in 1:n
         use_ref = rand([true, false])
-        check_alignment = rand([true, false])
         reference, template, template_log_p, reads, log_ps, error_rates =
             sample(n_seqs, ref_len,
                    template_error_rate,
@@ -196,7 +194,6 @@ function test_quiver2()
                                      log_ps;
                                      reference=reference,
                                      penalties=penalties,
-                                     check_alignment=check_alignment,
                                      bandwidth=3, min_dist=9, batch=5,
                                      max_iters=100)
         if length(result) % 3 != 0
@@ -228,5 +225,5 @@ test_random_insertions()
 test_random_codon_insertions()
 test_random_deletions()
 test_random_codon_deletions()
-test_is_inframe()
+test_no_single_indels()
 test_quiver2()
