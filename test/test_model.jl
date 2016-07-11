@@ -23,7 +23,7 @@ function test_perfect_forward()
     @test full(A) == expected
 end
 
-function test_perfect_backward()
+function test_imperfect_backward()
     bandwidth = 1
     template = "AA"
     seq = "AT"
@@ -44,13 +44,13 @@ function test_imperfect_forward()
     penalty = -3.0
     log_p = fill(penalty, length(seq))
     A = Model.forward(template, seq, log_p, bandwidth)
+    B = Model.backward(template, seq, log_p, bandwidth)
     expected = transpose(reshape([[0.0, penalty, 0.0];
                                   [penalty, 0.0, penalty];
                                   [0.0, penalty, penalty]],
                                  (3, 3)))
-    @test full(A) == expected
 
-    B = Model.backward(template, seq, log_p, bandwidth)
+    @test full(A) == expected
     @test A[end, end] == B[1, 1]
 end
 
@@ -78,7 +78,6 @@ function test_random_mutation(mutation, template_len)
     Bnew = Model.backward(new_template, seq, log_p, bandwidth)
     @test_approx_eq Anew[end, end] Bnew[1, 1]
 
-    i = mutation.pos + 2
     A = Model.forward(template, seq, log_p, bandwidth)
     B = Model.backward(template, seq, log_p, bandwidth)
     score = Model.score_mutation(mutation, A, B, template, seq, log_p,
@@ -216,7 +215,7 @@ end
 srand(1234)
 
 test_perfect_forward()
-test_perfect_backward()
+test_imperfect_backward()
 test_imperfect_forward()
 test_equal_ranges()
 test_random_substitutions()
