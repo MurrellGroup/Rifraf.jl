@@ -54,16 +54,6 @@ function parse_commandline()
         arg_type = Int
         default = 0
 
-        "log_ins"
-        help = "log10 insertion probability"
-        arg_type = Float64
-        required = true
-
-        "log_del"
-        help = "log10 deletion probability"
-        arg_type = Float64
-        required = true
-
         "input"
         help = "a single file or a glob. each filename should be unique."
         required = true
@@ -85,12 +75,12 @@ end
     if args["verbose"] > 0
         println(STDERR, "starting run")
     end
-    penalties = Penalties(args["log_ins"], args["log_del"])
     return quiver2(template, sequences, log_ps,
                    reference=reference,
-                   penalties=penalties,
-                   bandwidth=args["bandwidth"], min_dist=args["min-dist"],
-                   batch=args["batch"], do_full=args["do-full"],
+                   bandwidth=args["bandwidth"],
+                   min_dist=args["min-dist"],
+                   batch=args["batch"],
+                   do_full=args["do-full"],
                    max_iters=args["max-iters"],
                    verbose=args["verbose"])
 end
