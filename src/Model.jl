@@ -501,7 +501,8 @@ macro process_mutation(m)
     end
 end
 
-function getcands(state::State,
+
+function candstask(state::State,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
                   reference::ASCIIString,
@@ -509,44 +510,54 @@ function getcands(state::State,
                   penalties::Penalties,
                   bandwidth::Int)
     len = length(state.template)
-    candidates = CandMutation[]
-    # substitutions
-    for j in 1:len
-        for base in "ACGT"
-            if state.template[j] != base
-                ms = Substitution(j, base)
-                @process_mutation ms
-            end
-        end
-    end
-    if state.stage == initial_stage ||
-        state.stage == frame_correction_stage
-        # single indels
-        for base in "ACGT"
-            mi = Insertion(0, base)
-            @process_mutation mi
-        end
+    function _it()
+        # substitutions
         for j in 1:len
             for base in "ACGT"
-                mi = Insertion(j, base)
-                @process_mutation mi
+                if state.template[j] != base
+                    produce(Substitution(j, base))
+                end
             end
-            md = Deletion(j)
-            @process_mutation md
+        end
+        if state.stage == initial_stage ||
+            state.stage == frame_correction_stage
+            # single indels
+            for base in "ACGT"
+                produce(Insertion(0, base))
+            end
+            for j in 1:len
+                for base in "ACGT"
+                    produce(Insertion(j, base))
+                end
+                produce(Deletion(j))
+            end
+        end
+        if state.stage == frame_correction_stage
+            # codon indels
+            produce(CodonInsertion(0, ('N', 'N', 'N')))
+            for j in 1:len
+                produce(CodonInsertion(j, ('N', 'N', 'N')))
+                if j < len - 1
+                    produce(CodonDeletion(j))
+                end
+            end
         end
     end
-    if state.stage == frame_correction_stage
-        # codon indels
-        mci = CodonInsertion(0, ('N', 'N', 'N'))
-        @process_mutation mci
-        for j in 1:len
-            mci = CodonInsertion(j, ('N', 'N', 'N'))
-            @process_mutation mci
-            if j < len - 1
-                mcd = CodonDeletion(j)
-                @process_mutation mcd
-            end
-        end
+    Task(_it)
+end
+
+
+function getcands(state::State,
+                  sequences::Vector{ASCIIString},
+                  log_ps::Vector{Vector{Float64}},
+                  reference::ASCIIString,
+                  reference_log_p::Vector{Float64},
+                  penalties::Penalties,
+                  bandwidth::Int)
+    candidates = CandMutation[]
+    for m in candstask(state, sequences, log_ps, reference,
+                       reference_log_p, penalties, bandwidth)
+        @process_mutation m
     end
     return candidates
 end
