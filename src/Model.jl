@@ -89,15 +89,15 @@ end
 
 function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
-                log_p::Float64, prev_log_p::Float64,
+                log_p::Float64, next_log_p::Float64,
                 allow_codon_indels::Bool, penalties::Penalties)
     result = (typemin(Float64), match)
     match_penalty = 0.0
     if t_base != 'N'
         match_penalty = (s_base == t_base ? 0.0 : log_p)
     end
-    ins_penalty = mean([prev_log_p, log_p]) * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
-    del_penalty = log_p * (allow_codon_indels ? penalties.del_multiplier : 1.0)
+    ins_penalty = log_p * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
+    del_penalty = mean([log_p, next_log_p]) * (allow_codon_indels ? penalties.del_multiplier : 1.0)
     result = update_helper(A, i, j, match, match_penalty, result...)
     result = update_helper(A, i, j, ins, ins_penalty, result...)
     result = update_helper(A, i, j, del, del_penalty, result...)
@@ -155,11 +155,10 @@ function prepare_array(t::AbstractString, s::AbstractString,
     end
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
-        result[i, 1] = result[i-1, 1] + mean([log_p[i-1], log_p[max(i-2, 1)]])
+        result[i, 1] = result[i-1, 1] + log_p[i-1]
     end
-    del_penalty = minimum(log_p)  # to make forward and backward symmetric
     for j = 2:min(size(result)[2], result.h_offset + bandwidth + 1)
-        result[1, j] = del_penalty * (j - 1)
+        result[1, j] = log_p[1] * (j - 1)
     end
     return result
 end
@@ -190,7 +189,7 @@ function forward_moves(t::AbstractString, s::AbstractString,
         start = max(start, 2)
         for i = start:stop
             x = update(result, i, j, s[i-1], t[j-1],
-                       log_p[i-1], log_p[max(i-2, 1)],
+                       log_p[i-1], log_p[min(i, length(log_p))],
                        allow_codon_indels, penalties)
             result[i, j] = x[1]
             moves[i, j] = x[2]
@@ -215,7 +214,7 @@ function forward(t::AbstractString, s::AbstractString,
         start = max(start, 2)
         for i = start:stop
             x = update(result, i, j, s[i-1], t[j-1],
-                       log_p[i-1], log_p[max(i-2, 1)],
+                       log_p[i-1], log_p[min(i, length(log_p))],
                        allow_codon_indels, penalties)
             result[i, j] = x[1]
         end
@@ -321,8 +320,7 @@ function score_mutation(mutation::Union{Insertion,Substitution},
         penalty = log_p[max(seq_i, 1)]
         if i > 1
             # insertion
-            prev_penalty = log_p[max(seq_i - 1, 1)]
-            ins_penalty = mean([prev_penalty, penalty]) * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
+            ins_penalty = penalty * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
             scores[1] = max(scores[1], scores[2] + ins_penalty)
         end
         if prev_start < real_i <= (prev_stop + 1)
@@ -331,7 +329,8 @@ function score_mutation(mutation::Union{Insertion,Substitution},
         end
         if prev_start <= real_i <= prev_stop
             # deletion
-            del_penalty = penalty * (allow_codon_indels ? penalties.del_multiplier : 1.0)
+            next_log_p = log_p[min(seq_i + 1, length(log_p))]
+            del_penalty = mean([penalty, next_log_p]) * (allow_codon_indels ? penalties.del_multiplier : 1.0)
             scores[1] = max(scores[1], A[real_i, ajprev] + del_penalty)
         end
         if allow_codon_indels
@@ -367,8 +366,7 @@ function compute_subcol(row_start, row_stop,
         penalty = log_p[max(seq_i, 1)]
         if i > 1
             # insertion
-            prev_penalty = log_p[max(seq_i - 1, 1)]
-            ins_penalty = mean([prev_penalty, penalty]) * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
+            ins_penalty = penalty * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
             col[i] = max(col[i], col[i-1] + ins_penalty)
         end
         if prev_start < real_i <= (prev_stop + 1)
@@ -377,7 +375,8 @@ function compute_subcol(row_start, row_stop,
         end
         if prev_start <= real_i <= prev_stop
             # deletion
-            del_penalty = penalty * (allow_codon_indels ? penalties.del_multiplier : 1.0)
+            next_log_p = log_p[min(seq_i + 1, length(log_p))]
+            del_penalty = mean([penalty, next_log_p]) * (allow_codon_indels ? penalties.del_multiplier : 1.0)
             col[i] = max(col[i], prev[prev_i] + del_penalty)
         end
         if allow_codon_indels
@@ -399,7 +398,7 @@ function score_mutation(mutation::CodonInsertion,
                         A::BandedArray{Float64}, B::BandedArray{Float64},
                         template::AbstractString,
                         seq::AbstractString, log_p::Vector{Float64},
-                        allow_codon_indels, penalties)
+                        allow_codon_indels::Bool, penalties::Penalties)
     bj = mutation.pos + 1 # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     b_start, b_stop = row_range(B, bj)  # row range of B column
@@ -494,8 +493,7 @@ macro process_mutation(m)
         end
         if state.stage == frame_correction_stage
             score += score_mutation($m, state.A_t, state.B_t, state.template,
-                                    reference, reference_log_p;
-                                    true, penalties)
+                                    reference, reference_log_p, true, penalties)
         end
         if score > state.score
             push!(candidates, CandMutation($m, score))
@@ -506,7 +504,7 @@ end
 function getcands(state::State,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
-                  reference::AbstractString,
+                  reference::ASCIIString,
                   reference_log_p::Vector{Float64},
                   penalties::Penalties,
                   bandwidth::Int)
@@ -769,14 +767,14 @@ function quiver2(template::AbstractString,
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
                 if no_single_indels(state.template,
-                                      reference, reference_log_p,
-                                      penalties, bandwidth)
+                                    reference, reference_log_p,
+                                    penalties, bandwidth)
                     state.stage = refinement_stage
                 else
-                    ref_penalties = Penalties(ref_penalties.ins_multipler * cooling_rate,
-                                              ref_penalties.del_multipler * cooling_rate,
-                                              ref_penalties.codon_ins,
-                                              ref_penalties.codon_del)
+                    penalties = Penalties(penalties.ins_multiplier * cooling_rate,
+                                          penalties.del_multiplier * cooling_rate,
+                                          penalties.codon_ins,
+                                          penalties.codon_del)
                     if verbose > 1
                         println(STDERR, "  alignment to reference had single indels. increasing penalty.")
                     end

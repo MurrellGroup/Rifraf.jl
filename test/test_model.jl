@@ -60,8 +60,19 @@ function test_equal_ranges()
     @test Model.equal_ranges((1, 5), (4, 5)) == ((4, 5), (1, 2))
 end
 
+
+function test_forward_backward_agreement()
+    template = "AAT"
+    seq = "AT"
+    bandwidth = 10
+    log_p = [-2.0, -1.0]
+    A = Model.forward(template, seq, log_p, bandwidth)
+    B = Model.backward(template, seq, log_p, bandwidth)
+    @test_approx_eq A[end, end] B[1, 1]
+end
+
+
 function test_random_mutation(mutation, template_len)
-    println(mutation)
     error_rate = 0.1
     sub_ratio = 2 / 10
     ins_ratio = 4 / 10
@@ -218,6 +229,7 @@ test_perfect_forward()
 test_imperfect_backward()
 test_imperfect_forward()
 test_equal_ranges()
+test_forward_backward_agreement()
 test_random_substitutions()
 test_random_insertions()
 test_random_codon_insertions()
