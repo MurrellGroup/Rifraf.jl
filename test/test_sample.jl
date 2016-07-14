@@ -13,9 +13,9 @@ begin
         ins_ratio = 3
         del_ratio = 3
         error_std = 0.001
-        seq, logp = sample_from_template(template, error_rate,
+        seq, logp = sample_from_template(template,
                                          sub_ratio, ins_ratio, del_ratio,
-                                         error_std, codon=true)
+                                         error_rate, error_std, codon=true)
         @test length(seq) % 3 == 0
     end
 end

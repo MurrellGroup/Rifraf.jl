@@ -62,14 +62,21 @@ end
 
 const default_penalties = Penalties(1.0, 1.0, -9.0, -9.0)
 
-
 @enum DPMove match=1 ins=2 del=3 codon_ins=4 codon_del=5
 
-const offsets = ([-1, -1],
-                 [-1, 0],
-                 [0, -1],
-                 [-3, 0],
-                 [0, -3])
+const offsets = ([-1, -1],  # sub
+                 [-1, 0],   # insertion
+                 [0, -1],   # deletion
+                 [-3, 0],   # codon insertion
+                 [0, -3])   # codon deletion
+
+
+const baseints = Dict('A' => 1,
+                      'C' => 2,
+                      'G' => 3,
+                      'T' => 4,
+                      '-' => 5,
+                      )
 
 
 function update_helper(A::BandedArray{Float64}, i::Int, j::Int, move::DPMove,
@@ -479,48 +486,44 @@ function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
 end
 
 
-# This macro is used in getcands() for performance reasons, to avoid
-# using a variable of type `Mutation`.
-#
-# TODO: convert this to a generated function.
-macro process_mutation(m)
-    return quote
-        score = 0.0
-        for si in 1:length(sequences)
-            score += score_mutation($m, state.As[si], state.Bs[si], state.template,
-                                    sequences[si], log_ps[si],
-                                    false, penalties)
-        end
-        if state.stage == frame_correction_stage
-            score += score_mutation($m, state.A_t, state.B_t, state.template,
-                                    reference, reference_log_p, true, penalties)
-        end
-        if score > state.score
-            push!(candidates, CandMutation($m, score))
-        end
+function score_mutation(m::Mutation,
+                        state::State,
+                        sequences::Vector{ASCIIString},
+                        log_ps::Vector{Vector{Float64}},
+                        use_ref::Bool,
+                        reference::ASCIIString,
+                        reference_log_p::Vector{Float64},
+                        penalties::Penalties)
+    score = 0.0
+    for si in 1:length(sequences)
+        score += score_mutation(m, state.As[si], state.Bs[si], state.template,
+                                sequences[si], log_ps[si],
+                                false, penalties)
     end
+    if use_ref
+        score += score_mutation(m, state.A_t, state.B_t, state.template,
+                                reference, reference_log_p, true, penalties)
+    end
+    return score
 end
 
 
-function candstask(state::State,
-                  sequences::Vector{ASCIIString},
-                  log_ps::Vector{Vector{Float64}},
-                  reference::ASCIIString,
-                  reference_log_p::Vector{Float64},
-                  penalties::Penalties,
-                  bandwidth::Int)
-    len = length(state.template)
+function candstask(stage::Stage,
+                   template::AbstractString,
+                   sequences::Vector{ASCIIString},
+                   log_ps::Vector{Vector{Float64}})
+    len = length(template)
     function _it()
         # substitutions
         for j in 1:len
             for base in "ACGT"
-                if state.template[j] != base
+                if template[j] != base
                     produce(Substitution(j, base))
                 end
             end
         end
-        if state.stage == initial_stage ||
-            state.stage == frame_correction_stage
+        if stage == initial_stage ||
+            stage == frame_correction_stage
             # single indels
             for base in "ACGT"
                 produce(Insertion(0, base))
@@ -532,7 +535,7 @@ function candstask(state::State,
                 produce(Deletion(j))
             end
         end
-        if state.stage == frame_correction_stage
+        if stage == frame_correction_stage
             # codon indels
             produce(CodonInsertion(0, ('N', 'N', 'N')))
             for j in 1:len
@@ -552,12 +555,16 @@ function getcands(state::State,
                   log_ps::Vector{Vector{Float64}},
                   reference::ASCIIString,
                   reference_log_p::Vector{Float64},
-                  penalties::Penalties,
-                  bandwidth::Int)
+                  penalties::Penalties)
     candidates = CandMutation[]
-    for m in candstask(state, sequences, log_ps, reference,
-                       reference_log_p, penalties, bandwidth)
-        @process_mutation m
+    for m in candstask(state.stage, state.template,
+                       sequences, log_ps)
+        score = score_mutation(m, state, sequences, log_ps,
+                               state.stage == frame_correction_stage,
+                               reference, reference_log_p, penalties)
+        if score > state.score
+            push!(candidates, CandMutation(m, score))
+        end
     end
     return candidates
 end
@@ -698,6 +705,32 @@ function replace_ns!(state::State, seqs::Vector{ASCIIString},
 end
 
 
+"""Generate per-base template log differences"""
+function estimate_quality(state::State,
+                          sequences::Vector{ASCIIString},
+                          log_ps::Vector{Vector{Float64}})
+    # `position_scores[i]` gives the following log probabilities
+    # for `template[i]`: [A, C, G, T, -]
+    position_scores = zeros(length(state.template), 5)
+    # `insertion_scores[i]` gives the following log probabilities for an
+    # insertion before `template[i]` of [A, C, G, T]
+    insertion_scores = zeros(length(state.template) + 1, 4)
+    for m in candstask(initial_stage, state.template, sequences, log_ps)
+        score = score_mutation(m, state, sequences, log_ps,
+                               false, "", Float64[], default_penalties)
+        score -= state.score
+        if typeof(m) == Substitution
+            position_scores[m.pos, baseints[m.base]] = score
+        elseif typeof(m) == Deletion
+            position_scores[m.pos, baseints['-']] = score
+        elseif typeof(m) == Insertion
+            insertion_scores[m.pos + 1, baseints[m.base]] = score
+        end
+    end
+    return position_scores, insertion_scores
+end
+
+
 function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
                  log_ps::Vector{Vector{Float64}};
@@ -761,8 +794,7 @@ function quiver2(template::AbstractString,
         end
 
         candidates = getcands(state, seqs, lps,
-                              reference, reference_log_p, penalties,
-                              bandwidth)
+                              reference, reference_log_p, penalties)
 
         recompute_As = true
         if length(candidates) == 0
@@ -866,7 +898,13 @@ function quiver2(template::AbstractString,
                 "n_mutations" => transpose(hcat(n_mutations...)),
                 "consensus_lengths" => consensus_lengths,
                 )
-    return state.template, info
+
+    # FIXME: recomputing for all sequences may be costly
+    recompute!(state, sequences, log_ps,
+               reference, reference_log_p, penalties,
+               bandwidth, true, true)
+    base_scores, insertion_scores = estimate_quality(state, sequences, log_ps)
+    return state.template, base_scores, insertion_scores, info
 end
 
 """
@@ -881,10 +919,10 @@ function quiver2{T<:NucleotideSequence}(template::DNASequence,
     new_reference = convert(AbstractString, reference)
     new_template = convert(AbstractString, template)
     new_sequences = ASCIIString[convert(AbstractString, s) for s in sequences]
-    result, info = quiver2(new_template, new_sequences, log_ps;
-                           reference=new_reference,
-                           kwargs...)
-    return DNASequence(result), info
+    result, base_scores, insertion_scores, info = quiver2(new_template, new_sequences, log_ps;
+                                                          reference=new_reference,
+                                                          kwargs...)
+    return DNASequence(result), base_scores, insertion_scores, info
 end
 
 end

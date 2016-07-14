@@ -102,10 +102,15 @@ function ratios(sub_part, ins_part, del_part)
     return sub_ratio, ins_ratio, del_ratio
 end
 
+"""
+error_rate: mean of Beta distribution for per-base errors
+error_std: standard deviation of Beta distribution
+codon: if true, only do codon indels
 
-function sample_from_template(template, error_rate,
+"""
+function sample_from_template(template,
                               sub_part, ins_part, del_part,
-                              error_std;
+                              error_rate, error_std;
                               codon=true)
     sub_ratio, ins_ratio, del_ratio = ratios(sub_part, ins_part, del_part)
     # do deletions
@@ -188,9 +193,10 @@ function sample(nseqs::Int, len::Int,
 
     t_sub_ratio, t_ins_ratio, t_del_ratio = ratios(t_sub_part, t_ins_part, t_del_part)
     reference = random_seq(len)
-    template, template_log_p = sample_from_template(reference, template_error_rate,
+    template, template_log_p = sample_from_template(reference,
                                                     t_sub_ratio, t_ins_ratio, t_del_ratio,
-                                                    error_std, codon=true)
+                                                    template_error_rate, error_std,
+                                                    codon=true)
 
 
     error_d = Beta(error_rate_alpha, error_rate_beta)
@@ -202,9 +208,9 @@ function sample(nseqs::Int, len::Int,
 
     for i = 1:nseqs
         error_rate = Distributions.rand(error_d) * max_error_rate
-        seq, log_p = sample_from_template(template, error_rate,
+        seq, log_p = sample_from_template(template,
                                           sub_ratio, ins_ratio, del_ratio,
-                                          error_std, codon=false)
+                                          error_rate, error_std, codon=false)
         push!(seqs, seq)
         push!(log_ps, log_p)
         push!(error_rates, error_rate)

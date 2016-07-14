@@ -80,8 +80,9 @@ function test_random_mutation(mutation, template_len)
     error_std = 0.01
     template_seq = random_seq(template_len)
     template = convert(AbstractString, template_seq)
-    bioseq, log_p = sample_from_template(template_seq, error_rate,
-                                         sub_ratio, ins_ratio, del_ratio, error_std)
+    bioseq, log_p = sample_from_template(template_seq,
+                                         sub_ratio, ins_ratio, del_ratio,
+                                         error_rate, error_std)
     seq = convert(AbstractString, bioseq)
     bandwidth = max(3 * abs(length(template) - length(seq)), 5)
     new_template = Mutations.update_template(template, mutation)
@@ -200,11 +201,11 @@ function test_quiver2()
             reference = DNASequence("")
         end
         initial_template = reads[1]
-        result, info = Model.quiver2(initial_template, reads,
-                                     log_ps;
-                                     reference=reference,
-                                     bandwidth=3, min_dist=9, batch=5,
-                                     max_iters=100)
+        result, q1, q2, info = Model.quiver2(initial_template, reads,
+                                              log_ps;
+                                              reference=reference,
+                                              bandwidth=3, min_dist=9, batch=5,
+                                              max_iters=100)
         if length(result) % 3 != 0
             n_out_frame += 1
         end
