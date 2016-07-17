@@ -2,10 +2,11 @@ module Sample
 
 using Bio.Seq
 using Distributions
+using Iterators
 
 using Quiver2.QIO
 
-export rbase, mutate_base, random_codon, random_seq, sample_from_template, sample, BetaAlt
+export rbase, mutate_base, random_codon, random_seq, sample_from_reference, sample_from_template, sample, BetaAlt
 
 function rbase()
     bases = [DNA_A, DNA_C, DNA_G, DNA_T]
@@ -44,6 +45,7 @@ end
 function restore(y, lower, upper)
     return y * (upper - lower) + lower
 end
+
 
 """A beta distribution parametrized by mean and standard deviation."""
 type BetaAlt <: Sampleable{Univariate,Continuous}
@@ -84,15 +86,14 @@ function rand(s::BetaAlt)
 end
 
 """
-Draw a vector of samples.
-
-This should be done automatically by Distributions.jl, but it results
-in a stack overflow.
-
+Draw a new error vector from a vector of means.
 """
-function myrand(s::BetaAlt, n::Int)
-    return [rand(s) for i in 1:n]
+function draw_error_vector(means::Vector{Float64},
+                           std::Float64)
+    min_prob = to_prob(Float64(typemax(UInt8)))
+    return Float64[rand(BetaAlt(x, std, minval=min_prob)) for x in means]
 end
+
 
 function ratios(sub_part, ins_part, del_part)
     denom = sub_part + ins_part + del_part
@@ -102,120 +103,204 @@ function ratios(sub_part, ins_part, del_part)
     return sub_ratio, ins_ratio, del_ratio
 end
 
-"""
-error_rate: mean of Beta distribution for per-base errors
-error_std: standard deviation of Beta distribution
-codon: if true, only do codon indels
 
-"""
-function sample_from_template(template,
-                              sub_part, ins_part, del_part,
-                              error_rate, error_std;
-                              codon=true)
-    sub_ratio, ins_ratio, del_ratio = ratios(sub_part, ins_part, del_part)
-    # do deletions
-    del_rate = error_rate * del_ratio
-    if codon
-        del_rate /= 3
+function substitute(base, p::Float64)
+    if Base.rand(Bernoulli(x)) == 1
+        return mutate_base(base)
     end
-    del_d = Bernoulli(del_rate)
-    seq = DNANucleotide[]
+    return base
+end
+
+
+function do_substitutions(template::DNASequence,
+                          actual_error_p::Vector{Float64},
+                          sub_ratio::Float64)
+    sub_p = actual_error_p * sub_ratio
+    seq = copy(template)
+    # do substitutions
+    for i = 1:length(seq)
+        if Base.rand(Bernoulli(sub_p[i])) == 1
+            seq[i] = mutate_base(seq[i])
+        end
+    end
+    return seq
+end
+
+
+function do_deletions(seq::DNASequence,
+                      actual_error_p::Vector{Float64},
+                      del_ratio::Float64,
+                      codon::Bool)
+    if codon && length(seq) % 3 != 0
+        error("sequence length is not multiple of 3")
+    end
+    # ajust probabilities for ratios
+    del_p = actual_error_p * del_ratio
+    if codon
+        # adjust for multiple tests
+        # first and last bases only get checked once, so no adjustment necessary
+        # bases second from ends get checked twice
+        del_p[2] /= 2.0
+        del_p[end-1] /= 2.0
+        # all others get checked three times
+        del_p[3:end-2] /= 3.0
+    end
+    final_seq = []
+    final_actual_error_p = Float64[]
     skip = 0
-    for j = 1:length(template)
+    for i = 1:(length(seq))
         if skip > 0
             skip -= 1
             continue
         end
-        if Distributions.rand(del_d) == 0 || (codon && ((length(template) - j) < 2))
-            push!(seq, template[j])
+        p = del_p[i]
+        if codon
+            if i > length(seq) - 3
+                p = 0.0
+            else
+                p = 1-prod(1-del_p[i:i+2])
+            end
+        end
+        if Base.rand(Bernoulli(p)) == 1
+            skip = codon ? 2 : 0
         else
-            # do deletion
-            if codon
-                skip = 2
-            end
+            push!(final_seq, seq[i])
+            push!(final_actual_error_p, actual_error_p[i])
         end
     end
-
-    # generate per-base error probs
-    min_prob = to_prob(Float64(typemax(UInt8)))
-    error_d = BetaAlt(error_rate, error_std, minval=min_prob)
-    probs = myrand(error_d, length(seq))
-
-    # do substitutions
-    if sub_ratio > 0
-        sub_d = Bernoulli(error_rate * sub_ratio)
-        for j = 1:length(seq)
-            s_rate = probs[j] * sub_ratio
-            if s_rate > 0 && Distributions.rand(Bernoulli(s_rate)) == 1
-                seq[j] = mutate_base(seq[j])
-            end
-        end
-    end
-
-    final_seq = DNANucleotide[]
-    final_probs = Float64[]
-    if codon
-        ins_ratio /= 3
-    end
-    # do insertions, drawing new phred scores
-    if ins_ratio > 0
-        for j = 1:length(seq)
-            push!(final_seq, seq[j])
-            push!(final_probs, probs[j])
-            ins_rate = probs[j] * ins_ratio
-            while Distributions.rand(Bernoulli(ins_rate)) == 1
-                for k=1:(codon ? 3 : 1)
-                    push!(final_seq, rbase())
-                    push!(final_probs, rand(error_d))
-                end
-            end
-        end
-    else
-        final_seq = seq
-        final_probs = probs
-    end
-    # round phreds and cap value so they fit in a UInt8, which
-    # is used by BioJulia's FASTQRecord.
-    log_ps = log10(final_probs)
-    return DNASequence(final_seq), convert(Vector{Float64}, log_ps)
+    return DNASequence(final_seq), final_actual_error_p
 end
 
+
+function do_insertions(seq::DNASequence,
+                       actual_error_p::Vector{Float64},
+                       ins_ratio::Float64,
+                       codon::Bool)
+    if codon && length(seq) % 3 != 0
+        error("sequence length is not multiple of 3")
+    end
+    # do insertions
+    ins_p = actual_error_p * ins_ratio
+    if codon
+        ins_p /= 3.0
+    end
+    final_seq = []
+    final_actual_error_p = Float64[]
+    for i = 1:length(seq)
+        p = ins_p[i]
+        actual_p = actual_error_p[i]
+        if Base.rand(Bernoulli(p)) == 1
+            if codon
+                push!(final_seq, random_codon()...)
+                push!(final_actual_error_p, collect(repeated(actual_p, 3))...)
+            else
+                push!(final_seq, rbase())
+                push!(final_actual_error_p, actual_p)
+            end
+        end
+        push!(final_seq, seq[i])
+        push!(final_actual_error_p, actual_p)
+    end
+    return DNASequence(final_seq), final_actual_error_p
+end
+
+
+function sample_from_reference(reference::DNASequence,
+                               error_rate::Float64,
+                               error_ratios::Tuple{Float64, Float64, Float64})
+    sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
+    error_p = error_rate *  ones(length(reference))
+
+    template = do_substitutions(reference, error_p, sub_ratio)
+    template, error_p = do_deletions(template, error_p, del_ratio, true)
+    template, error_p = do_insertions(template, error_p, ins_ratio, true)
+
+    return DNASequence(template)
+end
+
+
+"""
+error_ratios: (sub, ins, del)
+template_error_p: vector of per-base error rates
+actual_error_std: standard deviation of Beta distribution
+    for actual errors
+reported_error_std: standard deviation of Beta distribution
+    for reported erros
+codon: if true, only do codon indels
+
+"""
+function sample_from_template(template::DNASequence,
+                              template_error_p::Vector{Float64},
+                              error_ratios::Tuple{Float64, Float64, Float64},
+                              actual_error_std::Float64,
+                              reported_error_std::Float64)
+    sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
+
+    actual_error_p = draw_error_vector(template_error_p,
+                                       actual_error_std)
+
+    seq = do_substitutions(template, actual_error_p, sub_ratio)
+    seq, actual_error_p = do_deletions(seq, actual_error_p, del_ratio, false)
+    seq, actual_error_p = do_insertions(seq, actual_error_p, ins_ratio, false)
+
+    reported_error_p = draw_error_vector(actual_error_p,
+                                         reported_error_std)
+
+    return DNASequence(seq), actual_error_p, reported_error_p
+end
+
+"""
+nseqs: number of sequences to sample
+len: length of the reference
+template_error_rate: overall error rate for the template
+template_error_ratios: (sub, ins, del) template error ratios
+template_error_mean: mean of Beta distribution for drawing
+    per-base template sequencing error rates
+template_error_std: standard deviation of same Beta 
+sequence_error_std: standard deviation for drawing actual
+    sequence per-base error rate
+sequence_quality_std: standard deviation for drawing reported
+    sequence per-base error rate
+sequence_error_ratios: (sub, ins, del) sequence error ratios
+
+"""
 function sample(nseqs::Int, len::Int,
                 template_error_rate::Float64,
-                t_sub_part::Float64, t_ins_part::Float64, t_del_part::Float64,
-                max_error_rate::Float64,
-                sub_part::Float64, ins_part::Float64, del_part::Float64;
-                error_rate_alpha::Float64=5.0, error_rate_beta::Float64=1.0,
-                error_std::Float64=0.01)
+                template_error_ratios::Tuple{Float64, Float64, Float64},
+                template_error_mean::Float64,
+                template_error_std::Float64,
+                sequence_actual_std::Float64,
+                sequence_reported_std::Float64,
+                sequence_error_ratios::Tuple{Float64, Float64, Float64})
     if len % 3 != 0
         error("Reference length must be a multiple of three")
     end
 
-    t_sub_ratio, t_ins_ratio, t_del_ratio = ratios(t_sub_part, t_ins_part, t_del_part)
     reference = random_seq(len)
-    template, template_log_p = sample_from_template(reference,
-                                                    t_sub_ratio, t_ins_ratio, t_del_ratio,
-                                                    template_error_rate, error_std,
-                                                    codon=true)
+    template = sample_from_reference(reference,
+                                     template_error_rate,
+                                     template_error_ratios)
 
+    min_prob = to_prob(Float64(typemax(UInt8)))
+    dist = BetaAlt(template_error_mean, template_error_std, minval=min_prob)
+    template_error_p = Float64[rand(dist) for i = 1:length(template)]
 
-    error_d = Beta(error_rate_alpha, error_rate_beta)
-    sub_ratio, ins_ratio, del_ratio = ratios(sub_part, ins_part, del_part)
-
+    # left off here
     seqs = DNASequence[]
-    log_ps = Vector{Float64}[]
-    error_rates = Float64[]
+    actual_error_ps = Vector{Float64}[]
+    reported_error_ps = Vector{Float64}[]
 
     for i = 1:nseqs
-        error_rate = Distributions.rand(error_d) * max_error_rate
-        seq, log_p = sample_from_template(template,
-                                          sub_ratio, ins_ratio, del_ratio,
-                                          error_rate, error_std, codon=false)
+        seq, actual_error_p, reported_error_p = sample_from_template(template,
+                                                                     template_error_p,
+                                                                     sequence_error_ratios,
+                                                                     sequence_actual_std,
+                                                                     sequence_reported_std)
         push!(seqs, seq)
-        push!(log_ps, log_p)
-        push!(error_rates, error_rate)
+        push!(actual_error_ps, actual_error_p)
+        push!(reported_error_ps, reported_error_p)
     end
-    return DNASequence(reference), DNASequence(template), template_log_p, seqs, log_ps, error_rates
+    return DNASequence(reference), DNASequence(template), template_error_p, seqs, actual_error_ps, reported_error_ps
 end
 
 """Write template into FASTA and sequences into FASTQ."""

@@ -911,14 +911,14 @@ end
 Alternate quiver2() using BioJulia types.
 
 """
-function quiver2{T<:NucleotideSequence}(template::DNASequence,
-                                        sequences::Vector{T},
-                                        log_ps::Vector{Vector{Float64}};
-                                        reference::DNASequence=DNASequence(""),
-                                        kwargs...)
-    new_reference = convert(AbstractString, reference)
-    new_template = convert(AbstractString, template)
-    new_sequences = ASCIIString[convert(AbstractString, s) for s in sequences]
+function quiver2(template::DNASequence,
+                 sequences::Vector{DNASequence},
+                 log_ps::Vector{Vector{Float64}};
+                 reference::DNASequence=DNASequence(""),
+                 kwargs...)
+    new_reference = convert(ASCIIString, reference)
+    new_template = convert(ASCIIString, template)
+    new_sequences = ASCIIString[convert(ASCIIString, s) for s in sequences]
     result, base_scores, insertion_scores, info = quiver2(new_template, new_sequences, log_ps;
                                                           reference=new_reference,
                                                           kwargs...)
