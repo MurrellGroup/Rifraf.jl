@@ -47,6 +47,9 @@ function restore(y, lower, upper)
 end
 
 
+const MIN_PROB = 1e-10
+
+
 """A beta distribution parametrized by mean and standard deviation."""
 type BetaAlt <: Sampleable{Univariate,Continuous}
     mean::Float64
@@ -86,12 +89,17 @@ function rand(s::BetaAlt)
 end
 
 """
-Draw a new error vector from a vector of means.
+Add independent gaussian noise to each position in vector.
+
+Keep within range [0, 1].
 """
-function draw_error_vector(means::Vector{Float64},
-                           std::Float64)
-    min_prob = to_prob(Float64(typemax(UInt8)))
-    return Float64[rand(BetaAlt(x, std, minval=min_prob)) for x in means]
+function jitter_vector(x::Vector{Float64},
+                       std::Float64)
+    error = randn(length(x)) * std
+    result = x + error
+    result[map(a -> a < MIN_PROB, result)] = MIN_PROB
+    result[map(a -> a > 1.0, result)] = 1.0
+    return result
 end
 
 
@@ -236,15 +244,15 @@ function sample_from_template(template::DNASequence,
                               reported_error_std::Float64)
     sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
 
-    actual_error_p = draw_error_vector(template_error_p,
-                                       actual_error_std)
+    actual_error_p = jitter_vector(template_error_p,
+                                   actual_error_std)
 
     seq = do_substitutions(template, actual_error_p, sub_ratio)
     seq, actual_error_p = do_deletions(seq, actual_error_p, del_ratio, false)
     seq, actual_error_p = do_insertions(seq, actual_error_p, ins_ratio, false)
 
-    reported_error_p = draw_error_vector(actual_error_p,
-                                         reported_error_std)
+    reported_error_p = jitter_vector(actual_error_p,
+                                     reported_error_std)
 
     return DNASequence(seq), actual_error_p, reported_error_p
 end
@@ -257,9 +265,9 @@ template_error_ratios: (sub, ins, del) template error ratios
 template_error_mean: mean of Beta distribution for drawing
     per-base template sequencing error rates
 template_error_std: standard deviation of same Beta 
-sequence_error_std: standard deviation for drawing actual
+sequence_error_std: standard deviation for jittering actual
     sequence per-base error rate
-sequence_quality_std: standard deviation for drawing reported
+sequence_quality_std: standard deviation for jittering reported
     sequence per-base error rate
 sequence_error_ratios: (sub, ins, del) sequence error ratios
 
@@ -280,9 +288,7 @@ function sample(nseqs::Int, len::Int,
     template = sample_from_reference(reference,
                                      template_error_rate,
                                      template_error_ratios)
-
-    min_prob = to_prob(Float64(typemax(UInt8)))
-    dist = BetaAlt(template_error_mean, template_error_std, minval=min_prob)
+    dist = BetaAlt(template_error_mean, template_error_std, minval=MIN_PROB)
     template_error_p = Float64[rand(dist) for i = 1:length(template)]
 
     # left off here
