@@ -48,6 +48,7 @@ end
 
 
 const MIN_PROB = 1e-10
+const MAX_PROB = 0.5
 
 
 """A beta distribution parametrized by mean and standard deviation."""
@@ -67,18 +68,18 @@ type BetaAlt <: Sampleable{Univariate,Continuous}
             error("mean must be in ($minval, $maxval)\n")
         end
         mean_scaled = normalize(mean, minval, maxval)
-        scale = (maxval - minval)
-        std_scaled = std / scale
+        std_scaled = std / (maxval - minval)
         if std_scaled <= 0
             error("std must be > 0")
         end
         variance = std_scaled ^ 2
         max_variance = mean_scaled * (1 - mean_scaled)
         if variance >= max_variance
-            variance = max_variance * 0.9999
+            error("variance cannot be larger than mean * (1 - mean)")
         end
-        alpha = (((1 - mean_scaled) / variance) - 1 / mean_scaled) * (mean_scaled ^ 2)
-        beta = alpha * (1 / mean_scaled - 1)
+        nu = mean_scaled * (1 - mean_scaled) / variance - 1.0
+        alpha = mean_scaled * nu
+        beta = (1.0 - mean_scaled) * nu
         d = Beta(alpha, beta)
         new(mean, std, minval, maxval, alpha, beta, d)
     end
@@ -89,16 +90,16 @@ function rand(s::BetaAlt)
 end
 
 """
-Add independent gaussian noise to each position in vector.
+Add independent log-gaussian noise to each position in vector.
 
 Keep within range [0, 1].
 """
 function jitter_vector(x::Vector{Float64},
-                       std::Float64)
-    error = randn(length(x)) * std
-    result = x + error
+                       log_std::Float64)
+    error = randn(length(x)) * log_std
+    result = exp10(log10(x) + error)
     result[map(a -> a < MIN_PROB, result)] = MIN_PROB
-    result[map(a -> a > 1.0, result)] = 1.0
+    result[map(a -> a > MAX_PROB, result)] = MAX_PROB
     return result
 end
 
@@ -240,19 +241,19 @@ codon: if true, only do codon indels
 function sample_from_template(template::DNASequence,
                               template_error_p::Vector{Float64},
                               error_ratios::Tuple{Float64, Float64, Float64},
-                              actual_error_std::Float64,
-                              reported_error_std::Float64)
+                              log_actual_error_std::Float64,
+                              log_reported_error_std::Float64)
     sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
 
     actual_error_p = jitter_vector(template_error_p,
-                                   actual_error_std)
+                                   log_actual_error_std)
 
     seq = do_substitutions(template, actual_error_p, sub_ratio)
     seq, actual_error_p = do_deletions(seq, actual_error_p, del_ratio, false)
     seq, actual_error_p = do_insertions(seq, actual_error_p, ins_ratio, false)
 
     reported_error_p = jitter_vector(actual_error_p,
-                                     reported_error_std)
+                                     log_reported_error_std)
 
     return DNASequence(seq), actual_error_p, reported_error_p
 end
@@ -264,12 +265,12 @@ template_error_rate: overall error rate for the template
 template_error_ratios: (sub, ins, del) template error ratios
 template_error_mean: mean of Beta distribution for drawing
     per-base template sequencing error rates
-template_error_std: standard deviation of same Beta 
-sequence_error_std: standard deviation for jittering actual
+template_error_std: standard deviation of same Beta
+log_seq_actual_std: standard deviation for jittering actual
     sequence per-base error rate
-sequence_quality_std: standard deviation for jittering reported
+log_seq_quality_std: standard deviation for jittering reported
     sequence per-base error rate
-sequence_error_ratios: (sub, ins, del) sequence error ratios
+seq_error_ratios: (sub, ins, del) sequence error ratios
 
 """
 function sample(nseqs::Int, len::Int,
@@ -277,9 +278,9 @@ function sample(nseqs::Int, len::Int,
                 template_error_ratios::Tuple{Float64, Float64, Float64},
                 template_error_mean::Float64,
                 template_error_std::Float64,
-                sequence_actual_std::Float64,
-                sequence_reported_std::Float64,
-                sequence_error_ratios::Tuple{Float64, Float64, Float64})
+                log_seq_actual_std::Float64,
+                log_seq_reported_std::Float64,
+                seq_error_ratios::Tuple{Float64, Float64, Float64})
     if len % 3 != 0
         error("Reference length must be a multiple of three")
     end
@@ -288,7 +289,8 @@ function sample(nseqs::Int, len::Int,
     template = sample_from_reference(reference,
                                      template_error_rate,
                                      template_error_ratios)
-    dist = BetaAlt(template_error_mean, template_error_std, minval=MIN_PROB)
+    dist = BetaAlt(template_error_mean, template_error_std,
+                   minval=MIN_PROB, maxval=MAX_PROB)
     template_error_p = Float64[rand(dist) for i = 1:length(template)]
 
     # left off here
@@ -299,14 +301,15 @@ function sample(nseqs::Int, len::Int,
     for i = 1:nseqs
         seq, actual_error_p, reported_error_p = sample_from_template(template,
                                                                      template_error_p,
-                                                                     sequence_error_ratios,
-                                                                     sequence_actual_std,
-                                                                     sequence_reported_std)
+                                                                     seq_error_ratios,
+                                                                     log_seq_actual_std,
+                                                                     log_seq_reported_std)
         push!(seqs, seq)
         push!(actual_error_ps, actual_error_p)
         push!(reported_error_ps, reported_error_p)
     end
-    return DNASequence(reference), DNASequence(template), template_error_p, seqs, actual_error_ps, reported_error_ps
+    return (DNASequence(reference), DNASequence(template),
+            template_error_p, seqs, actual_error_ps, reported_error_ps)
 end
 
 """Write template into FASTA and sequences into FASTQ."""
