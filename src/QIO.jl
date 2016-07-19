@@ -16,21 +16,19 @@ end
 function read_fastq(filename)
     stream = open(filename, FASTQ)
     seqs = DNASequence[]
-    log_ps = Vector{Float64}[]
+    phreds = Vector{UInt8}[]
     for entry in stream
         push!(seqs, entry.seq)
-        lps = Float64[Float64(q) / (-10.0) for q in entry.metadata.quality]
-        push!(log_ps, lps)
+        push!(phreds, entry.metadata.quality)
     end
-    return seqs, log_ps
+    return seqs, phreds
 end
 
-function write_fastq(filename, seqs, log_ps)
+function write_fastq(filename, seqs, phreds::Vector{Vector{UInt8}})
     stream = open(filename, "w")
     i = 0
-    for (s, lps) in zip(seqs, log_ps)
+    for (s, q) in zip(seqs, phreds)
         i += 1
-        q = UInt8[UInt8(min(round(-10 * p), 80)) for p in lps]
         write(stream, Seq.FASTQSeqRecord(string("seq_", i), s, Seq.FASTQMetadata("", q)))
     end
     close(stream)

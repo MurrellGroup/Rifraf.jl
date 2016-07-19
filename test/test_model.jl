@@ -81,12 +81,12 @@ function test_random_mutation(mutation, template_len)
     log_actual_error_std = 0.5
     log_reported_error_std = 0.5
 
-    bioseq, actual, reported = sample_from_template(template_seq,
-                                                    template_error_p,
-                                                    ratios,
-                                                    log_actual_error_std,
-                                                    log_reported_error_std)
-    log_p = log10(reported)
+    bioseq, actual, phreds = sample_from_template(template_seq,
+                                                  template_error_p,
+                                                  ratios,
+                                                  log_actual_error_std,
+                                                  log_reported_error_std)
+    log_p = Float64[Float64(q) / (-10.0) for q in phreds]
     seq = convert(AbstractString, bioseq)
     bandwidth = max(3 * abs(length(template) - length(seq)), 5)
     new_template = Mutations.update_template(template, mutation)
@@ -190,22 +190,21 @@ function test_quiver2()
     for i in 1:n
         use_ref = rand([true, false])
         (reference, template, template_error, reads,
-         actual, reported) = sample(n_seqs, ref_len,
-                                    template_error_rate,
-                                    template_ratios,
-                                    template_error_mean,
-                                    template_error_std,
-                                    log_seq_actual_std,
-                                    log_seq_reported_std,
-                                    seq_error_ratios)
+         actual, phreds) = sample(n_seqs, ref_len,
+                                  template_error_rate,
+                                  template_ratios,
+                                  template_error_mean,
+                                  template_error_std,
+                                  log_seq_actual_std,
+                                  log_seq_reported_std,
+                                  seq_error_ratios)
         if !use_ref
             reference = DNASequence("")
         end
         initial_template = reads[1]
-        log_ps = Vector{Float64}[log10(r) for r in reported]
 
         result, q1, q2, info = Model.quiver2(initial_template, reads,
-                                              log_ps;
+                                              phreds;
                                               reference=reference,
                                               bandwidth=3, min_dist=9, batch=5,
                                               max_iters=100)

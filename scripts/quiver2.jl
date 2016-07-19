@@ -70,12 +70,12 @@ end
     end
     reference = length(reffile) > 0 ? read_single(reffile) : DNASequence("")
 
-    sequences, log_ps = read_fastq(file)
+    sequences, phreds = read_fastq(file)
     template = sequences[1]
     if args["verbose"] > 0
         println(STDERR, "starting run")
     end
-    return quiver2(template, sequences, log_ps,
+    return quiver2(template, sequences, phreds,
                    reference=reference,
                    bandwidth=args["bandwidth"],
                    min_dist=args["min-dist"],

@@ -733,7 +733,7 @@ end
 
 function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
-                 log_ps::Vector{Vector{Float64}};
+                 phreds::Vector{Vector{UInt8}};
                  reference::AbstractString="",
                  penalties::Penalties=default_penalties,
                  ref_mismatch::Float64=-3.0,
@@ -759,6 +759,8 @@ function quiver2(template::AbstractString,
     if ref_mismatch >= 0
         error("reference mismatch penalty must be less than 0")
     end
+
+    log_ps = phreds / (-10.0)
 
     if batch < 0 || batch > length(sequences)
         batch = length(sequences)
@@ -913,13 +915,13 @@ Alternate quiver2() using BioJulia types.
 """
 function quiver2(template::DNASequence,
                  sequences::Vector{DNASequence},
-                 log_ps::Vector{Vector{Float64}};
+                 phreds::Vector{Vector{UInt8}};
                  reference::DNASequence=DNASequence(""),
                  kwargs...)
     new_reference = convert(ASCIIString, reference)
     new_template = convert(ASCIIString, template)
     new_sequences = ASCIIString[convert(ASCIIString, s) for s in sequences]
-    result, base_scores, insertion_scores, info = quiver2(new_template, new_sequences, log_ps;
+    result, base_scores, insertion_scores, info = quiver2(new_template, new_sequences, phreds;
                                                           reference=new_reference,
                                                           kwargs...)
     return DNASequence(result), base_scores, insertion_scores, info

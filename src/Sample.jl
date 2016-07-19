@@ -25,17 +25,12 @@ function random_codon()
     return (rbase(), rbase(), rbase())
 end
 
-
 function random_seq(n)
     return DNASequence([rbase() for i in 1:n])
 end
 
 function to_phred(x)
-    return -10.0 * log10(x)
-end
-
-function to_prob(x)
-    return exp10(-x / 10.0)
+    return UInt8(min(round(-10.0 * log10(x)), typemax(UInt8)))
 end
 
 function normalize(x, lower, upper)
@@ -254,8 +249,8 @@ function sample_from_template(template::DNASequence,
 
     reported_error_p = jitter_vector(actual_error_p,
                                      log_reported_error_std)
-
-    return DNASequence(seq), actual_error_p, reported_error_p
+    phreds = UInt8[to_phred(p) for p in reported_error_p]
+    return DNASequence(seq), actual_error_p, phreds
 end
 
 """
@@ -296,36 +291,35 @@ function sample(nseqs::Int, len::Int,
     # left off here
     seqs = DNASequence[]
     actual_error_ps = Vector{Float64}[]
-    reported_error_ps = Vector{Float64}[]
+    phreds = Vector{UInt8}[]
 
     for i = 1:nseqs
-        (seq, actual_error_p,
-         reported_error_p) = sample_from_template(template,
-                                                  template_error_p,
-                                                  seq_error_ratios,
-                                                  log_seq_actual_std,
-                                                  log_seq_reported_std)
+        (seq, actual_error_p, phred) = sample_from_template(template,
+                                                            template_error_p,
+                                                            seq_error_ratios,
+                                                            log_seq_actual_std,
+                                                            log_seq_reported_std)
         push!(seqs, seq)
         push!(actual_error_ps, actual_error_p)
-        push!(reported_error_ps, reported_error_p)
+        push!(phreds, phred)
     end
     return (DNASequence(reference), DNASequence(template),
-            template_error_p, seqs, actual_error_ps, reported_error_ps)
+            template_error_p, seqs, actual_error_ps, phreds)
 end
 
 """Write template into FASTA and sequences into FASTQ."""
-function write_samples(filename, reference, template, seqs, log_ps)
+function write_samples(filename, reference, template, seqs, phreds)
     write_single(string(filename, "-reference.fasta"), reference, name="reference")
     write_single(string(filename, "-template.fasta"), template, name="template")
-    write_fastq(string(filename, "-sequences.fastq"), seqs, log_ps)
+    write_fastq(string(filename, "-sequences.fastq"), seqs, phreds)
 end
 
 """Read template from FASTA and sequences from FASTQ."""
 function read_samples(filename)
     reference = read_single(string(filename, "-reference.fasta"))
     template = read_single(string(filename, "-template.fasta"))
-    seqs, log_ps = read_fastq(string(filename, "-sequences.fastq"))
-    return reference, template, seqs, log_ps
+    seqs, phreds = read_fastq(string(filename, "-sequences.fastq"))
+    return reference, template, seqs, phreds
 end
 
 end
