@@ -73,16 +73,20 @@ end
 
 
 function test_random_mutation(mutation, template_len)
-    error_rate = 0.1
-    sub_ratio = 2 / 10
-    ins_ratio = 4 / 10
-    del_ratio = 4 / 10
-    error_std = 0.01
     template_seq = random_seq(template_len)
     template = convert(AbstractString, template_seq)
-    bioseq, log_p = sample_from_template(template_seq,
-                                         sub_ratio, ins_ratio, del_ratio,
-                                         error_rate, error_std)
+
+    template_error_p = Float64[0.1 for i=1:length(template)]
+    ratios = (2.0 / 10.0, 4.0 / 10.0, 4.0 / 10.0)
+    log_actual_error_std = 0.5
+    log_reported_error_std = 0.5
+
+    bioseq, actual, reported = sample_from_template(template_seq,
+                                                    template_error_p,
+                                                    ratios,
+                                                    log_actual_error_std,
+                                                    log_reported_error_std)
+    log_p = log10(reported)
     seq = convert(AbstractString, bioseq)
     bandwidth = max(3 * abs(length(template) - length(seq)), 5)
     new_template = Mutations.update_template(template, mutation)
@@ -147,7 +151,6 @@ end
 
 function test_no_single_indels()
     reference = "AAAGGGTTT"
-    ref_log_p = ones(length(reference))
     ref_log_p = -2.0 * ones(length(reference))
 
     penalties = Penalties(1.0, 1.0, -2.0, -2.0)
@@ -171,16 +174,13 @@ function test_quiver2()
     n_seqs=10
     ref_len=90
     template_error_rate = 0.03
-    t_sub_part = 8.0
-    t_ins_part = 1.0
-    t_del_part = 1.0
+    template_ratios = (8.0, 1.0, 1.0)
 
-    mean_error_rate = 0.01
-    max_error_rate = 0.01
-    sub_ratio = 1.0 / 7.0
-    ins_ratio = 3.0 / 7.0
-    del_ratio = 3.0 / 7.0
-    error_std = 0.01
+    template_error_mean = 0.01
+    template_error_std = 0.001
+    log_seq_actual_std = 0.3
+    log_seq_reported_std = 0.3
+    seq_error_ratios = (1.0 / 7.0, 3.0 / 7.0, 3.0 / 7.0)
 
     n = 100
     n_wrong = 0
@@ -189,18 +189,21 @@ function test_quiver2()
 
     for i in 1:n
         use_ref = rand([true, false])
-        reference, template, template_log_p, reads, log_ps, error_rates =
-            sample(n_seqs, ref_len,
-                   template_error_rate,
-                   t_sub_part, t_ins_part, t_del_part,
-                   max_error_rate,
-                   sub_ratio, ins_ratio, del_ratio,
-                   error_std=error_std,
-                   error_rate_alpha=3.0, error_rate_beta=1.0)
+        (reference, template, template_error, reads,
+         actual, reported) = sample(n_seqs, ref_len,
+                                    template_error_rate,
+                                    template_ratios,
+                                    template_error_mean,
+                                    template_error_std,
+                                    log_seq_actual_std,
+                                    log_seq_reported_std,
+                                    seq_error_ratios)
         if !use_ref
             reference = DNASequence("")
         end
         initial_template = reads[1]
+        log_ps = Vector{Float64}[log10(r) for r in reported]
+
         result, q1, q2, info = Model.quiver2(initial_template, reads,
                                               log_ps;
                                               reference=reference,

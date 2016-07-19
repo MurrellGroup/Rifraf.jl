@@ -299,11 +299,12 @@ function sample(nseqs::Int, len::Int,
     reported_error_ps = Vector{Float64}[]
 
     for i = 1:nseqs
-        seq, actual_error_p, reported_error_p = sample_from_template(template,
-                                                                     template_error_p,
-                                                                     seq_error_ratios,
-                                                                     log_seq_actual_std,
-                                                                     log_seq_reported_std)
+        (seq, actual_error_p,
+         reported_error_p) = sample_from_template(template,
+                                                  template_error_p,
+                                                  seq_error_ratios,
+                                                  log_seq_actual_std,
+                                                  log_seq_reported_std)
         push!(seqs, seq)
         push!(actual_error_ps, actual_error_p)
         push!(reported_error_ps, reported_error_p)
