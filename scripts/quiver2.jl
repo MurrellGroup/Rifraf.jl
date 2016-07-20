@@ -68,7 +68,7 @@ end
             println(STDERR, "reading reference from '$(reffile)'")
         end
     end
-    reference = length(reffile) > 0 ? read_single(reffile) : DNASequence("")
+    reference = length(reffile) > 0 ? read_fasta(reffile)[1] : DNASequence("")
 
     sequences, phreds = read_fastq(file)
     template = sequences[1]

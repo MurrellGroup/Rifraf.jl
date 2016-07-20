@@ -316,8 +316,8 @@ end
 
 """Read template from FASTA and sequences from FASTQ."""
 function read_samples(filename)
-    reference = read_single(string(filename, "-reference.fasta"))
-    template = read_single(string(filename, "-template.fasta"))
+    reference = read_fasta(string(filename, "-reference.fasta"))[1]
+    template = read_fasta(string(filename, "-template.fasta"))[1]
     seqs, phreds = read_fastq(string(filename, "-sequences.fastq"))
     return reference, template, seqs, phreds
 end

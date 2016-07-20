@@ -2,7 +2,16 @@ module QIO
 
 using Bio.Seq
 
-export write_fasta, read_fastq, write_fastq, read_single, write_single
+export write_fasta, read_fastq, write_fastq, read_fasta, write_single
+
+function read_fasta(filename)
+    stream = open(filename, FASTA)
+    seqs = DNASequence[]
+    for entry in stream
+        push!(seqs, entry.seq)
+    end
+    return seqs
+end
 
 function write_fasta(filename, seqs)
     stream = open(filename, "w")
@@ -32,14 +41,6 @@ function write_fastq(filename, seqs, phreds::Vector{Vector{UInt8}})
         write(stream, Seq.FASTQSeqRecord(string("seq_", i), s, Seq.FASTQMetadata("", q)))
     end
     close(stream)
-end
-
-function read_single(filename)
-    stream = open(filename, FASTA)
-    entry = Seq.FASTADNASeqRecord()
-    while read!(stream, entry)
-        return entry.seq
-    end
 end
 
 function write_single(filename, seq; name::AbstractString="seq")
