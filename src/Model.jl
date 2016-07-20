@@ -706,10 +706,20 @@ function replace_ns!(state::State, seqs::Vector{ASCIIString},
 end
 
 
-"""Generate per-base template log differences"""
-function estimate_quality(state::State,
-                          sequences::Vector{ASCIIString},
-                          log_ps::Vector{Vector{Float64}})
+"""convert per-mutation log differences to a per-base error rate"""
+function normalize_log_differences(position_scores, insertion_scores)
+    # per-base insertion score is mean of neighboring insertions
+    position_exp = exp10(position_scores)
+    ins_exp = exp10(insertion_scores)
+    position_probs = broadcast(/, position_exp, sum(position_exp, 2))
+    ins_probs = broadcast(/, ins_exp, 1.0 + sum(ins_exp, 2))
+    return position_probs, ins_probs
+end
+
+
+function estimate_probs(state::State,
+                        sequences::Vector{ASCIIString},
+                        log_ps::Vector{Vector{Float64}})
     # `position_scores[i]` gives the following log probabilities
     # for `template[i]`: [A, C, G, T, -]
     position_scores = zeros(length(state.template), 5)
@@ -728,7 +738,18 @@ function estimate_quality(state::State,
             insertion_scores[m.pos + 1, baseints[m.base]] = score
         end
     end
-    return position_scores, insertion_scores
+    return normalize_log_differences(position_scores, insertion_scores)
+end
+
+
+function estimate_point_probs(position_probs, insertion_probs)
+    no_point_error_prob = maximum(position_probs, 2)
+    # multiple by 0.5 to avoid double counting.
+    # TODO: is this the right way to do this?
+    no_ins_error_prob = 1.0 - 0.5 * sum(insertion_probs, 2)
+    return 1.0 - broadcast(*, no_point_error_prob,
+                           no_ins_error_prob[1:end-1],
+                           no_ins_error_prob[2:end])
 end
 
 
@@ -906,8 +927,9 @@ function quiver2(template::AbstractString,
     recompute!(state, sequences, log_ps,
                reference, reference_log_p, penalties,
                bandwidth, true, true)
-    base_scores, insertion_scores = estimate_quality(state, sequences, log_ps)
-    return state.template, base_scores, insertion_scores, info
+    base_probs, insertion_probs = estimate_probs(state, sequences, log_ps)
+    point_probs = estimate_point_probs(base_probs, insertion_probs)
+    return state.template, base_probs, insertion_probs, point_probs, info
 end
 
 """
@@ -922,10 +944,12 @@ function quiver2(template::DNASequence,
     new_reference = convert(ASCIIString, reference)
     new_template = convert(ASCIIString, template)
     new_sequences = ASCIIString[convert(ASCIIString, s) for s in sequences]
-    result, base_scores, insertion_scores, info = quiver2(new_template, new_sequences, phreds;
-                                                          reference=new_reference,
-                                                          kwargs...)
-    return DNASequence(result), base_scores, insertion_scores, info
+    (result, base_probs, insertion_probs,
+     point_probs, info) = quiver2(new_template, new_sequences, phreds;
+                                  reference=new_reference,
+                                  kwargs...)
+    return (DNASequence(result), base_probs,
+            insertion_probs, point_probs, info)
 end
 
 end
