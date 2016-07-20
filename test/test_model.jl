@@ -13,12 +13,13 @@ function test_perfect_forward()
     template = "AA"
     seq = "AA"
     penalty = -3.0
+    inv = log10(1.0 - exp10(penalty))
     log_p = fill(penalty, length(seq))
     A = Model.forward(template, seq, log_p, bandwidth)
     # transpose because of column-major order
     expected = transpose(reshape([[0.0, penalty, 0.0];
-                                  [penalty, 0.0, penalty];
-                                  [0.0, penalty, 0.0]],
+                                  [penalty, inv, inv + penalty];
+                                  [0.0, inv + penalty, 2 * inv]],
                                  (3, 3)))
     @test full(A) == expected
 end
@@ -28,11 +29,12 @@ function test_imperfect_backward()
     template = "AA"
     seq = "AT"
     penalty = -3.0
+    inv = log10(1.0 - exp10(penalty))
     log_p = fill(penalty, length(seq))
     B = Model.backward(template, seq, log_p, bandwidth)
-    expected = transpose(reshape([[penalty, penalty, 0.0];
+    expected = transpose(reshape([[inv + penalty, inv + penalty, 0.0];
                                   [2*penalty, penalty, penalty];
-                                  [0.0,         penalty, 0.0]],
+                                  [0.0, penalty, 0.0]],
                                  (3, 3)))
     @test full(B) == expected
 end
@@ -42,12 +44,13 @@ function test_imperfect_forward()
     template = "AA"
     seq = "AT"
     penalty = -3.0
+    inv = log10(1.0 - exp10(penalty))
     log_p = fill(penalty, length(seq))
     A = Model.forward(template, seq, log_p, bandwidth)
     B = Model.backward(template, seq, log_p, bandwidth)
     expected = transpose(reshape([[0.0, penalty, 0.0];
-                                  [penalty, 0.0, penalty];
-                                  [0.0, penalty, penalty]],
+                                  [penalty, inv, inv + penalty];
+                                  [0.0, inv + penalty, inv + penalty]],
                                  (3, 3)))
 
     @test full(A) == expected

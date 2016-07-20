@@ -99,10 +99,10 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
                 log_p::Float64, next_log_p::Float64,
                 allow_codon_indels::Bool, penalties::Penalties)
     result = (typemin(Float64), match)
-    match_penalty = 0.0
-    if t_base != 'N'
-        # TODO: precompute inv_log_p
-        match_penalty = (s_base == t_base ? log10(1.0 - exp10(log_p)) : log_p)
+    # TODO: precompute inv_log_p
+    match_penalty = (s_base == t_base ? log10(1.0 - exp10(log_p)) : log_p)
+    if t_base == 'N'
+        match_penalty = 0.0
     end
     ins_penalty = log_p * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
     del_penalty = mean([log_p, next_log_p]) * (allow_codon_indels ? penalties.del_multiplier : 1.0)
@@ -333,7 +333,8 @@ function score_mutation(mutation::Union{Insertion,Substitution},
         end
         if prev_start < real_i <= (prev_stop + 1)
             # (mis)match
-            scores[1] = max(scores[1], A[real_i - 1, ajprev] + (mutation.base == seq[seq_i] ? 0.0 : penalty))
+            mm_penalty = (mutation.base == seq[seq_i] ? log10(1.0 - exp10(penalty)) : penalty)
+            scores[1] = max(scores[1], A[real_i - 1, ajprev] + mm_penalty)
         end
         if prev_start <= real_i <= prev_stop
             # deletion
@@ -379,7 +380,8 @@ function compute_subcol(row_start, row_stop,
         end
         if prev_start < real_i <= (prev_stop + 1)
             # (mis)match
-            col[i] = max(col[i], prev[prev_i-1] + (base == seq[seq_i] ? 0.0 : penalty))
+            mm_penalty = (base == seq[seq_i] ? log10(1.0 - exp10(penalty)) : penalty)
+            col[i] = max(col[i], prev[prev_i-1] + mm_penalty)
         end
         if prev_start <= real_i <= prev_stop
             # deletion
