@@ -757,7 +757,7 @@ end
 
 function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
-                 phreds::Vector{Vector{UInt8}};
+                 phreds::Vector{Vector{Int8}};
                  reference::AbstractString="",
                  penalties::Penalties=default_penalties,
                  ref_mismatch::Float64=-3.0,
@@ -940,7 +940,7 @@ Alternate quiver2() using BioJulia types.
 """
 function quiver2(template::DNASequence,
                  sequences::Vector{DNASequence},
-                 phreds::Vector{Vector{UInt8}};
+                 phreds::Vector{Vector{Int8}};
                  reference::DNASequence=DNASequence(""),
                  kwargs...)
     new_reference = convert(ASCIIString, reference)

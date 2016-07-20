@@ -30,7 +30,7 @@ function random_seq(n)
 end
 
 function to_phred(x)
-    return UInt8(min(round(-10.0 * log10(x)), typemax(UInt8)))
+    return Int8(min(round(-10.0 * log10(x)), typemax(Int8)))
 end
 
 function normalize(x, lower, upper)
@@ -249,7 +249,7 @@ function sample_from_template(template::DNASequence,
 
     reported_error_p = jitter_vector(actual_error_p,
                                      log_reported_error_std)
-    phreds = UInt8[to_phred(p) for p in reported_error_p]
+    phreds = Int8[to_phred(p) for p in reported_error_p]
     return DNASequence(seq), actual_error_p, phreds
 end
 
@@ -291,7 +291,7 @@ function sample(nseqs::Int, len::Int,
     # left off here
     seqs = DNASequence[]
     actual_error_ps = Vector{Float64}[]
-    phreds = Vector{UInt8}[]
+    phreds = Vector{Int8}[]
 
     for i = 1:nseqs
         (seq, actual_error_p, phred) = sample_from_template(template,
@@ -308,18 +308,21 @@ function sample(nseqs::Int, len::Int,
 end
 
 """Write template into FASTA and sequences into FASTQ."""
-function write_samples(filename, reference, template, seqs, phreds)
-    write_single(string(filename, "-reference.fasta"), reference, name="reference")
-    write_single(string(filename, "-template.fasta"), template, name="template")
+function write_samples(filename, reference, template, template_error, seqs, phreds)
+    template_phred = Vector{Int8}[[to_phred(p) for p in template_error]]
+    write_fasta(string(filename, "-reference.fasta"), [reference])
+    write_fastq(string(filename, "-template.fastq"), [template], template_phred)
     write_fastq(string(filename, "-sequences.fastq"), seqs, phreds)
 end
 
 """Read template from FASTA and sequences from FASTQ."""
 function read_samples(filename)
     reference = read_fasta(string(filename, "-reference.fasta"))[1]
-    template = read_fasta(string(filename, "-template.fasta"))[1]
+    template_tuple = read_fastq(string(filename, "-template.fastq"))
+    template = template_tuple[1][1]
+    template_error = exp10(template_tuple[2][1] / (-10.0))
     seqs, phreds = read_fastq(string(filename, "-sequences.fastq"))
-    return reference, template, seqs, phreds
+    return reference, template, template_error, seqs, phreds
 end
 
 end
