@@ -101,7 +101,8 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
     result = (typemin(Float64), match)
     match_penalty = 0.0
     if t_base != 'N'
-        match_penalty = (s_base == t_base ? 0.0 : log_p)
+        # TODO: precompute inv_log_p
+        match_penalty = (s_base == t_base ? log10(1.0 - exp10(log_p)) : log_p)
     end
     ins_penalty = log_p * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
     del_penalty = mean([log_p, next_log_p]) * (allow_codon_indels ? penalties.del_multiplier : 1.0)
