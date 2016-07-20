@@ -565,7 +565,7 @@ function getcands(state::State,
         score = score_mutation(m, state, sequences, log_ps,
                                state.stage == frame_correction_stage,
                                reference, reference_log_p, penalties)
-        if score > state.score
+        if score > state.score && !isapprox(score, state.score)
             push!(candidates, CandMutation(m, score))
         end
     end
@@ -763,7 +763,7 @@ function quiver2(template::AbstractString,
                  ref_mismatch::Float64=-3.0,
                  cooling_rate::Float64=100.0,
                  bandwidth::Int=10, min_dist::Int=9,
-                 batch::Int=10, do_full::Bool=false,
+                 batch::Int=10,
                  max_iters::Int=100, verbose::Int=0)
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
@@ -871,7 +871,7 @@ function quiver2(template::AbstractString,
                        bandwidth, true, false)
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
-            if state.score < chosen_cands[1].score
+            if state.score < chosen_cands[1].score || isapprox(state.score, chosen_cands[1].score)
                 if verbose > 1
                     println(STDERR, "  rejecting multiple candidates in favor of best")
                 end
