@@ -757,6 +757,16 @@ function estimate_point_probs(position_probs, insertion_probs)
 end
 
 
+function estimate_indel_probs(position_probs, insertion_probs)
+    no_del_prob = 1.0 - position_probs[:, end]
+    no_ins_error_prob = 1.0 - 0.5 * sum(insertion_probs, 2)
+    result = 1.0 - broadcast(*, no_del_prob,
+                             no_ins_error_prob[1:end-1],
+                             no_ins_error_prob[2:end])
+    return reshape(result, length(result))
+end
+
+
 function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
                  phreds::Vector{Vector{Int8}};
@@ -932,8 +942,7 @@ function quiver2(template::AbstractString,
                reference, reference_log_p, penalties,
                bandwidth, true, true)
     base_probs, insertion_probs = estimate_probs(state, sequences, log_ps)
-    point_probs = estimate_point_probs(base_probs, insertion_probs)
-    return state.template, base_probs, insertion_probs, point_probs, info
+    return state.template, base_probs, insertion_probs, info
 end
 
 """
@@ -948,12 +957,11 @@ function quiver2(template::DNASequence,
     new_reference = convert(ASCIIString, reference)
     new_template = convert(ASCIIString, template)
     new_sequences = ASCIIString[convert(ASCIIString, s) for s in sequences]
-    (result, base_probs, insertion_probs,
-     point_probs, info) = quiver2(new_template, new_sequences, phreds;
-                                  reference=new_reference,
-                                  kwargs...)
-    return (DNASequence(result), base_probs,
-            insertion_probs, point_probs, info)
+    (result, base_probs,
+     insertion_probs, info) = quiver2(new_template, new_sequences, phreds;
+                                      reference=new_reference,
+                                      kwargs...)
+    return (DNASequence(result), base_probs, insertion_probs, info)
 end
 
 end

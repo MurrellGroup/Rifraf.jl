@@ -207,10 +207,10 @@ function test_quiver2()
         initial_template = reads[1]
 
         result, q1, q2, info = Model.quiver2(initial_template, reads,
-                                              phreds;
-                                              reference=reference,
-                                              bandwidth=3, min_dist=9, batch=5,
-                                              max_iters=100)
+                                             phreds;
+                                             reference=reference,
+                                             bandwidth=3, min_dist=9, batch=5,
+                                             max_iters=100)
         if length(result) % 3 != 0
             n_out_frame += 1
         end
@@ -229,6 +229,58 @@ function test_quiver2()
     end
 end
 
+
+function test_base_probs()
+    template = "CGTAC"
+    seqs = ["CGAC",
+            "CGAC",
+            "CGAC"]
+    lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0],
+                          [-9.0, -9.0, -9.0, -9.0],
+                          [-9.0, -9.0, -9.0, -9.0]]
+    bandwidth = 3
+    state = Quiver2.Model.initial_state(template, seqs, lps, bandwidth)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps)
+    @test base[1, 2] > 0.9
+    del_probs = base[:, end]
+    @test del_probs[1] < 1e-9
+    @test del_probs[3] > 0.9
+end
+
+
+function test_ins_probs()
+    template = "CGAT"
+    seqs = ["CGTAT",
+            "CGTAT",
+            "CGTAT"]
+    bandwidth = 3
+    lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
+                          [-9.0, -9.0, -9.0, -9.0, -9.0],
+                          [-9.0, -9.0, -9.0, -9.0, -9.0]]
+    state = Quiver2.Model.initial_state(template, seqs, lps, bandwidth)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps)
+    @test maximum(ins[1, :]) < 1e-9
+    @test ins[3, 4] > 0.9
+end
+
+function test_indel_probs()
+    template = "CGAT"
+    seqs = ["CGTAT",
+            "CGTAT",
+            "CGTAT"]
+    bandwidth = 3
+    lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
+                          [-9.0, -9.0, -9.0, -9.0, -9.0],
+                          [-9.0, -9.0, -9.0, -9.0, -9.0]]
+    state = Quiver2.Model.initial_state(template, seqs, lps, bandwidth)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps)
+    probs = Quiver2.Model.estimate_indel_probs(base, ins)
+    @test probs[1] == probs[4]
+    @test probs[1] < 0.5
+    @test probs[2] == probs[3]
+    @test probs[2] > 0.5
+end
+
 srand(1234)
 
 test_perfect_forward()
@@ -243,3 +295,6 @@ test_random_deletions()
 test_random_codon_deletions()
 test_no_single_indels()
 test_quiver2()
+test_base_probs()
+test_ins_probs()
+test_indel_probs()
