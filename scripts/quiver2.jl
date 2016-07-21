@@ -5,8 +5,10 @@ using Glob
 
 import Quiver2.Model
 import Quiver2.QIO
+import Quiver2.Util
 @everywhere using Quiver2.Model
 @everywhere using Quiver2.QIO
+@everywhere using Quiver2.Util
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -39,10 +41,6 @@ function parse_commandline()
         help = "batch size; -1 for no batch iterations"
         arg_type = Int
         default = 10
-
-        "--do-full"
-        help = "switch off batch mode after convergence"
-        action = :store_true
 
         "--max-iters"
         help = "maximum iterations before giving up"
@@ -80,7 +78,6 @@ end
                    bandwidth=args["bandwidth"],
                    min_dist=args["min-dist"],
                    batch=args["batch"],
-                   do_full=args["do-full"],
                    max_iters=args["max-iters"],
                    verbose=args["verbose"])
 end
@@ -142,7 +139,8 @@ function main()
     slen = 0
     if args["keep-unique-name"]
         plen = length(common_prefix(names))
-	slen = length(common_suffix(names))
+        snames = [n[plen+1:end] for n in names]
+	slen = length(common_suffix(snames))
     end
 
     n_failed = 0
@@ -151,14 +149,15 @@ function main()
         if typeof(results[i]) == RemoteException
             throw(results[i])
         end
-        consensus, info = results[i]
+        consensus, base_probs, ins_probs, quality, info = results[i]
         if info["converged"]
             name = names[i]
             if args["keep-unique-name"]
                 name = name[plen + 1:end - slen]
             end
             label = string(prefix, name)
-            write(STDOUT, Seq.FASTASeqRecord(label, consensus, Seq.FASTAMetadata("")))
+            t_phred = p_to_phred(quality)
+            write(STDOUT, Seq.FASTQSeqRecord(label, consensus, t_phred))
         else
             n_failed += 1
         end

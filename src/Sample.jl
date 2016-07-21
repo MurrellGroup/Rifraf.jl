@@ -5,6 +5,7 @@ using Distributions
 using Iterators
 
 using Quiver2.QIO
+using Quiver2.Util
 
 export rbase, mutate_base, random_codon, random_seq, sample_from_reference, sample_from_template, sample, BetaAlt
 
@@ -27,10 +28,6 @@ end
 
 function random_seq(n)
     return DNASequence([rbase() for i in 1:n])
-end
-
-function to_phred(x)
-    return Int8(min(round(-10.0 * log10(x)), typemax(Int8)))
 end
 
 function normalize(x, lower, upper)
@@ -249,7 +246,7 @@ function sample_from_template(template::DNASequence,
 
     reported_error_p = jitter_vector(actual_error_p,
                                      log_reported_error_std)
-    phreds = Int8[to_phred(p) for p in reported_error_p]
+    phreds = p_to_phred(reported_error_p)
     return DNASequence(seq), actual_error_p, phreds
 end
 
@@ -309,7 +306,7 @@ end
 
 """Write template into FASTA and sequences into FASTQ."""
 function write_samples(filename, reference, template, template_error, seqs, phreds)
-    template_phred = Vector{Int8}[[to_phred(p) for p in template_error]]
+    template_phred = p_to_phred(template_error)
     write_fasta(string(filename, "-reference.fasta"), [reference])
     write_fastq(string(filename, "-template.fastq"), [template], template_phred)
     write_fastq(string(filename, "-sequences.fastq"), seqs, phreds)
@@ -318,9 +315,9 @@ end
 """Read template from FASTA and sequences from FASTQ."""
 function read_samples(filename)
     reference = read_fasta(string(filename, "-reference.fasta"))[1]
-    template_tuple = read_fastq(string(filename, "-template.fastq"))
-    template = template_tuple[1][1]
-    template_error = exp10(template_tuple[2][1] / (-10.0))
+    template_seqs, template_phreds = read_fastq(string(filename, "-template.fastq"))
+    template = template_seqs[1]
+    template_error = phred_to_p(template_phreds[1])
     seqs, phreds = read_fastq(string(filename, "-sequences.fastq"))
     return reference, template, template_error, seqs, phreds
 end

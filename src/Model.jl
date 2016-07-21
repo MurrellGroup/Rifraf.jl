@@ -14,6 +14,7 @@ using DataStructures
 using Quiver2.Sample
 using Quiver2.BandedArrays
 using Quiver2.Mutations
+using Quiver2.Util
 
 export quiver2, Penalties
 
@@ -749,9 +750,10 @@ function estimate_point_probs(position_probs, insertion_probs)
     # multiple by 0.5 to avoid double counting.
     # TODO: is this the right way to do this?
     no_ins_error_prob = 1.0 - 0.5 * sum(insertion_probs, 2)
-    return 1.0 - broadcast(*, no_point_error_prob,
-                           no_ins_error_prob[1:end-1],
-                           no_ins_error_prob[2:end])
+    result = 1.0 - broadcast(*, no_point_error_prob,
+                             no_ins_error_prob[1:end-1],
+                             no_ins_error_prob[2:end])
+    return reshape(result, length(result))
 end
 
 
@@ -776,7 +778,7 @@ function quiver2(template::AbstractString,
         error("invalid max iters: $max_iters")
     end
 
-    if verbose > 0
+    if verbose > 1
         println(STDERR, "computing initial alignments")
     end
 
@@ -784,7 +786,7 @@ function quiver2(template::AbstractString,
         error("reference mismatch penalty must be less than 0")
     end
 
-    log_ps = phreds / (-10.0)
+    log_ps = phred_to_log_p(phreds)
 
     if batch < 0 || batch > length(sequences)
         batch = length(sequences)
@@ -804,7 +806,7 @@ function quiver2(template::AbstractString,
     min_ref_ins = typemin(Float64)
     min_ref_del = typemin(Float64)
 
-    if verbose > 0
+    if verbose > 1
         println(STDERR, "initial score: $(state.score)")
     end
     n_mutations = Vector{Int}[]
