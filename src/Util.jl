@@ -16,11 +16,11 @@ end
     end
 end
 
-function phred_to_p(q::Float64)
+function phred_to_p(q::Int8)
     return exp10(phred_to_log_p(q))
 end
 
-function phred_to_p(x::Vector{Float64})
+function phred_to_p(x::Vector{Int8})
     return exp10(phred_to_log_p(x))
 end
 
