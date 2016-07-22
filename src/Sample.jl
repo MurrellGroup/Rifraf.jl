@@ -308,7 +308,7 @@ end
 function write_samples(filename, reference, template, template_error, seqs, phreds)
     template_phred = p_to_phred(template_error)
     write_fasta(string(filename, "-reference.fasta"), [reference])
-    write_fastq(string(filename, "-template.fastq"), [template], template_phred)
+    write_fastq(string(filename, "-template.fastq"), [template], Vector{Int8}[template_phred])
     write_fastq(string(filename, "-sequences.fastq"), seqs, phreds)
 end
 
