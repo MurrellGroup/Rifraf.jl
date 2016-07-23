@@ -2,8 +2,10 @@ module Util
 
 export p_to_phred, phred_to_log_p, phred_to_p
 
+MAX_PHRED = Int('~') - 33
+
 function p_to_phred(p::Float64)
-    return Int8(min(round(-10.0 * log10(p)), typemax(Int8)))
+    return Int8(min(round(-10.0 * log10(p)), MAX_PHRED))
 end
 
 function p_to_phred(x::Vector{Float64})
