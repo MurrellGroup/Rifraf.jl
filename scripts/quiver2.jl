@@ -47,6 +47,11 @@ function parse_commandline()
         arg_type = Int
         default = 100
 
+        "--indel-fastq"
+        help = "if given, a file to store indel base probs"
+        arg_type = AbstractString
+        default = ""
+
         "--verbose", "-v"
         help = "print progress"
         arg_type = Int
@@ -55,6 +60,11 @@ function parse_commandline()
         "input"
         help = "a single file or a glob. each filename should be unique."
         required = true
+
+        "output"
+        help = "output fastq file"
+        required = true
+
     end
     return parse_args(s)
 end
@@ -145,23 +155,48 @@ function main()
 
     n_failed = 0
     prefix = args["prefix"]
+    indel_handle = open("/dev/null", "w")
+    if length(args["indel-fastq"]) > 0
+        indel_handle = open(args["indel-fastq"], "w")
+        write(indel_handle, "label",
+              ",", "max_indel_p",
+              ",", "sum_indel_p",
+              ",", "indel_rate",
+              "\n")
+    end
+    stream = open(args["output"], "w", FASTQ, ascii_offset=33)
     for i=1:length(results)
         if typeof(results[i]) == RemoteException
             throw(results[i])
         end
-        consensus, base_probs, ins_probs, quality, info = results[i]
+        consensus, base_probs, ins_probs, info = results[i]
         if info["converged"]
             name = names[i]
             if args["keep-unique-name"]
                 name = name[plen + 1:end - slen]
             end
             label = string(prefix, name)
+            quality = Quiver2.Model.estimate_point_probs(base_probs, ins_probs)
             t_phred = p_to_phred(quality)
-            write(STDOUT, Seq.FASTQSeqRecord(label, consensus, t_phred))
+            record = Seq.FASTQSeqRecord(label, consensus, t_phred)
+            write(stream, record)
+            if length(args["indel-fastq"]) > 0
+                indel_p = Quiver2.Model.estimate_indel_probs(base_probs, ins_probs)
+                max_indel_p = maximum(indel_p)
+                sum_indel_p = sum(indel_p)
+                indel_rate = sum_indel_p / length(indel_p)
+                write(indel_handle, label,
+                      ",", string(max_indel_p),
+                      ",", string(sum_indel_p),
+                      ",", string(indel_rate),
+                      "\n")
+            end
         else
             n_failed += 1
         end
     end
+    close(indel_handle)
+    close(stream)
     if args["verbose"] > 0
         println(STDERR, "done. processed $(length(results)). $n_failed failed to converge.")
     end
