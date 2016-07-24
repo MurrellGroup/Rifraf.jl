@@ -153,7 +153,7 @@ function main()
 	slen = length(common_suffix(snames))
     end
 
-    n_failed = 0
+    n_converged = 0
     prefix = args["prefix"]
     indel_handle = open("/dev/null", "w")
     if length(args["indel-fastq"]) > 0
@@ -171,6 +171,7 @@ function main()
         end
         consensus, base_probs, ins_probs, info = results[i]
         if info["converged"]
+            n_converged += 1
             name = names[i]
             if args["keep-unique-name"]
                 name = name[plen + 1:end - slen]
@@ -191,14 +192,12 @@ function main()
                       ",", string(indel_rate),
                       "\n")
             end
-        else
-            n_failed += 1
         end
     end
     close(indel_handle)
     close(stream)
     if args["verbose"] > 0
-        println(STDERR, "done. processed $(length(results)). $n_failed failed to converge.")
+        println(STDERR, "done. $n_converged / $(length(results)) converged.")
     end
 end
 
