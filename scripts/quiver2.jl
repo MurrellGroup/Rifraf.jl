@@ -47,8 +47,8 @@ function parse_commandline()
         arg_type = Int
         default = 100
 
-        "--indel-fastq"
-        help = "if given, a file to store indel base probs"
+        "--indel-file"
+        help = "if given, a file to store indel probabilities"
         arg_type = AbstractString
         default = ""
 
@@ -156,8 +156,8 @@ function main()
     n_converged = 0
     prefix = args["prefix"]
     indel_handle = open("/dev/null", "w")
-    if length(args["indel-fastq"]) > 0
-        indel_handle = open(args["indel-fastq"], "w")
+    if length(args["indel-file"]) > 0
+        indel_handle = open(args["indel-file"], "w")
         write(indel_handle, "label",
               ",", "max_indel_p",
               ",", "sum_indel_p",
@@ -181,7 +181,7 @@ function main()
             t_phred = p_to_phred(quality)
             record = Seq.FASTQSeqRecord(label, consensus, t_phred)
             write(stream, record)
-            if length(args["indel-fastq"]) > 0
+            if length(args["indel-file"]) > 0
                 indel_p = Quiver2.Model.estimate_indel_probs(base_probs, ins_probs)
                 max_indel_p = maximum(indel_p)
                 sum_indel_p = sum(indel_p)
