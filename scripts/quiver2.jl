@@ -118,8 +118,8 @@ function common_prefix(strings)
     for i = 1:minlen
         if all([s[i] == cand[i] for s in strings])
             x = i
-	else
-	    break
+        else
+            break
         end
     end
     return cand[1:x]
@@ -170,6 +170,10 @@ function main()
             name_to_ref[name] = refid
         end
         close(refmap_handle)
+        # only process seqs with a reference
+        present_names = Set(keys(name_to_ref))
+        infiles = sort(collect(filter(f -> basename(f) in present_names, infiles)))
+        basenames = [basename(f) for f in infiles]
         refids = [name_to_ref[name] for name in basenames]
     end
     results = pmap((f, rid) -> dofile(f, reffile, rid, args),
@@ -180,7 +184,7 @@ function main()
     if args["keep-unique-name"]
         plen = length(common_prefix(basenames))
         snames = [n[plen+1:end] for n in basenames]
-	slen = length(common_suffix(snames))
+        slen = length(common_suffix(snames))
     end
 
     n_converged = 0
