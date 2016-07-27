@@ -31,12 +31,6 @@ function read_fastq_records(filename)
     stream = open(filename, "r", FASTQ, quality_encoding=Seq.SANGER_QUAL_ENCODING)
     records = FASTQSeqRecord[]
     for entry in stream
-        # BioJulia gets the offset wrong
-        phred = entry.metadata.quality + 64 - 33
-        if minimum(phred) < Int('!') - 33 || maximum(phred) > Int('~') - 33
-            error("quality scores  not in range")
-        end
-        entry.metadata.quality = phred
         push!(records, entry)
     end
     return records
