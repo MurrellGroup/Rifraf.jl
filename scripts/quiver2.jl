@@ -25,7 +25,7 @@ function parse_commandline()
         default = ""
 
         "--prefix"
-        help = "prepended to each filename to make label"
+        help = "prepended to each filename to make name"
         arg_type = AbstractString
         default = ""
 
@@ -83,6 +83,7 @@ end
         end
     end
     reference = DNASequence("")
+    ref_records = []
     if splitext(reffile)[2] == ".fasta"
         ref_records = read_fasta_records(reffile)
     elseif splitext(reffile)[2] == ".fastq"
@@ -90,11 +91,9 @@ end
     end
     if length(refid) > 0
         ref_record = collect(filter(r -> r.name == refid, ref_records))[1]
-        println(ref_record.name)
         reference = ref_record.seq
     elseif length(ref_records) > 0
         ref_record = ref_records[1]
-        println(ref_record.name)
         reference = ref_record.seq
     end
 
@@ -141,8 +140,7 @@ function main()
     end
     infiles = sort(infiles)
     basenames = [basename(f) for f in infiles]
-    names = [splitext(f)[1] for f in basenames]
-    if length(Set(names)) != length(names)
+    if length(Set(basenames)) != length(basenames)
         error("Files do not have unique names")
     end
 
@@ -180,8 +178,8 @@ function main()
     plen = 0
     slen = 0
     if args["keep-unique-name"]
-        plen = length(common_prefix(names))
-        snames = [n[plen+1:end] for n in names]
+        plen = length(common_prefix(basenames))
+        snames = [n[plen+1:end] for n in basenames]
 	slen = length(common_suffix(snames))
     end
 
@@ -190,7 +188,7 @@ function main()
     indel_handle = open("/dev/null", "w")
     if length(args["indel-file"]) > 0
         indel_handle = open(args["indel-file"], "w")
-        write(indel_handle, "label",
+        write(indel_handle, "name",
               ",", "max_indel_p",
               ",", "sum_indel_p",
               ",", "indel_rate",
@@ -204,21 +202,21 @@ function main()
         consensus, base_probs, ins_probs, info = results[i]
         if info["converged"]
             n_converged += 1
-            name = names[i]
+            name = basenames[i]
             if args["keep-unique-name"]
                 name = name[plen + 1:end - slen]
             end
-            label = string(prefix, name)
+            seqname = string(prefix, name)
             quality = Quiver2.Model.estimate_point_probs(base_probs, ins_probs)
             t_phred = p_to_phred(quality)
-            record = Seq.FASTQSeqRecord(label, consensus, t_phred)
+            record = Seq.FASTQSeqRecord(seqname, consensus, t_phred)
             write(stream, record)
             if length(args["indel-file"]) > 0
                 indel_p = Quiver2.Model.estimate_indel_probs(base_probs, ins_probs)
                 max_indel_p = maximum(indel_p)
                 sum_indel_p = sum(indel_p)
                 indel_rate = sum_indel_p / length(indel_p)
-                write(indel_handle, label,
+                write(indel_handle, seqname,
                       ",", string(max_indel_p),
                       ",", string(sum_indel_p),
                       ",", string(indel_rate),
