@@ -14,7 +14,13 @@ function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
         "--reference"
-        help = "single file, or a pattern to find reference files; must match inputs after sorting"
+        help = string("reference fasta/fastq file.",
+                      " uses first sequence unless --reference-map is given.")
+        arg_type = AbstractString
+        default = ""
+
+        "--reference-map"
+        help = "file mapping input filename to reference id"
         arg_type = AbstractString
         default = ""
 
@@ -69,14 +75,28 @@ function parse_commandline()
     return parse_args(s)
 end
 
-@everywhere function dofile(file, reffile, args)
+@everywhere function dofile(file, reffile, refid, args)
     if args["verbose"] > 0
         println(STDERR, "reading sequences from '$(file)'")
         if length(reffile) > 0
             println(STDERR, "reading reference from '$(reffile)'")
         end
     end
-    reference = length(reffile) > 0 ? read_fasta(reffile)[1] : DNASequence("")
+    reference = DNASequence("")
+    if splitext(reffile)[2] == ".fasta"
+        ref_records = read_fasta_records(reffile)
+    elseif splitext(reffile)[2] == ".fastq"
+        ref_records = read_fastq_records(reffile)
+    end
+    if length(refid) > 0
+        ref_record = collect(filter(r -> r.name == refid, ref_records))[1]
+        println(ref_record.name)
+        reference = ref_record.seq
+    elseif length(ref_records) > 0
+        ref_record = ref_records[1]
+        println(ref_record.name)
+        reference = ref_record.seq
+    end
 
     sequences, phreds = read_fastq(file)
     template = sequences[1]
@@ -120,30 +140,42 @@ function main()
        return
     end
     infiles = sort(infiles)
-    names = [splitext(basename(f))[1] for f in infiles]
+    basenames = [basename(f) for f in infiles]
+    names = [splitext(f)[1] for f in basenames]
     if length(Set(names)) != length(names)
         error("Files do not have unique names")
     end
 
-    refpattern = args["reference"]
-    reffiles = []
-    if length(refpattern) > 0
-        if isfile(refpattern)
-            reffiles = [refpattern for i in 1:length(infiles)]
-        else
-            dir, pattern = splitdir(refpattern)
-            reffiles = glob(pattern, dir)
-            if length(reffiles) != length(infiles)
-                error("Wrong number of reference files")
+    if length(args["reference"]) > 0
+        if !isfile(args["reference"])
+            error("reference file not found")
+        end
+        if length(args["reference-map"]) > 0
+            if !isfile(args["reference-map"])
+                error("reference map file not found")
             end
-            reffiles = sort(reffiles)
         end
     else
-        reffiles = ["" for i in 1:length(infiles)]
+        if length(args["reference-map"]) > 0
+            error("--reference-map is invalid without --reference")
+        end
     end
 
-    repeated_args = [args for i in 1:length(infiles)]
-    results = pmap((f, r, a) -> dofile(f, r, a), infiles, reffiles, repeated_args)
+    reffile = args["reference"]
+    refmapfile = args["reference-map"]
+    refids = ["" for i in 1:length(infiles)]
+    if length(refmapfile) > 0
+        refmap_handle = open(refmapfile)
+        name_to_ref = Dict()
+        for line in readlines(refmap_handle)
+            name, refid = split(line)
+            name_to_ref[name] = refid
+        end
+        close(refmap_handle)
+        refids = [name_to_ref[name] for name in basenames]
+    end
+    results = pmap((f, rid) -> dofile(f, reffile, rid, args),
+                   infiles, refids)
 
     plen = 0
     slen = 0
