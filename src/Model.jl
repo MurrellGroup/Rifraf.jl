@@ -775,7 +775,7 @@ function quiver2(template::AbstractString,
                  ref_mismatch::Float64=-3.0,
                  cooling_rate::Float64=100.0,
                  bandwidth::Int=10, min_dist::Int=9,
-                 batch::Int=10,
+                 batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
@@ -801,6 +801,7 @@ function quiver2(template::AbstractString,
     if batch < 0 || batch > length(sequences)
         batch = length(sequences)
     end
+    base_batch = batch
     seqs = sequences
     lps = log_ps
     if batch < length(sequences)
@@ -901,15 +902,7 @@ function quiver2(template::AbstractString,
             push!(n_mutations, mutation_counts)
         end
         push!(consensus_lengths, length(state.template))
-        if batch < length(sequences)
-            indices = rand(1:length(sequences), batch)
-            seqs = sequences[indices]
-            lps = log_ps[indices]
-            recompute_As = true
-        end
-        recompute!(state, seqs, lps,
-                   reference, reference_log_p, penalties,
-                   bandwidth, recompute_As, true)
+        # FIXME: code duplication with all these recomputations
         if 'N' in state.template
             if state.stage != frame_correction_stage
                 error("'N' not allowed in template during this stage")
@@ -920,8 +913,34 @@ function quiver2(template::AbstractString,
                        reference, reference_log_p, penalties,
                        bandwidth, true, true)
         end
+        if batch < length(sequences)
+            indices = rand(1:length(sequences), batch)
+            seqs = sequences[indices]
+            lps = log_ps[indices]
+            recompute_As = true
+        end
+        recompute!(state, seqs, lps,
+                   reference, reference_log_p, penalties,
+                   bandwidth, recompute_As, true)
         if verbose > 1
             println(STDERR, "  score: $(state.score)")
+        end
+        if ((state.score - old_score) / old_score > batch_threshold &&
+            batch < length(sequences))
+            batch = min(batch + base_batch, length(sequences))
+            if verbose > 1
+                println(STDERR, "  increased batch size to $batch")
+            end
+            indices = rand(1:length(sequences), batch)
+            seqs = sequences[indices]
+            lps = log_ps[indices]
+            recompute!(state, seqs, lps,
+                       reference, reference_log_p, penalties,
+                       bandwidth, true, true)
+            if verbose > 1
+                println(STDERR, "  new score: $(state.score)")
+            end
+
         end
     end
     if verbose > 0
