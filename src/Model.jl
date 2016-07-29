@@ -9,7 +9,6 @@
 module Model
 
 using Bio.Seq
-using DataStructures
 
 using Quiver2.Sample
 using Quiver2.BandedArrays
@@ -661,21 +660,21 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
 end
 
 
-function best_base(counter::DataStructures.Accumulator{Char, Int})
+function most_likely_base(counter::Dict{Char, Float64})
     if '-' in keys(counter)
         pop!('-', counter)
     end
     c = rbase()
     if length(counter) > 0
-        c, n = maximum(counter)
+        c, n = minimum(counter)
     end
     return c
 end
 
 
 function interleave(xs, ys)
-    if length(xs) != length(ys) + 2
-        error("`xs` must have two more elements than `ys`")
+    if length(xs) != length(ys) + 1
+        error("`xs` must have one more element than `ys`")
     end
     result = []
     for i in 1:length(ys)
@@ -687,7 +686,7 @@ function interleave(xs, ys)
 end
 
 
-function replace_ns!(state::State, seqs::Vector{ASCIIString},
+function replace_ns(state::State, seqs::Vector{ASCIIString},
                     log_ps::Vector{Vector{Float64}},
                     bandwidth::Int)
     positions = []
@@ -696,20 +695,29 @@ function replace_ns!(state::State, seqs::Vector{ASCIIString},
             push!(positions, i)
         end
     end
-    counters = [counter(Char) for i in positions]
-    for (s, p) in zip(seqs, lps)
-        t_aln, s_aln = align(state.state.template, s, p, bandwidth)
-        posn = 0
+    counters = [Dict{Char, Float64}() for i in positions]
+    for (s, p) in zip(seqs, log_ps)
+        t_aln, s_aln = align(state.template, s, p, bandwidth)
+        counter_posn = 0
+        seq_posn = 0
         for i in 1:length(t_aln)
+            if s_aln[i] != '-'
+                seq_posn += 1
+            end
             if t_aln[i] == 'N'
-                posn += 1
-                push!(counters[posn], s_aln[i])
+                counter_posn += 1
+                counter = counters[counter_posn]
+                base = s_aln[i]
+                if !(base in keys(counter))
+                    counter[base] = 0.0
+                end
+                counter[base] += p[seq_posn]
             end
         end
     end
-    bases = [best_base(c) for c in counters]
+    bases = [most_likely_base(c) for c in counters]
     parts = split(state.template, 'N')
-    state.template = join(interleave(parts, bases))
+    return join(interleave(parts, bases))
 end
 
 
@@ -912,7 +920,7 @@ function quiver2(template::AbstractString,
                 error("'N' not allowed in template during this stage")
             end
             # replace 'N' with best base from alignments and recompute everything
-            replace_ns!(state, seqs, lps, bandwidth)
+            state.template = replace_ns(state, seqs, lps, bandwidth)
             recompute!(state, seqs, lps,
                        reference, reference_log_p, penalties,
                        bandwidth, true, true)
