@@ -152,6 +152,32 @@ function test_random_codon_deletions()
 end
 
 
+function test_replace_ns()
+    template = "CGTNNN"
+    seqs = ["CGTAAA",
+            "CGTAAA",
+            "CGTAAC"]
+    lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0, -9.0],
+                          [-9.0, -9.0, -9.0, -9.0, -9.0, -9.0],
+                          [-9.0, -9.0, -9.0, -9.0, -9.0, -3.0]]
+    bandwidth = 3
+    As = [Quiver2.Model.forward(template, s, p, bandwidth, allow_codon_indels=true)
+          for (s, p) in zip(seqs, lps)]
+    Bs = [Quiver2.Model.backward(template, s, p, bandwidth, allow_codon_indels=true)
+          for (s, p) in zip(seqs, lps)]
+    score = sum([A[end, end] for A in As])
+
+    A_t = BandedArray(Float64, (1, 1), 1)
+    B_t = BandedArray(Float64, (1, 1), 1)
+
+    state = Quiver2.Model.State(score, template, A_t, B_t, As, Bs,
+                                Quiver2.Model.frame_correction_stage, false)
+    result = Quiver2.Model.replace_ns(state, seqs, lps, bandwidth)
+    expected = "CGTAAA"
+    @test result == expected
+end
+
+
 function test_no_single_indels()
     reference = "AAAGGGTTT"
     ref_log_p = -2.0 * ones(length(reference))
@@ -293,6 +319,7 @@ test_random_insertions()
 test_random_codon_insertions()
 test_random_deletions()
 test_random_codon_deletions()
+test_replace_ns()
 test_no_single_indels()
 test_quiver2()
 test_base_probs()
