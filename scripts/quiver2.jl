@@ -14,7 +14,7 @@ function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
         "--reference"
-        help = string("reference fasta/fastq file.",
+        help = string("reference fasta file.",
                       " uses first sequence unless --reference-map is given.")
         arg_type = AbstractString
         default = ""
@@ -84,10 +84,8 @@ end
     end
     reference = DNASequence("")
     ref_records = []
-    if splitext(reffile)[2] == ".fasta"
+    if length(reffile) > 0
         ref_records = read_fasta_records(reffile)
-    elseif splitext(reffile)[2] == ".fastq"
-        ref_records = read_fastq_records(reffile)
     end
     if length(refid) > 0
         ref_record = collect(filter(r -> r.name == refid, ref_records))[1]
