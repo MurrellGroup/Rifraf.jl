@@ -177,7 +177,7 @@ function main()
         refids = [name_to_ref[name] for name in basenames]
     end
     results = pmap((f, rid) -> dofile(f, reffile, rid, args),
-                   infiles, refids)
+                   infiles, refids, err_stop=true)
 
     plen = 0
     slen = 0
