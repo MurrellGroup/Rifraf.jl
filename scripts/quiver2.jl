@@ -134,7 +134,10 @@ function main()
     dir, pattern = splitdir(input)
     infiles = glob(pattern, dir)
     if length(infiles) == 0
-       return
+        if args["verbose"] > 0
+            println(STDERR, "warning: no input files found.")
+        end
+        return
     end
     infiles = sort(infiles)
     basenames = [basename(f) for f in infiles]
