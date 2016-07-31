@@ -808,6 +808,9 @@ function quiver2(template::AbstractString,
         error("reference mismatch penalty must be less than 0")
     end
 
+    if any([minimum(p) < 0 for p in phreds])
+        error("phred score cannot be negative")
+    end
     log_ps = phred_to_log_p(phreds)
 
     if batch < 0 || batch > length(sequences)

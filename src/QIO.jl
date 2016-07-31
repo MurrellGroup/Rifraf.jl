@@ -14,7 +14,7 @@ function read_fasta_records(filename)
 end
 
 function read_fasta(filename)
-    records = read_fastq_records(filename)
+    records = read_fasta_records(filename)
     return DNASequence[r.seq for r in records]
 end
 
@@ -30,8 +30,11 @@ end
 function read_fastq_records(filename)
     stream = open(filename, "r", FASTQ, quality_encoding=Seq.SANGER_QUAL_ENCODING)
     records = FASTQSeqRecord[]
-    for entry in stream
-        push!(records, entry)
+    for record in stream
+        if any([q < 0 for q in record.metadata.quality])
+            error("$(record.name) in $filename contains negative phred values")
+        end
+        push!(records, record)
     end
     return records
 end
