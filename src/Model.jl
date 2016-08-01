@@ -1,11 +1,3 @@
-# TODO: documentation
-
-# TODO: annealing schedule for log_ins and log_del penalties for
-# aligning template to reference
-
-# FIXME: swap log_ins and log_del penalties for aligning template to
-# reference
-
 module Model
 
 using Bio.Seq
@@ -899,7 +891,6 @@ function quiver2(template::AbstractString,
                     if verbose > 1
                         println(STDERR, "  alignment to reference had single indels. increasing penalty.")
                     end
-                    # FIXME: detect maximum penalty
                 end
             elseif state.stage == refinement_stage
                 state.converged = true
