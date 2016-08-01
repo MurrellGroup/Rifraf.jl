@@ -99,8 +99,8 @@ function test_random_mutation(mutation, template_len)
 
     A = Model.forward(template, seq, log_p, bandwidth)
     B = Model.backward(template, seq, log_p, bandwidth)
-    score = Model.score_mutation(mutation, A, B, template, seq, log_p,
-                                 false, Model.default_penalties)
+    score = Model.seq_score_mutation(mutation, A, B, template, seq, log_p,
+                                     false, Model.default_penalties)
     @test_approx_eq score Anew[end, end]
     # TODO: test that inband values are equal in A and Acols.
 end
@@ -161,9 +161,9 @@ function test_replace_ns()
                           [-9.0, -9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0, -3.0]]
     bandwidth = 3
-    As = [Quiver2.Model.forward(template, s, p, bandwidth, allow_codon_indels=true)
+    As = [Quiver2.Model.forward(template, s, p, bandwidth, use_penalties=true)
           for (s, p) in zip(seqs, lps)]
-    Bs = [Quiver2.Model.backward(template, s, p, bandwidth, allow_codon_indels=true)
+    Bs = [Quiver2.Model.backward(template, s, p, bandwidth, use_penalties=true)
           for (s, p) in zip(seqs, lps)]
     score = sum([A[end, end] for A in As])
 
@@ -180,22 +180,21 @@ end
 
 function test_no_single_indels()
     reference = "AAAGGGTTT"
-    ref_log_p = -2.0 * ones(length(reference))
 
-    penalties = Penalties(1.0, 1.0, -2.0, -2.0)
+    penalties = RefPenalties(-2.0, -2.0, -5.0, -2.0)
     bandwidth = 6
 
     template = "AAACCCGGGTTT"
     @test Quiver2.Model.no_single_indels(template, reference,
-                                         ref_log_p, penalties, bandwidth)
+                                         penalties, bandwidth)
 
     template = "AAACCCGGGTTTT"
     @test !Quiver2.Model.no_single_indels(template, reference,
-                                          ref_log_p, penalties, bandwidth)
+                                          penalties, bandwidth)
 
     template = "AAA"
     @test Quiver2.Model.no_single_indels(template, reference,
-                                         ref_log_p, penalties, bandwidth)
+                                         penalties, bandwidth)
 end
 
 function test_quiver2()
@@ -205,10 +204,10 @@ function test_quiver2()
     template_error_rate = 0.03
     template_ratios = (8.0, 1.0, 1.0)
 
-    template_error_mean = 0.01
+    template_error_mean = 0.005
     template_error_std = 0.001
-    log_seq_actual_std = 0.3
-    log_seq_reported_std = 0.3
+    log_seq_actual_std = 0.2
+    log_seq_reported_std = 0.2
     seq_error_ratios = (1.0 / 7.0, 3.0 / 7.0, 3.0 / 7.0)
 
     n = 100
@@ -266,7 +265,8 @@ function test_base_probs()
                           [-9.0, -9.0, -9.0, -9.0]]
     bandwidth = 3
     state = Quiver2.Model.initial_state(template, seqs, lps, bandwidth)
-    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps,
+                                             "", Quiver2.Model.default_penalties)
     @test base[1, 2] > 0.9
     del_probs = base[:, end]
     @test del_probs[1] < 1e-9
@@ -284,7 +284,8 @@ function test_ins_probs()
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     state = Quiver2.Model.initial_state(template, seqs, lps, bandwidth)
-    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps,
+                                             "", Quiver2.Model.default_penalties)
     @test maximum(ins[1, :]) < 1e-9
     @test ins[3, 4] > 0.9
 end
@@ -299,7 +300,8 @@ function test_indel_probs()
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     state = Quiver2.Model.initial_state(template, seqs, lps, bandwidth)
-    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps,
+                                             "", Quiver2.Model.default_penalties)
     probs = Quiver2.Model.estimate_indel_probs(base, ins)
     @test probs[1] == probs[4]
     @test probs[1] < 0.5

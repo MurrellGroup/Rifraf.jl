@@ -15,7 +15,7 @@ using Quiver2.BandedArrays
 using Quiver2.Mutations
 using Quiver2.Util
 
-export quiver2, Penalties
+export quiver2, RefPenalties
 
 # initial_stage:
 #   - do not use reference.
@@ -27,8 +27,12 @@ export quiver2, Penalties
 # refinement stage:
 #   - do not use reference
 #   - propose subsitutions only
+# scoring stage:
+#   - do not change consensus
+#   - use reference
+#   - propose subsitutions and indels
 
-@enum Stage initial_stage=1 frame_correction_stage=2 refinement_stage=3
+@enum Stage initial_stage=1 frame_correction_stage=2 refinement_stage=3 scoring_stage=4
 
 type State
     score::Float64
@@ -42,25 +46,27 @@ type State
 end
 
 
-immutable Penalties
-    ins_multiplier::Float64
-    del_multiplier::Float64
-    codon_ins::Float64
-    codon_del::Float64
+immutable RefPenalties
+    mismatch_penalty::Float64
+    indel_penalty::Float64
+    max_indel_penalty::Float64
+    codon_indel_penalty::Float64
 end
 
 
-function Penalties(ins, del, codon_ins, codon_del)
-    if ins < 1 || del < 1
-        error("multipliers must be >= 1")
-    end
-    if codon_ins >= 0 || codon_del >= 0
+function RefPenalties(mismatch_penalty, indel_penalty, max_indel_penalty, codon_indel_penalty)
+    if (mismatch_penalty >= 0.0 ||
+        indel_penalty >= 0.0 ||
+        max_indel_penalty >= 0.0 ||
+        codon_indel_penalty >= 0.0)
         error("penalties must be < 0")
     end
-    return Penalties()
+    return RefPenalties()
 end
 
-const default_penalties = Penalties(1.0, 1.0, -9.0, -9.0)
+const default_penalties = RefPenalties(log10(1.0 / 50.0), -0.1, -5.0, -2.3)
+
+const empty_log_p = Float64[]
 
 @enum DPMove match=1 ins=2 del=3 codon_ins=4 codon_del=5
 
@@ -101,24 +107,26 @@ end
 function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
                 log_p::Float64, next_log_p::Float64,
-                allow_codon_indels::Bool, penalties::Penalties)
+                use_penalties::Bool, penalties::RefPenalties)
     result = (typemin(Float64), match)
-    # TODO: precompute inv_log_p
-    match_penalty = (s_base == t_base ? inv_log10(log_p) : log_p)
+    match_p = use_penalties ? penalties.mismatch_penalty : log_p
+    match_penalty = (s_base == t_base ? inv_log10(match_p) : match_p)
     if t_base == 'N'
         match_penalty = 0.0
     end
-    ins_penalty = log_p * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
-    del_penalty = mean([log_p, next_log_p]) * (allow_codon_indels ? penalties.del_multiplier : 1.0)
+    ins_penalty = use_penalties ? penalties.indel_penalty : log_p
+    del_penalty = use_penalties ? penalties.indel_penalty : mean([log_p, next_log_p])
     result = update_helper(A, i, j, match, match_penalty, result...)
     result = update_helper(A, i, j, ins, ins_penalty, result...)
     result = update_helper(A, i, j, del, del_penalty, result...)
-    if allow_codon_indels
+    if use_penalties
         if i > 3
-            result = update_helper(A, i, j, codon_ins, penalties.codon_ins, result...)
+            result = update_helper(A, i, j, codon_ins,
+                                   penalties.codon_indel_penalty, result...)
         end
         if j > 3
-            result = update_helper(A, i, j, codon_del, penalties.codon_del, result...)
+            result = update_helper(A, i, j, codon_del,
+                                   penalties.codon_indel_penalty, result...)
         end
     end
     return result
@@ -160,17 +168,21 @@ end
 
 function prepare_array(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
-                       bandwidth::Int)
+                       bandwidth::Int,
+                       use_penalties::Bool=false,
+                       penalties::RefPenalties=default_penalties)
     # FIXME: consider codon moves in initialization
-    if length(s) != length(log_p)
+    if !use_penalties && length(s) != length(log_p)
         error("sequence length does not match quality score length")
     end
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
-        result[i, 1] = result[i-1, 1] + log_p[i-1]
+        penalty = use_penalties ? penalties.indel_penalty : log_p[i-1]
+        result[i, 1] = result[i-1, 1] + penalty
     end
+    penalty = use_penalties ? penalties.indel_penalty : log_p[1]
     for j = 2:min(size(result)[2], result.h_offset + bandwidth + 1)
-        result[1, j] = log_p[1] * (j - 1)
+        result[1, j] = result[1, j-1] + penalty
     end
     return result
 end
@@ -183,11 +195,11 @@ backtracing to find best alignment.
 function forward_moves(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
                        bandwidth::Int,
-                       allow_codon_indels::Bool, penalties::Penalties)
+                       use_penalties::Bool, penalties::RefPenalties)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
-    result = prepare_array(t, s, log_p, bandwidth)
+    result = prepare_array(t, s, log_p, bandwidth, use_penalties, penalties)
     moves = BandedArray(Int, result.shape, bandwidth)
     for i = 2:min(size(moves)[1], moves.v_offset + bandwidth + 1)
         moves[i, 1] = Int(ins)
@@ -200,9 +212,11 @@ function forward_moves(t::AbstractString, s::AbstractString,
         start, stop = row_range(result, j)
         start = max(start, 2)
         for i = start:stop
+            cur_log_p = (use_penalties ? 0.0 : log_p[i-1])
+            next_log_p = (use_penalties ? 0.0 : log_p[min(i, length(log_p))])
             x = update(result, i, j, s[i-1], t[j-1],
-                       log_p[i-1], log_p[min(i, length(log_p))],
-                       allow_codon_indels, penalties)
+                       cur_log_p, next_log_p,
+                       use_penalties, penalties)
             result[i, j] = x[1]
             moves[i, j] = x[2]
         end
@@ -218,16 +232,18 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 function forward(t::AbstractString, s::AbstractString,
                  log_p::Vector{Float64},
                  bandwidth::Int;
-                 allow_codon_indels::Bool=false,
-                 penalties::Penalties=default_penalties)
-    result = prepare_array(t, s, log_p, bandwidth)
+                 use_penalties::Bool=false,
+                 penalties::RefPenalties=default_penalties)
+    result = prepare_array(t, s, log_p, bandwidth, use_penalties, penalties)
     for j = 2:size(result)[2]
         start, stop = row_range(result, j)
         start = max(start, 2)
         for i = start:stop
+            cur_log_p = (use_penalties ? 0.0 : log_p[i-1])
+            next_log_p = (use_penalties ? 0.0 : log_p[min(i, length(log_p))])
             x = update(result, i, j, s[i-1], t[j-1],
-                       log_p[i-1], log_p[min(i, length(log_p))],
-                       allow_codon_indels, penalties)
+                       cur_log_p, next_log_p,
+                       use_penalties, penalties)
             result[i, j] = x[1]
         end
     end
@@ -241,13 +257,13 @@ B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 """
 function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
                   bandwidth::Int;
-                  allow_codon_indels::Bool=false,
-                  penalties::Penalties=default_penalties)
+                  use_penalties::Bool=false,
+                  penalties::RefPenalties=default_penalties)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
     t = reverse(t)
     result = forward(t, s, log_p, bandwidth;
-                     allow_codon_indels=allow_codon_indels, penalties=penalties)
+                     use_penalties=use_penalties, penalties=penalties)
     return flip(result)
 end
 
@@ -275,9 +291,9 @@ end
     end
 end
 
-function score_mutation(mutation::Union{Deletion,CodonDeletion},
-                        A::BandedArray{Float64}, B::BandedArray{Float64},
-                        args...)
+function seq_score_mutation(mutation::Union{Deletion,CodonDeletion},
+                            A::BandedArray{Float64}, B::BandedArray{Float64},
+                            args...)
     offset = typeof(mutation) == Deletion ? 1 : 3
     aj = mutation.pos           # column before base to delete (new last column before change)
     bj = mutation.pos + offset  # column after bases to delete
@@ -290,11 +306,11 @@ function score_mutation(mutation::Union{Deletion,CodonDeletion},
     return summax(asub, bsub)
 end
 
-function score_mutation(mutation::Union{Insertion,Substitution},
-                        A::BandedArray{Float64}, B::BandedArray{Float64},
-                        template::AbstractString,
-                        seq::AbstractString, log_p::Vector{Float64},
-                        allow_codon_indels::Bool, penalties::Penalties)
+function seq_score_mutation(mutation::Union{Insertion,Substitution},
+                            A::BandedArray{Float64}, B::BandedArray{Float64},
+                            template::AbstractString,
+                            seq::AbstractString, log_p::Vector{Float64},
+                            use_penalties::Bool, penalties::RefPenalties)
     bj = mutation.pos + 1 # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     b_start, b_stop = row_range(B, bj)  # row range of B column
@@ -329,31 +345,32 @@ function score_mutation(mutation::Union{Insertion,Substitution},
         i = real_i - row_start + 1  # position in this iteration
         prev_i = i - offset + 1 # position in `prev` matching i
         scores[1] = typemin(Float64)
-        penalty = log_p[max(seq_i, 1)]
+        penalty = use_penalties ? 0.0 : log_p[max(seq_i, 1)]
         if i > 1
             # insertion
-            ins_penalty = penalty * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
+            ins_penalty = use_penalties ? penalties.indel_penalty : penalty
             scores[1] = max(scores[1], scores[2] + ins_penalty)
         end
         if prev_start < real_i <= (prev_stop + 1)
             # (mis)match
-            mm_penalty = (mutation.base == seq[seq_i] ? inv_log10(penalty) : penalty)
+            my_mm_penalty = use_penalties ? penalties.mismatch_penalty : penalty
+            mm_penalty = (mutation.base == seq[seq_i] ? inv_log10(my_mm_penalty) : my_mm_penalty)
             scores[1] = max(scores[1], A[real_i - 1, ajprev] + mm_penalty)
         end
         if prev_start <= real_i <= prev_stop
             # deletion
-            next_log_p = log_p[min(seq_i + 1, length(log_p))]
-            del_penalty = mean([penalty, next_log_p]) * (allow_codon_indels ? penalties.del_multiplier : 1.0)
+            next_log_p = use_penalties ? 0.0 : log_p[min(seq_i + 1, length(log_p))]
+            del_penalty = use_penalties ? penalties.indel_penalty : mean([penalty, next_log_p])
             scores[1] = max(scores[1], A[real_i, ajprev] + del_penalty)
         end
-        if allow_codon_indels
+        if use_penalties
             if i > 3
                 # insertion
-                scores[1] = max(scores[1], scores[4] + penalties.codon_ins)
+                scores[1] = max(scores[1], scores[4] + penalties.codon_indel_penalty)
             end
             if ajprev3 > 0 && (prev3_start <= real_i <= prev3_stop) && inband(A, real_i, ajprev3)
                 # deletion
-                scores[1] = max(scores[1], A[real_i, ajprev-2] + penalties.codon_del)
+                scores[1] = max(scores[1], A[real_i, ajprev-2] + penalties.codon_indel_penalty)
             end
         end
         b_i = i  #  this is okay because we've chosen aj so it has the same range as bj
@@ -369,50 +386,51 @@ function compute_subcol(row_start, row_stop,
                         prev3, prev3_start, prev3_stop,
                         has_prev3,
                         base, seq, log_p,
-                        allow_codon_indels, penalties)
+                        use_penalties, penalties)
     col = fill(typemin(Float64), row_stop - row_start + 1)
     offset = 1 - (row_start - prev_start)
     for i in 1:length(col)
         real_i = i + row_start - 1
         seq_i = real_i - 1  # position in the sequence
         prev_i = i - offset + 1 # position in `prev` matching i
-        penalty = log_p[max(seq_i, 1)]
+        penalty = use_penalties ? 0.0 : log_p[max(seq_i, 1)]
         if i > 1
             # insertion
-            ins_penalty = penalty * (allow_codon_indels ? penalties.ins_multiplier : 1.0)
+            ins_penalty = use_penalties ? penalties.indel_penalty : penalty
             col[i] = max(col[i], col[i-1] + ins_penalty)
         end
         if prev_start < real_i <= (prev_stop + 1)
             # (mis)match
-            mm_penalty = (base == seq[seq_i] ? inv_log10(penalty) : penalty)
+            my_mm_penalty = use_penalties ? penalties.mismatch_penalty : penalty
+            mm_penalty = (base == seq[seq_i] ? inv_log10(my_mm_penalty) : my_mm_penalty)
             col[i] = max(col[i], prev[prev_i-1] + mm_penalty)
         end
         if prev_start <= real_i <= prev_stop
             # deletion
-            next_log_p = log_p[min(seq_i + 1, length(log_p))]
-            del_penalty = mean([penalty, next_log_p]) * (allow_codon_indels ? penalties.del_multiplier : 1.0)
+            next_log_p = use_penalties ? 0.0 : log_p[min(seq_i + 1, length(log_p))]
+            del_penalty = use_penalties ? penalties.indel_penalty : mean([penalty, next_log_p])
             col[i] = max(col[i], prev[prev_i] + del_penalty)
         end
-        if allow_codon_indels
+        if use_penalties
             if i > 3
                 # insertion
-                col[i] = max(col[i], col[i-3] + penalties.codon_ins)
+                col[i] = max(col[i], col[i-3] + penalties.codon_indel_penalty)
             end
             if has_prev3 && prev3_start <= real_i <= prev3_stop
                 # deletion
                 prev3_i = real_i - prev3_start + 1
-                col[i] = max(col[i], prev3[prev3_i] + penalties.codon_del)
+                col[i] = max(col[i], prev3[prev3_i] + penalties.codon_indel_penalty)
             end
         end
     end
     return col
 end
 
-function score_mutation(mutation::CodonInsertion,
-                        A::BandedArray{Float64}, B::BandedArray{Float64},
-                        template::AbstractString,
-                        seq::AbstractString, log_p::Vector{Float64},
-                        allow_codon_indels::Bool, penalties::Penalties)
+function seq_score_mutation(mutation::CodonInsertion,
+                            A::BandedArray{Float64}, B::BandedArray{Float64},
+                            template::AbstractString,
+                            seq::AbstractString, log_p::Vector{Float64},
+                            use_penalties::Bool, penalties::RefPenalties)
     bj = mutation.pos + 1 # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     b_start, b_stop = row_range(B, bj)  # row range of B column
@@ -446,7 +464,7 @@ function score_mutation(mutation::CodonInsertion,
                                  prev3, prev3_start, prev3_stop,
                                  has_prev3,
                                  mutation.bases[1], seq, log_p,
-                                 allow_codon_indels, penalties)
+                                 use_penalties, penalties)
 
     ajprev3 = ajprev - 1
     if ajprev3 > 0
@@ -459,7 +477,7 @@ function score_mutation(mutation::CodonInsertion,
                                  prev3, prev3_start, prev3_stop,
                                  has_prev3,
                                  mutation.bases[2], seq, log_p,
-                                 allow_codon_indels, penalties)
+                                 use_penalties, penalties)
 
     ajprev3 = ajprev
     if ajprev3 > 0
@@ -472,7 +490,7 @@ function score_mutation(mutation::CodonInsertion,
                                  prev3, prev3_start, prev3_stop,
                                  has_prev3,
                                  mutation.bases[3], seq, log_p,
-                                 allow_codon_indels, penalties)
+                                 use_penalties, penalties)
 
     result = maximum(Acols[:, end] + Bcol)
     return result
@@ -499,17 +517,16 @@ function score_mutation(m::Mutation,
                         log_ps::Vector{Vector{Float64}},
                         use_ref::Bool,
                         reference::ASCIIString,
-                        reference_log_p::Vector{Float64},
-                        penalties::Penalties)
+                        penalties::RefPenalties)
     score = 0.0
     for si in 1:length(sequences)
-        score += score_mutation(m, state.As[si], state.Bs[si], state.template,
-                                sequences[si], log_ps[si],
-                                false, penalties)
+        score += seq_score_mutation(m, state.As[si], state.Bs[si], state.template,
+                                    sequences[si], log_ps[si],
+                                    false, penalties)
     end
     if use_ref
-        score += score_mutation(m, state.A_t, state.B_t, state.template,
-                                reference, reference_log_p, true, penalties)
+        score += seq_score_mutation(m, state.A_t, state.B_t, state.template,
+                                    reference, empty_log_p, true, penalties)
     end
     return score
 end
@@ -530,7 +547,8 @@ function candstask(stage::Stage,
             end
         end
         if stage == initial_stage ||
-            stage == frame_correction_stage
+            stage == frame_correction_stage ||
+            stage == scoring_stage
             # single indels
             for base in "ACGT"
                 produce(Insertion(0, base))
@@ -561,14 +579,13 @@ function getcands(state::State,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
                   reference::ASCIIString,
-                  reference_log_p::Vector{Float64},
-                  penalties::Penalties)
+                  penalties::RefPenalties)
     candidates = CandMutation[]
+    use_ref = state.stage == frame_correction_stage
     for m in candstask(state.stage, state.template,
                        sequences, log_ps)
         score = score_mutation(m, state, sequences, log_ps,
-                               state.stage == frame_correction_stage,
-                               reference, reference_log_p, penalties)
+                               use_ref, reference, penalties)
         if score > state.score && !isapprox(score, state.score)
             push!(candidates, CandMutation(m, score))
         end
@@ -594,21 +611,20 @@ end
 
 
 function align(t, s, log_p, bandwidth;
-               allow_codon_indels::Bool=false,
-               penalties::Penalties=default_penalties)
-    moves = forward_moves(t, s, log_p, bandwidth, allow_codon_indels, penalties)
+               use_penalties::Bool=false,
+               penalties::RefPenalties=default_penalties)
+    moves = forward_moves(t, s, log_p, bandwidth, use_penalties, penalties)
     return backtrace(t, s, moves)
 end
 
 
 function no_single_indels(template::AbstractString,
                           reference::AbstractString,
-                          ref_log_p::Vector{Float64},
-                          penalties::Penalties,
+                          penalties::RefPenalties,
                           bandwidth::Int)
     has_right_length = length(template) % 3 == 0
-    t_aln, r_aln = align(template, reference, ref_log_p, bandwidth,
-                         allow_codon_indels=true, penalties=penalties)
+    t_aln, r_aln = align(template, reference, empty_log_p, bandwidth,
+                         use_penalties=true, penalties=penalties)
     result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
     if result && !has_right_length
         error("template length is not a multiple of three")
@@ -634,27 +650,32 @@ end
 function recompute!(state::State, seqs::Vector{ASCIIString},
                     lps::Vector{Vector{Float64}},
                     reference::AbstractString,
-                    reference_log_p,
-                    penalties::Penalties,
+                    penalties::RefPenalties,
                     bandwidth::Int, recompute_As::Bool, recompute_Bs::Bool)
     if recompute_As
         state.As = [forward(state.template, s, p, bandwidth)
                     for (s, p) in zip(seqs, lps)]
-        if state.stage == frame_correction_stage
-            state.A_t = forward(state.template, reference, reference_log_p,
-                                bandwidth, allow_codon_indels=true, penalties=penalties)
+        if ((state.stage == frame_correction_stage ||
+             state.stage == scoring_stage) &&
+            length(reference) > 0)
+            state.A_t = forward(state.template, reference, empty_log_p,
+                                bandwidth, use_penalties=true, penalties=penalties)
         end
     end
     if recompute_Bs
         state.Bs = [backward(state.template, s, p, bandwidth)
                     for (s, p) in zip(seqs, lps)]
-        if state.stage == frame_correction_stage
-            state.B_t = backward(state.template, reference, reference_log_p, bandwidth,
-                                 allow_codon_indels=true, penalties=penalties)
+        if ((state.stage == frame_correction_stage ||
+             state.stage == scoring_stage) &&
+            length(reference) > 0)
+            state.B_t = backward(state.template, reference, empty_log_p, bandwidth,
+                                 use_penalties=true, penalties=penalties)
         end
     end
     state.score = sum([A[end, end] for A in state.As])
-    if state.stage == frame_correction_stage
+    if ((state.stage == frame_correction_stage ||
+         state.stage == scoring_stage) &&
+        length(reference) > 0)
         state.score += state.A_t[end, end]
     end
 end
@@ -734,16 +755,24 @@ end
 
 function estimate_probs(state::State,
                         sequences::Vector{ASCIIString},
-                        log_ps::Vector{Vector{Float64}})
+                        log_ps::Vector{Vector{Float64}},
+                        reference::AbstractString,
+                        penalties::RefPenalties)
     # `position_scores[i]` gives the following log probabilities
     # for `template[i]`: [A, C, G, T, -]
     position_scores = zeros(length(state.template), 5)
     # `insertion_scores[i]` gives the following log probabilities for an
     # insertion before `template[i]` of [A, C, G, T]
     insertion_scores = zeros(length(state.template) + 1, 4)
-    for m in candstask(initial_stage, state.template, sequences, log_ps)
+    use_ref = (length(reference) > 0)
+
+    # TODO: should we modify penalties before using reference?
+    # - do not penalize mismatches
+    # - use max indel penalty
+
+    for m in candstask(scoring_stage, state.template, sequences, log_ps)
         score = score_mutation(m, state, sequences, log_ps,
-                               false, "", Float64[], default_penalties)
+                               use_ref, reference, default_penalties)
         score -= state.score
         if typeof(m) == Substitution
             position_scores[m.pos, baseints[m.base]] = score
@@ -783,9 +812,8 @@ function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
                  phreds::Vector{Vector{Int8}};
                  reference::AbstractString="",
-                 penalties::Penalties=default_penalties,
-                 ref_mismatch::Float64=-3.0,
-                 cooling_rate::Float64=100.0,
+                 penalties::RefPenalties=default_penalties,
+                 cooling_rate::Float64=2.0,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
@@ -802,10 +830,6 @@ function quiver2(template::AbstractString,
 
     if verbose > 1
         println(STDERR, "computing initial alignments")
-    end
-
-    if ref_mismatch >= 0
-        error("reference mismatch penalty must be less than 0")
     end
 
     if any([minimum(p) < 0 for p in phreds])
@@ -827,10 +851,6 @@ function quiver2(template::AbstractString,
 
     state = initial_state(template, seqs, lps, bandwidth)
     empty_ref = length(reference) == 0
-    reference_log_p = fill(ref_mismatch, length(reference))
-
-    min_ref_ins = typemin(Float64)
-    min_ref_del = typemin(Float64)
 
     if verbose > 1
         println(STDERR, "initial score: $(state.score)")
@@ -847,8 +867,7 @@ function quiver2(template::AbstractString,
             println(STDERR, "iteration $i : $(state.stage)")
         end
 
-        candidates = getcands(state, seqs, lps,
-                              reference, reference_log_p, penalties)
+        candidates = getcands(state, seqs, lps, reference, penalties)
 
         recompute_As = true
         if length(candidates) == 0
@@ -863,15 +882,20 @@ function quiver2(template::AbstractString,
                 end
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
-                if no_single_indels(state.template,
-                                    reference, reference_log_p,
-                                    penalties, bandwidth)
+                if no_single_indels(state.template, reference, penalties, bandwidth)
+                    state.stage = refinement_stage
+                elseif penalties.indel_penalty == penalties.max_indel_penalty
+                    if verbose > 1
+                        println(STDERR, "  alignment had single indels but penalty already maximized.")
+                    end
                     state.stage = refinement_stage
                 else
-                    penalties = Penalties(penalties.ins_multiplier * cooling_rate,
-                                          penalties.del_multiplier * cooling_rate,
-                                          penalties.codon_ins,
-                                          penalties.codon_del)
+                    new_indel = min(penalties.indel_penalty * cooling_rate,
+                                    penalties.max_indel_penalty)
+                    penalties = RefPenalties(penalties.mismatch_penalty,
+                                             new_indel,
+                                             penalties.max_indel_penalty,
+                                             penalties.codon_indel_penalty)
                     if verbose > 1
                         println(STDERR, "  alignment to reference had single indels. increasing penalty.")
                     end
@@ -894,8 +918,7 @@ function quiver2(template::AbstractString,
             state.template = apply_mutations(old_template,
                                              Mutation[c.mutation
                                                       for c in chosen_cands])
-            recompute!(state, seqs, lps,
-                       reference, reference_log_p, penalties,
+            recompute!(state, seqs, lps, reference, penalties,
                        bandwidth, true, false)
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
@@ -924,8 +947,7 @@ function quiver2(template::AbstractString,
             end
             # replace 'N' with best base from alignments and recompute everything
             state.template = replace_ns(state, seqs, lps, bandwidth)
-            recompute!(state, seqs, lps,
-                       reference, reference_log_p, penalties,
+            recompute!(state, seqs, lps, reference, penalties,
                        bandwidth, true, true)
         end
         if batch < length(sequences)
@@ -934,8 +956,7 @@ function quiver2(template::AbstractString,
             lps = log_ps[indices]
             recompute_As = true
         end
-        recompute!(state, seqs, lps,
-                   reference, reference_log_p, penalties,
+        recompute!(state, seqs, lps, reference, penalties,
                    bandwidth, recompute_As, true)
         if verbose > 1
             println(STDERR, "  score: $(state.score)")
@@ -949,8 +970,7 @@ function quiver2(template::AbstractString,
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
             lps = log_ps[indices]
-            recompute!(state, seqs, lps,
-                       reference, reference_log_p, penalties,
+            recompute!(state, seqs, lps, reference, penalties,
                        bandwidth, true, true)
             if verbose > 1
                 println(STDERR, "  new score: $(state.score)")
@@ -958,6 +978,7 @@ function quiver2(template::AbstractString,
 
         end
     end
+    state.stage = scoring_stage
     if verbose > 0
         println(STDERR, "done. converged: $(state.converged)")
     end
@@ -972,10 +993,10 @@ function quiver2(template::AbstractString,
                 )
 
     # FIXME: recomputing for all sequences may be costly
-    recompute!(state, sequences, log_ps,
-               reference, reference_log_p, penalties,
+    recompute!(state, sequences, log_ps, reference, penalties,
                bandwidth, true, true)
-    base_probs, insertion_probs = estimate_probs(state, sequences, log_ps)
+    base_probs, insertion_probs = estimate_probs(state, sequences, log_ps,
+                                                 reference, penalties)
     return state.template, base_probs, insertion_probs, info
 end
 

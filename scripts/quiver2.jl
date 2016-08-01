@@ -12,6 +12,7 @@ import Quiver2.Util
 
 function parse_commandline()
     s = ArgParseSettings()
+    rps = Quiver2.Model.default_penalties
     @add_arg_table s begin
         "--reference"
         help = string("reference fasta file.",
@@ -23,6 +24,26 @@ function parse_commandline()
         help = "file mapping input filename to reference id"
         arg_type = AbstractString
         default = ""
+
+        "--mismatch-penalty"
+        help = "reference mismatch penalty"
+        arg_type = Float64
+        default = rps.mismatch_penalty
+
+        "--indel-penalty"
+        help = "reference indel penalty"
+        arg_type = Float64
+        default = rps.indel_penalty
+
+        "--max-indel-penalty"
+        help = "max reference indel penalty"
+        arg_type = Float64
+        default = rps.max_indel_penalty
+
+        "--codon-indel-penalty"
+        help = "codon reference indel penalty"
+        arg_type = Float64
+        default = rps.codon_indel_penalty
 
         "--prefix"
         help = "prepended to each filename to make name"
@@ -95,6 +116,10 @@ end
         reference = ref_record.seq
     end
 
+    penalties = Quiver2.Model.RefPenalties(args["mismatch-penalty"],
+                                           args["indel-penalty"],
+                                           args["max-indel-penalty"],
+                                           args["codon-indel-penalty"])
     sequences, phreds = read_fastq(file)
     template = sequences[1]
     if args["verbose"] > 0
@@ -102,6 +127,7 @@ end
     end
     return quiver2(template, sequences, phreds,
                    reference=reference,
+                   penalties=penalties,
                    bandwidth=args["bandwidth"],
                    min_dist=args["min-dist"],
                    batch=args["batch"],
