@@ -7,7 +7,7 @@ using Quiver2.BandedArrays
 using Quiver2.Mutations
 using Quiver2.Util
 
-export quiver2, RefPenalties
+export quiver2, Penalties
 
 # initial_stage:
 #   - do not use reference.
@@ -38,7 +38,7 @@ type State
 end
 
 
-immutable RefPenalties
+immutable Penalties
     mismatch_penalty::Float64
     indel_penalty::Float64
     max_indel_penalty::Float64
@@ -46,17 +46,17 @@ immutable RefPenalties
 end
 
 
-function RefPenalties(mismatch_penalty, indel_penalty, max_indel_penalty, codon_indel_penalty)
+function Penalties(mismatch_penalty, indel_penalty, max_indel_penalty, codon_indel_penalty)
     if (mismatch_penalty >= 0.0 ||
         indel_penalty >= 0.0 ||
         max_indel_penalty >= 0.0 ||
         codon_indel_penalty >= 0.0)
         error("penalties must be < 0")
     end
-    return RefPenalties()
+    return Penalties()
 end
 
-const default_penalties = RefPenalties(log10(1.0 / 50.0), -0.1, -5.0, -2.3)
+const default_penalties = Penalties(log10(1.0 / 50.0), -0.1, -5.0, -2.3)
 
 const empty_log_p = Float64[]
 
@@ -99,7 +99,7 @@ end
 function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
                 log_p::Float64, next_log_p::Float64,
-                use_penalties::Bool, penalties::RefPenalties)
+                use_penalties::Bool, penalties::Penalties)
     result = (typemin(Float64), match)
     match_p = use_penalties ? penalties.mismatch_penalty : log_p
     match_penalty = (s_base == t_base ? inv_log10(match_p) : match_p)
@@ -162,7 +162,7 @@ function prepare_array(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
                        bandwidth::Int,
                        use_penalties::Bool=false,
-                       penalties::RefPenalties=default_penalties)
+                       penalties::Penalties=default_penalties)
     # FIXME: consider codon moves in initialization
     if !use_penalties && length(s) != length(log_p)
         error("sequence length does not match quality score length")
@@ -187,7 +187,7 @@ backtracing to find best alignment.
 function forward_moves(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
                        bandwidth::Int,
-                       use_penalties::Bool, penalties::RefPenalties)
+                       use_penalties::Bool, penalties::Penalties)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
@@ -225,7 +225,7 @@ function forward(t::AbstractString, s::AbstractString,
                  log_p::Vector{Float64},
                  bandwidth::Int;
                  use_penalties::Bool=false,
-                 penalties::RefPenalties=default_penalties)
+                 penalties::Penalties=default_penalties)
     result = prepare_array(t, s, log_p, bandwidth, use_penalties, penalties)
     for j = 2:size(result)[2]
         start, stop = row_range(result, j)
@@ -250,7 +250,7 @@ B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 function backward(t::AbstractString, s::AbstractString, log_p::Vector{Float64},
                   bandwidth::Int;
                   use_penalties::Bool=false,
-                  penalties::RefPenalties=default_penalties)
+                  penalties::Penalties=default_penalties)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
     t = reverse(t)
@@ -302,7 +302,7 @@ function seq_score_mutation(mutation::Union{Insertion,Substitution},
                             A::BandedArray{Float64}, B::BandedArray{Float64},
                             template::AbstractString,
                             seq::AbstractString, log_p::Vector{Float64},
-                            use_penalties::Bool, penalties::RefPenalties)
+                            use_penalties::Bool, penalties::Penalties)
     bj = mutation.pos + 1 # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     b_start, b_stop = row_range(B, bj)  # row range of B column
@@ -422,7 +422,7 @@ function seq_score_mutation(mutation::CodonInsertion,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
                             template::AbstractString,
                             seq::AbstractString, log_p::Vector{Float64},
-                            use_penalties::Bool, penalties::RefPenalties)
+                            use_penalties::Bool, penalties::Penalties)
     bj = mutation.pos + 1 # column after base to mutate or insert
     Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
     b_start, b_stop = row_range(B, bj)  # row range of B column
@@ -509,7 +509,7 @@ function score_mutation(m::Mutation,
                         log_ps::Vector{Vector{Float64}},
                         use_ref::Bool,
                         reference::ASCIIString,
-                        penalties::RefPenalties)
+                        penalties::Penalties)
     score = 0.0
     for si in 1:length(sequences)
         score += seq_score_mutation(m, state.As[si], state.Bs[si], state.template,
@@ -571,7 +571,7 @@ function getcands(state::State,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
                   reference::ASCIIString,
-                  penalties::RefPenalties)
+                  penalties::Penalties)
     candidates = CandMutation[]
     use_ref = state.stage == frame_correction_stage
     for m in candstask(state.stage, state.template,
@@ -604,7 +604,7 @@ end
 
 function align(t, s, log_p, bandwidth;
                use_penalties::Bool=false,
-               penalties::RefPenalties=default_penalties)
+               penalties::Penalties=default_penalties)
     moves = forward_moves(t, s, log_p, bandwidth, use_penalties, penalties)
     return backtrace(t, s, moves)
 end
@@ -612,7 +612,7 @@ end
 
 function no_single_indels(template::AbstractString,
                           reference::AbstractString,
-                          penalties::RefPenalties,
+                          penalties::Penalties,
                           bandwidth::Int)
     has_right_length = length(template) % 3 == 0
     t_aln, r_aln = align(template, reference, empty_log_p, bandwidth,
@@ -642,7 +642,7 @@ end
 function recompute!(state::State, seqs::Vector{ASCIIString},
                     lps::Vector{Vector{Float64}},
                     reference::AbstractString,
-                    penalties::RefPenalties,
+                    penalties::Penalties,
                     bandwidth::Int, recompute_As::Bool, recompute_Bs::Bool)
     if recompute_As
         state.As = [forward(state.template, s, p, bandwidth)
@@ -749,7 +749,7 @@ function estimate_probs(state::State,
                         sequences::Vector{ASCIIString},
                         log_ps::Vector{Vector{Float64}},
                         reference::AbstractString,
-                        penalties::RefPenalties)
+                        penalties::Penalties)
     # `position_scores[i]` gives the following log probabilities
     # for `template[i]`: [A, C, G, T, -]
     position_scores = zeros(length(state.template), 5)
@@ -761,6 +761,8 @@ function estimate_probs(state::State,
     # TODO: should we modify penalties before using reference?
     # - do not penalize mismatches
     # - use max indel penalty
+
+    # TODO: insertion scores should also include the chance of no insertion.
 
     for m in candstask(scoring_stage, state.template, sequences, log_ps)
         score = score_mutation(m, state, sequences, log_ps,
@@ -804,7 +806,7 @@ function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
                  phreds::Vector{Vector{Int8}};
                  reference::AbstractString="",
-                 penalties::RefPenalties=default_penalties,
+                 penalties::Penalties=default_penalties,
                  cooling_rate::Float64=2.0,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
@@ -884,10 +886,10 @@ function quiver2(template::AbstractString,
                 else
                     new_indel = min(penalties.indel_penalty * cooling_rate,
                                     penalties.max_indel_penalty)
-                    penalties = RefPenalties(penalties.mismatch_penalty,
-                                             new_indel,
-                                             penalties.max_indel_penalty,
-                                             penalties.codon_indel_penalty)
+                    penalties = Penalties(penalties.mismatch_penalty,
+                                          new_indel,
+                                          penalties.max_indel_penalty,
+                                          penalties.codon_indel_penalty)
                     if verbose > 1
                         println(STDERR, "  alignment to reference had single indels. increasing penalty.")
                     end

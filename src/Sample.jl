@@ -253,15 +253,17 @@ end
 """
 nseqs: number of sequences to sample
 len: length of the reference
-template_error_rate: overall error rate for the template
-template_error_ratios: (sub, ins, del) template error ratios
+template_error_rate: overall error rate sampling template
+    from reference
+template_error_ratios: (sub, ins, del) error ratios for
+    sampling template from reference
 template_error_mean: mean of Beta distribution for drawing
     per-base template sequencing error rates
 template_error_std: standard deviation of same Beta
 log_seq_actual_std: standard deviation for jittering actual
-    sequence per-base error rate
+    sequence per-base error rate (measurement noise)
 log_seq_quality_std: standard deviation for jittering reported
-    sequence per-base error rate
+    sequence per-base error rate (quality score estimation noise)
 seq_error_ratios: (sub, ins, del) sequence error ratios
 
 """

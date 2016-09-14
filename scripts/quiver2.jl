@@ -116,10 +116,10 @@ end
         reference = ref_record.seq
     end
 
-    penalties = Quiver2.Model.RefPenalties(args["mismatch-penalty"],
-                                           args["indel-penalty"],
-                                           args["max-indel-penalty"],
-                                           args["codon-indel-penalty"])
+    penalties = Quiver2.Model.Penalties(args["mismatch-penalty"],
+                                        args["indel-penalty"],
+                                        args["max-indel-penalty"],
+                                        args["codon-indel-penalty"])
     sequences, phreds = read_fastq(file)
     template = sequences[1]
     if args["verbose"] > 0

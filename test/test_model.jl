@@ -181,7 +181,7 @@ end
 function test_no_single_indels()
     reference = "AAAGGGTTT"
 
-    penalties = RefPenalties(-2.0, -2.0, -5.0, -2.0)
+    penalties = Penalties(-2.0, -2.0, -5.0, -2.0)
     bandwidth = 6
 
     template = "AAACCCGGGTTT"
