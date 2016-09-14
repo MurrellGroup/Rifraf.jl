@@ -113,96 +113,65 @@ function substitute(base, p::Float64)
 end
 
 
-function do_substitutions(template::DNASequence,
-                          actual_error_p::Vector{Float64},
-                          sub_ratio::Float64)
-    sub_p = actual_error_p * sub_ratio
-    seq = copy(template)
-    # do substitutions
-    for i = 1:length(seq)
-        if Base.rand(Bernoulli(sub_p[i])) == 1
-            seq[i] = mutate_base(seq[i])
-        end
-    end
-    return seq
-end
-
-
-function do_deletions(seq::DNASequence,
-                      actual_error_p::Vector{Float64},
-                      del_ratio::Float64,
-                      codon::Bool)
-    if codon && length(seq) % 3 != 0
+function hmm_sample(sequence::DNASequence,
+                    error_p::Vector{Float64},
+                    error_ratios::Tuple{Float64, Float64, Float64};
+                    codon=false)
+    if codon && length(sequence) % 3 != 0
         error("sequence length is not multiple of 3")
     end
-    # ajust probabilities for ratios
-    del_p = actual_error_p * del_ratio
-    if codon
-        # adjust for multiple tests
-        # first and last bases only get checked once, so no adjustment necessary
-        # bases second from ends get checked twice
-        del_p[2] /= 2.0
-        del_p[end-1] /= 2.0
-        # all others get checked three times
-        del_p[3:end-2] /= 3.0
-    end
+    sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
     final_seq = []
-    final_actual_error_p = Float64[]
+    final_error_p = Float64[]
     skip = 0
-    for i = 1:(length(seq))
+    for i = 1:(length(sequence) + 1)
         if skip > 0
             skip -= 1
             continue
         end
-        p = del_p[i]
+        p = (i > length(sequence) ? error_p[i - 1] : error_p[i])
+        prev_p = (i == 1 ? error_p[1] : error_p[i - 1])
+        # insertion between i-1 and i
+        ins_p = exp10(0.5 * (log10(prev_p) + log10(p))) * ins_ratio
         if codon
-            if i > length(seq) - 3
-                p = 0.0
-            else
-                p = 1-prod(1-del_p[i:i+2])
-            end
+            ins_p /= 3.0
         end
-        if Base.rand(Bernoulli(p)) == 1
-            skip = codon ? 2 : 0
-        else
-            push!(final_seq, seq[i])
-            push!(final_actual_error_p, actual_error_p[i])
-        end
-    end
-    return DNASequence(final_seq), final_actual_error_p
-end
-
-
-function do_insertions(seq::DNASequence,
-                       actual_error_p::Vector{Float64},
-                       ins_ratio::Float64,
-                       codon::Bool)
-    if codon && length(seq) % 3 != 0
-        error("sequence length is not multiple of 3")
-    end
-    # do insertions
-    ins_p = actual_error_p * ins_ratio
-    if codon
-        ins_p /= 3.0
-    end
-    final_seq = []
-    final_actual_error_p = Float64[]
-    for i = 1:length(seq)
-        p = ins_p[i]
-        actual_p = actual_error_p[i]
-        if Base.rand(Bernoulli(p)) == 1
+        while Base.rand(Bernoulli(ins_p)) == 1
             if codon
                 push!(final_seq, random_codon()...)
-                push!(final_actual_error_p, collect(repeated(actual_p, 3))...)
+                push!(final_error_p, collect(repeated(p, 3))...)
             else
                 push!(final_seq, rbase())
-                push!(final_actual_error_p, actual_p)
+                push!(final_error_p, p)
             end
         end
-        push!(final_seq, seq[i])
-        push!(final_actual_error_p, actual_p)
+        if i > length(sequence)
+            break
+        end
+
+        # deletion of i
+        del_p = p * del_ratio
+        if codon
+            if i > length(sequence) - 3
+                del_p = 0.0
+            else
+                del_p = 1 - prod(1 - error_p[i:i+2] * del_ratio)
+            end
+        end
+        if Base.rand(Bernoulli(del_p)) == 1
+            # skip position i, and possibly the entire codon starting at i
+            skip = codon ? 2 : 0
+        else
+            # mutation of position i
+            if Base.rand(Bernoulli(p * sub_ratio)) == 1
+                push!(final_seq, mutate_base(sequence[i]))
+            else
+                push!(final_seq, sequence[i])
+            end
+            push!(final_error_p, p)
+        end
     end
-    return DNASequence(final_seq), final_actual_error_p
+    return DNASequence(final_seq), final_error_p
 end
 
 
@@ -211,12 +180,8 @@ function sample_from_reference(reference::DNASequence,
                                error_ratios::Tuple{Float64, Float64, Float64})
     sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
     error_p = error_rate *  ones(length(reference))
-
-    template = do_substitutions(reference, error_p, sub_ratio)
-    template, error_p = do_deletions(template, error_p, del_ratio, true)
-    template, error_p = do_insertions(template, error_p, ins_ratio, true)
-
-    return DNASequence(template)
+    template, e = hmm_sample(reference, error_p, error_ratios, codon=true)
+    return template
 end
 
 
@@ -237,13 +202,14 @@ function sample_from_template(template::DNASequence,
                               log_reported_error_std::Float64)
     sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
 
-    actual_error_p = jitter_vector(template_error_p,
-                                   log_actual_error_std)
+    # add noise to simulate measurement error
+    jittered_error_p = jitter_vector(template_error_p,
+                                     log_actual_error_std)
 
-    seq = do_substitutions(template, actual_error_p, sub_ratio)
-    seq, actual_error_p = do_deletions(seq, actual_error_p, del_ratio, false)
-    seq, actual_error_p = do_insertions(seq, actual_error_p, ins_ratio, false)
+    seq, actual_error_p = hmm_sample(template, jittered_error_p,
+                                     error_ratios, codon=false)
 
+    # add noise to simulate quality score estimation error
     reported_error_p = jitter_vector(actual_error_p,
                                      log_reported_error_std)
     phreds = p_to_phred(reported_error_p)
