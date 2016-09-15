@@ -347,6 +347,9 @@ function seq_score_mutation(mutation::Union{Insertion,Substitution},
             # (mis)match
             my_mm_penalty = use_penalties ? penalties.mismatch_penalty : penalty
             mm_penalty = (mutation.base == seq[seq_i] ? inv_log10(my_mm_penalty) : my_mm_penalty)
+            if seq[seq_i] == 'N' || mutation.base == 'N'
+                mm_penalty = 0.0
+            end
             scores[1] = max(scores[1], A[real_i - 1, ajprev] + mm_penalty)
         end
         if prev_start <= real_i <= prev_stop
@@ -395,6 +398,9 @@ function compute_subcol(row_start, row_stop,
             # (mis)match
             my_mm_penalty = use_penalties ? penalties.mismatch_penalty : penalty
             mm_penalty = (base == seq[seq_i] ? inv_log10(my_mm_penalty) : my_mm_penalty)
+            if seq[seq_i] == 'N' || base == 'N'
+                mm_penalty = 0.0
+            end
             col[i] = max(col[i], prev[prev_i-1] + mm_penalty)
         end
         if prev_start <= real_i <= prev_stop
