@@ -128,7 +128,7 @@ function hmm_sample(sequence::DNASequence,
         p = (i > length(sequence) ? error_p[i - 1] : error_p[i])
         prev_p = (i == 1 ? error_p[1] : error_p[i - 1])
         # insertion between i-1 and i
-        mean_p = 0.5 * (p + prev_p)
+        mean_p = mean([p, prev_p])
         ins_p = mean_p * ins_ratio
         if codon
             ins_p /= 3.0
@@ -155,10 +155,10 @@ function hmm_sample(sequence::DNASequence,
         # deletion of i
         del_p = p * del_ratio
         if codon
-            if i > length(sequence) - 3
+            if i > length(sequence) - 2
                 del_p = 0.0
             else
-                del_p = 1 - prod(1 - error_p[i:i+2] * del_ratio)
+                del_p = mean(error_p[i:i+2]) * del_ratio / 3
             end
         end
         if Base.rand(Bernoulli(del_p)) == 1
@@ -181,7 +181,6 @@ end
 function sample_from_reference(reference::DNASequence,
                                error_rate::Float64,
                                error_ratios::Tuple{Float64, Float64, Float64})
-    sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
     error_p = error_rate *  ones(length(reference))
     template, e = hmm_sample(reference, error_p, error_ratios, codon=true)
     return template
@@ -203,8 +202,6 @@ function sample_from_template(template::DNASequence,
                               error_ratios::Tuple{Float64, Float64, Float64},
                               log_actual_error_std::Float64,
                               log_reported_error_std::Float64)
-    sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
-
     # add noise to simulate measurement error
     jittered_error_p = jitter_vector(template_error_p,
                                      log_actual_error_std)

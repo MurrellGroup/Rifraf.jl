@@ -738,8 +738,8 @@ end
 function normalize_log_differences(position_scores, insertion_scores, state_score)
     # per-base insertion score is mean of neighboring insertions
     position_exp = exp10(position_scores)
-    ins_exp = exp10(insertion_scores)
     position_probs = broadcast(/, position_exp, sum(position_exp, 2))
+    ins_exp = exp10(insertion_scores)
     ins_probs = broadcast(/, ins_exp, exp10(state_score) + sum(ins_exp, 2))
     return position_probs, ins_probs
 end
@@ -752,7 +752,7 @@ function estimate_probs(state::State,
                         penalties::Penalties)
     # `position_scores[i]` gives the following log probabilities
     # for `template[i]`: [A, C, G, T, -]
-    position_scores = zeros(length(state.template), 5)
+    position_scores = zeros(length(state.template), 5) + state.score
     # `insertion_scores[i]` gives the following log probabilities for an
     # insertion before `template[i]` of [A, C, G, T]
     insertion_scores = zeros(length(state.template) + 1, 4)
@@ -763,13 +763,9 @@ function estimate_probs(state::State,
 
     use_ref = (length(reference) > 0)
 
-    max_score = state.score
     for m in candstask(scoring_stage, state.template, sequences, log_ps)
         score = score_mutation(m, state, sequences, log_ps,
                                use_ref, reference, penalties)
-        if score > max_score
-            max_score = score
-        end
         if typeof(m) == Substitution
             position_scores[m.pos, baseints[m.base]] = score
         elseif typeof(m) == Deletion
@@ -778,8 +774,15 @@ function estimate_probs(state::State,
             insertion_scores[m.pos + 1, baseints[m.base]] = score
         end
     end
+    max_score = max(maximum(position_scores), maximum(insertion_scores))
     position_scores -= max_score
     insertion_scores -= max_score
+    if maximum(position_scores) > 0.0
+        error("position scores cannot be positive")
+    end
+    if maximum(insertion_scores) > 0.0
+        error("insertion scores cannot be positive")
+    end
     return normalize_log_differences(position_scores, insertion_scores, state.score - max_score)
 end
 
@@ -854,7 +857,8 @@ function quiver2(template::AbstractString,
         println(STDERR, "initial score: $(state.score)")
     end
     n_mutations = Vector{Int}[]
-    consensus_lengths = Int[]
+    consensus_lengths = Int[length(template)]
+    consensus_noref = ""
 
     stage_iterations = zeros(Int, Int(typemax(Stage)))
     for i in 1:max_iters
@@ -874,6 +878,7 @@ function quiver2(template::AbstractString,
             end
             push!(n_mutations, zeros(Int, Int(typemax(DPMove))))
             if state.stage == initial_stage
+                consensus_noref = state.template
                 if empty_ref
                     state.converged = true
                     break
@@ -986,6 +991,7 @@ function quiver2(template::AbstractString,
                 "stage_iterations" => stage_iterations,
                 "exceeded_max_iterations" => exceeded,
                 "penalties" => penalties,
+                "consensus_noref" => consensus_noref,
                 "n_mutations" => transpose(hcat(n_mutations...)),
                 "consensus_lengths" => consensus_lengths,
                 )
@@ -1014,6 +1020,7 @@ function quiver2(template::DNASequence,
      insertion_probs, info) = quiver2(new_template, new_sequences, phreds;
                                       reference=new_reference,
                                       kwargs...)
+    info["consensus_noref"] = DNASequence(info["consensus_noref"])
     return (DNASequence(result), base_probs, insertion_probs, info)
 end
 
