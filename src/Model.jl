@@ -740,8 +740,6 @@ function normalize_log_differences(position_scores, insertion_scores, state_scor
     position_exp = exp10(position_scores)
     ins_exp = exp10(insertion_scores)
     position_probs = broadcast(/, position_exp, sum(position_exp, 2))
-    # add '1.0' because we normalized current score to 0.0, which is
-    # log10(1.0)
     ins_probs = broadcast(/, ins_exp, exp10(state_score) + sum(ins_exp, 2))
     return position_probs, ins_probs
 end
@@ -758,16 +756,17 @@ function estimate_probs(state::State,
     # `insertion_scores[i]` gives the following log probabilities for an
     # insertion before `template[i]` of [A, C, G, T]
     insertion_scores = zeros(length(state.template) + 1, 4)
-    use_ref = (length(reference) > 0)
 
     # TODO: should we modify penalties before using reference?
     # - do not penalize mismatches
     # - use max indel penalty
 
+    use_ref = (length(reference) > 0)
+
     max_score = state.score
     for m in candstask(scoring_stage, state.template, sequences, log_ps)
         score = score_mutation(m, state, sequences, log_ps,
-                               use_ref, reference, default_penalties)
+                               use_ref, reference, penalties)
         if score > max_score
             max_score = score
         end
@@ -994,9 +993,9 @@ function quiver2(template::AbstractString,
     # FIXME: recomputing for all sequences may be costly
     recompute!(state, sequences, log_ps, reference, penalties,
                bandwidth, true, true)
-    base_probs, insertion_probs = estimate_probs(state, sequences, log_ps,
-                                                 reference, penalties)
-    return state.template, base_probs, insertion_probs, info
+    base_probs, ins_probs = estimate_probs(state, sequences, log_ps,
+                                           reference, penalties)
+    return state.template, base_probs, ins_probs, info
 end
 
 """
