@@ -930,7 +930,8 @@ function quiver2(template::AbstractString,
                        bandwidth, true, false)
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
-            if state.score < chosen_cands[1].score || isapprox(state.score, chosen_cands[1].score)
+            if length(chosen_cands) > 1 && (state.score < chosen_cands[1].score
+                                            || isapprox(state.score, chosen_cands[1].score))
                 if verbose > 1
                     println(STDERR, "  rejecting multiple candidates in favor of best")
                 end
