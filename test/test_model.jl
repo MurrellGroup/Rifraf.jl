@@ -123,11 +123,11 @@ function test_random_insertions()
     end
 end
 
-function test_random_codon_insertions()
+function test_codon_insertions()
     for i = 1:30
         template_len = rand(10:20)
         pos = rand(0:template_len)
-        mutation = Mutations.CodonInsertion(pos, random_codon())
+        mutation = Mutations.CodonInsertion(pos, ('N', 'N', 'N'))
         test_random_mutation(mutation, template_len)
     end
 end
@@ -318,7 +318,7 @@ test_equal_ranges()
 test_forward_backward_agreement()
 test_random_substitutions()
 test_random_insertions()
-test_random_codon_insertions()
+test_codon_insertions()
 test_random_deletions()
 test_random_codon_deletions()
 test_replace_ns()
