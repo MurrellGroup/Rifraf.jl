@@ -1,6 +1,7 @@
 module Model
 
 using Bio.Seq
+using Iterators
 
 using Quiver2.Sample
 using Quiver2.BandedArrays
@@ -103,9 +104,6 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
     result = (typemin(Float64), match)
     match_p = use_penalties ? penalties.mismatch_penalty : log_p
     match_penalty = (s_base == t_base ? inv_log10(match_p) : match_p)
-    if t_base == 'N'
-        match_penalty = 0.0
-    end
     ins_penalty = use_penalties ? penalties.indel_penalty : log_p
     del_penalty = use_penalties ? penalties.indel_penalty : mean([log_p, next_log_p])
     result = update_helper(A, i, j, match, match_penalty, result...)
@@ -180,8 +178,9 @@ function prepare_array(t::AbstractString, s::AbstractString,
 end
 
 
-"""Does some work as forward_codon, but also keeps track of moves does
-backtracing to find best alignment.
+"""Does some work as forward_codon, but also keeps track of moves
+
+Does backtracing to find best alignment.
 
 """
 function forward_moves(t::AbstractString, s::AbstractString,
@@ -347,9 +346,6 @@ function seq_score_mutation(mutation::Union{Insertion,Substitution},
             # (mis)match
             my_mm_penalty = use_penalties ? penalties.mismatch_penalty : penalty
             mm_penalty = (mutation.base == seq[seq_i] ? inv_log10(my_mm_penalty) : my_mm_penalty)
-            if seq[seq_i] == 'N' || mutation.base == 'N'
-                mm_penalty = 0.0
-            end
             scores[1] = max(scores[1], A[real_i - 1, ajprev] + mm_penalty)
         end
         if prev_start <= real_i <= prev_stop
@@ -398,9 +394,6 @@ function compute_subcol(row_start, row_stop,
             # (mis)match
             my_mm_penalty = use_penalties ? penalties.mismatch_penalty : penalty
             mm_penalty = (base == seq[seq_i] ? inv_log10(my_mm_penalty) : my_mm_penalty)
-            if seq[seq_i] == 'N' || base == 'N'
-                mm_penalty = 0.0
-            end
             col[i] = max(col[i], prev[prev_i-1] + mm_penalty)
         end
         if prev_start <= real_i <= prev_stop
@@ -559,12 +552,14 @@ function candstask(stage::Stage,
             end
         end
         if stage == frame_correction_stage
-            # codon indels
-            produce(CodonInsertion(0, ('N', 'N', 'N')))
-            for j in 1:len
-                produce(CodonInsertion(j, ('N', 'N', 'N')))
-                if j < len - 1
-                    produce(CodonDeletion(j))
+            # codon deletions
+            for j in 1:(len-2)
+                produce(CodonDeletion(j))
+            end
+            # codon insertions
+            for codon in product("ACGT", "ACGT", "ACGT")
+                for j in 0:len
+                    produce(CodonInsertion(j, codon))
                 end
             end
         end
@@ -676,67 +671,6 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
         length(reference) > 0)
         state.score += state.A_t[end, end]
     end
-end
-
-
-function most_likely_base(counter::Dict{Char, Float64})
-    if '-' in keys(counter)
-        pop!('-', counter)
-    end
-    c = rbase()
-    if length(counter) > 0
-        c, n = minimum(counter)
-    end
-    return c
-end
-
-
-function interleave(xs, ys)
-    if length(xs) != length(ys) + 1
-        error("`xs` must have one more element than `ys`")
-    end
-    result = []
-    for i in 1:length(ys)
-        push!(result, xs[i])
-        push!(result, ys[i])
-    end
-    push!(result, xs[end])
-    return result
-end
-
-
-function replace_ns(state::State, seqs::Vector{ASCIIString},
-                    log_ps::Vector{Vector{Float64}},
-                    bandwidth::Int)
-    positions = []
-    for i in 1:length(state.template)
-        if state.template[i] == 'N'
-            push!(positions, i)
-        end
-    end
-    counters = [Dict{Char, Float64}() for i in positions]
-    for (s, p) in zip(seqs, log_ps)
-        t_aln, s_aln = align(state.template, s, p, bandwidth)
-        counter_posn = 0
-        seq_posn = 0
-        for i in 1:length(t_aln)
-            if s_aln[i] != '-'
-                seq_posn += 1
-            end
-            if t_aln[i] == 'N'
-                counter_posn += 1
-                counter = counters[counter_posn]
-                base = s_aln[i]
-                if !(base in keys(counter))
-                    counter[base] = 0.0
-                end
-                counter[base] += p[seq_posn]
-            end
-        end
-    end
-    bases = [most_likely_base(c) for c in counters]
-    parts = split(state.template, 'N')
-    return join(interleave(parts, bases))
 end
 
 
@@ -865,6 +799,7 @@ function quiver2(template::AbstractString,
     n_mutations = Vector{Int}[]
     consensus_lengths = Int[length(template)]
     consensus_noref = ""
+    consensus_ref = ""
 
     stage_iterations = zeros(Int, Int(typemax(Stage)))
     for i in 1:max_iters
@@ -892,6 +827,7 @@ function quiver2(template::AbstractString,
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
                 if no_single_indels(state.template, reference, penalties, bandwidth)
+                    consensus_ref = state.template
                     state.stage = refinement_stage
                 elseif penalties.indel_penalty == penalties.max_indel_penalty
                     if verbose > 1
@@ -949,16 +885,6 @@ function quiver2(template::AbstractString,
             push!(n_mutations, mutation_counts)
         end
         push!(consensus_lengths, length(state.template))
-        # FIXME: code duplication with all these recomputations
-        if 'N' in state.template
-            if state.stage != frame_correction_stage
-                error("'N' not allowed in template during this stage")
-            end
-            # replace 'N' with best base from alignments and recompute everything
-            state.template = replace_ns(state, seqs, lps, bandwidth)
-            recompute!(state, seqs, lps, reference, penalties,
-                       bandwidth, true, true)
-        end
         if batch < length(sequences)
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
@@ -999,6 +925,7 @@ function quiver2(template::AbstractString,
                 "exceeded_max_iterations" => exceeded,
                 "penalties" => penalties,
                 "consensus_noref" => consensus_noref,
+                "consensus_ref" => consensus_ref,
                 "n_mutations" => transpose(hcat(n_mutations...)),
                 "consensus_lengths" => consensus_lengths,
                 )
@@ -1028,6 +955,7 @@ function quiver2(template::DNASequence,
                                       reference=new_reference,
                                       kwargs...)
     info["consensus_noref"] = DNASequence(info["consensus_noref"])
+    info["consensus_ref"] = DNASequence(info["consensus_ref"])
     return (DNASequence(result), base_probs, insertion_probs, info)
 end
 
