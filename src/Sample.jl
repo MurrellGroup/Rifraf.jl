@@ -125,30 +125,33 @@ function hmm_sample(sequence::DNASequence,
     final_error_p = Float64[]
     skip = 0
     for i = 1:(length(sequence) + 1)
-        if skip > 0
-            skip -= 1
-            continue
-        end
         p = (i > length(sequence) ? error_p[i - 1] : error_p[i])
         prev_p = (i == 1 ? error_p[1] : error_p[i - 1])
         # insertion between i-1 and i
-        ins_p = exp10(0.5 * (log10(prev_p) + log10(p))) * ins_ratio
+        mean_p = 0.5 * (p + prev_p)
+        ins_p = mean_p * ins_ratio
         if codon
             ins_p /= 3.0
         end
-        while Base.rand(Bernoulli(ins_p)) == 1
+        if Base.rand(Bernoulli(ins_p)) == 1
             if codon
                 push!(final_seq, random_codon()...)
-                push!(final_error_p, collect(repeated(p, 3))...)
+                push!(final_error_p, collect(repeated(mean_p / ins_ratio, 3))...)
             else
                 push!(final_seq, rbase())
-                push!(final_error_p, p)
+                push!(final_error_p, mean_p)
             end
         end
         if i > length(sequence)
             break
         end
 
+        # only skip after insertions, to ensure equal probability of
+        # insertion and deletions
+        if skip > 0
+            skip -= 1
+            continue
+        end
         # deletion of i
         del_p = p * del_ratio
         if codon

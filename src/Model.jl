@@ -735,12 +735,14 @@ end
 
 
 """convert per-mutation log differences to a per-base error rate"""
-function normalize_log_differences(position_scores, insertion_scores)
+function normalize_log_differences(position_scores, insertion_scores, state_score)
     # per-base insertion score is mean of neighboring insertions
     position_exp = exp10(position_scores)
     ins_exp = exp10(insertion_scores)
     position_probs = broadcast(/, position_exp, sum(position_exp, 2))
-    ins_probs = broadcast(/, ins_exp, 1.0 + sum(ins_exp, 2))
+    # add '1.0' because we normalized current score to 0.0, which is
+    # log10(1.0)
+    ins_probs = broadcast(/, ins_exp, exp10(state_score) + sum(ins_exp, 2))
     return position_probs, ins_probs
 end
 
@@ -762,12 +764,13 @@ function estimate_probs(state::State,
     # - do not penalize mismatches
     # - use max indel penalty
 
-    # TODO: insertion scores should also include the chance of no insertion.
-
+    max_score = state.score
     for m in candstask(scoring_stage, state.template, sequences, log_ps)
         score = score_mutation(m, state, sequences, log_ps,
                                use_ref, reference, default_penalties)
-        score -= state.score
+        if score > max_score
+            max_score = score
+        end
         if typeof(m) == Substitution
             position_scores[m.pos, baseints[m.base]] = score
         elseif typeof(m) == Deletion
@@ -776,7 +779,9 @@ function estimate_probs(state::State,
             insertion_scores[m.pos + 1, baseints[m.base]] = score
         end
     end
-    return normalize_log_differences(position_scores, insertion_scores)
+    position_scores -= max_score
+    insertion_scores -= max_score
+    return normalize_log_differences(position_scores, insertion_scores, state.score - max_score)
 end
 
 
@@ -981,6 +986,7 @@ function quiver2(template::AbstractString,
     info = Dict("converged" => state.converged,
                 "stage_iterations" => stage_iterations,
                 "exceeded_max_iterations" => exceeded,
+                "penalties" => penalties,
                 "n_mutations" => transpose(hcat(n_mutations...)),
                 "consensus_lengths" => consensus_lengths,
                 )
