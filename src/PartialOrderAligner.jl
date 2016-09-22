@@ -16,6 +16,12 @@ immutable NodeLabel
 end
 
 
+immutable Scores
+    mismatch::Float64
+    indel::Float64
+end
+
+
 immutable PartialOrderGraph
     graph::DiGraph
     # has all same nodes as `graph`. edges link aligned nodes.
@@ -23,23 +29,23 @@ immutable PartialOrderGraph
     node_chars::Vector{Char}
     node_labels::Vector{Vector{NodeLabel}}
     n_seqs::Vector{Int}  # needs to be a vector so we can change its contents
-    penalties::Penalties
+    scores::Scores
 end
 
 
-function PartialOrderGraph(penalties::Penalties)
+function PartialOrderGraph(scores::Scores)
     g = DiGraph()
     aligned_nodes = Graph()
     node_chars = Char[]
     node_labels = Vector{NodeLabel}[]
     return PartialOrderGraph(g, aligned_nodes,
-                             node_chars, node_labels, Int[0], penalties)
+                             node_chars, node_labels, Int[0], scores)
 end
 
 
 function PartialOrderGraph(sequences::Vector{ASCIIString},
-                           penalties::Penalties)
-    g = PartialOrderGraph(penalties)
+                           scores::Scores)
+    g = PartialOrderGraph(scores)
     for s in sequences
         add_sequence!(g, s)
     end
@@ -88,11 +94,11 @@ function align(g::PartialOrderGraph, sequence::ASCIIString)
     moves = Array(Tuple{Int, Int}, (u, v))
     moves[1, 1] = (0, 0)
     for i = 2:u
-        result[i, 1] = result[i-1, 1] + g.penalties.indel_penalty
+        result[i, 1] = result[i-1, 1] + g.scores.indel
         moves[i, 1] = (i-1, 1)
     end
     for j = 2:v
-        result[1, j] = result[1, j-1] + g.penalties.indel_penalty
+        result[1, j] = result[1, j-1] + g.scores.indel
         moves[1, j] = (1, j-1)
     end
 
@@ -107,13 +113,13 @@ function align(g::PartialOrderGraph, sequence::ASCIIString)
             prev_row = 1
             # align
             is_match = false
-            score = result[prev_row, j-1] + (is_match ? 0.0 : g.penalties.mismatch_penalty)
+            score = result[prev_row, j-1] + (is_match ? 0.0 : g.scores.mismatch)
             if score > best_score
                 best_score = score
                 move = (prev_row, j-1)
             end
             # skip node (vertical move)
-            score = result[prev_row, j] + g.penalties.indel_penalty
+            score = result[prev_row, j] + g.scores.indel
             if score > best_score
                 best_score = score
                 move = (prev_row, j)
@@ -127,20 +133,20 @@ function align(g::PartialOrderGraph, sequence::ASCIIString)
                 end
                 # align
                 is_match = (g.node_chars[prev] == sequence[j-1])
-                score = result[prev_row, j-1] + (is_match ? 0.0 : g.penalties.mismatch_penalty)
+                score = result[prev_row, j-1] + (is_match ? 0.0 : g.scores.mismatch)
                 if score > best_score
                     best_score = score
                     move = (prev_row, j-1)
                 end
                 # skip node (vertical move)
-                score = result[prev_row, j] + g.penalties.indel_penalty
+                score = result[prev_row, j] + g.scores.indel
                 if score > best_score
                     best_score = score
                     move = (prev_row, j)
                 end
             end
             # insert new node (horizontal move)
-            score = result[i, j-1] + g.penalties.indel_penalty
+            score = result[i, j-1] + g.scores.indel
             if score > best_score
                 best_score = score
                 move = (i, j-1)

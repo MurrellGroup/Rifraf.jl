@@ -6,6 +6,7 @@ using Iterators
 
 using Quiver2.QIO
 using Quiver2.Util
+using Quiver2.Model
 
 export rbase, mutate_base, random_codon, random_seq, sample_from_reference, sample_from_template, sample, BetaAlt
 
@@ -30,7 +31,7 @@ function random_seq(n)
     return DNASequence([rbase() for i in 1:n])
 end
 
-function normalize(x, lower, upper)
+function rescale(x, lower, upper)
     return (x - lower) / (upper - lower)
 end
 
@@ -59,7 +60,7 @@ type BetaAlt <: Sampleable{Univariate,Continuous}
         if mean <= minval || mean >= maxval
             error("mean must be in ($minval, $maxval)\n")
         end
-        mean_scaled = normalize(mean, minval, maxval)
+        mean_scaled = rescale(mean, minval, maxval)
         std_scaled = std / (maxval - minval)
         if std_scaled <= 0
             error("std must be > 0")
@@ -96,15 +97,6 @@ function jitter_vector(x::Vector{Float64},
 end
 
 
-function ratios(sub_part, ins_part, del_part)
-    denom = sub_part + ins_part + del_part
-    sub_ratio = sub_part / denom
-    ins_ratio = ins_part / denom
-    del_ratio = del_part / denom
-    return sub_ratio, ins_ratio, del_ratio
-end
-
-
 function substitute(base, p::Float64)
     if Base.rand(Bernoulli(x)) == 1
         return mutate_base(base)
@@ -115,12 +107,21 @@ end
 
 function hmm_sample(sequence::DNASequence,
                     error_p::Vector{Float64},
-                    error_ratios::Tuple{Float64, Float64, Float64};
-                    codon=false)
+                    errors::ErrorModel)
+    codon = errors.codon_insertion > -Inf || errors.codon_deletion > -Inf
+    if codon && (errors.insertion > -Inf || errors.deletion > -Inf)
+        error("codon and non-codon indels are not both allowed")
+    end
     if codon && length(sequence) % 3 != 0
         error("sequence length is not multiple of 3")
     end
-    sub_ratio, ins_ratio, del_ratio = ratios(error_ratios...)
+    sub_ratio = exp10(errors.mismatch)
+    ins_ratio = exp10(errors.insertion)
+    del_ratio = exp10(errors.deletion)
+    if codon
+        ins_ratio = exp10(errors.codon_insertion)
+        del_ratio = exp10(errors.codon_deletion)
+    end
     final_seq = []
     final_error_p = Float64[]
     skip = 0
@@ -180,15 +181,17 @@ end
 
 function sample_from_reference(reference::DNASequence,
                                error_rate::Float64,
-                               error_ratios::Tuple{Float64, Float64, Float64})
-    error_p = error_rate *  ones(length(reference))
-    template, e = hmm_sample(reference, error_p, error_ratios, codon=true)
+                               errors::ErrorModel)
+    if errors.insertion > -Inf || errors.deletion > -Inf
+        error("non-codon indels are not allowed in template")
+    end
+    error_p = error_rate * ones(length(reference))
+    template, e = hmm_sample(reference, error_p, errors)
     return template
 end
 
 
 """
-error_ratios: (sub, ins, del)
 template_error_p: vector of per-base error rates
 actual_error_std: standard deviation of Beta distribution
     for actual errors
@@ -199,15 +202,18 @@ codon: if true, only do codon indels
 """
 function sample_from_template(template::DNASequence,
                               template_error_p::Vector{Float64},
-                              error_ratios::Tuple{Float64, Float64, Float64},
+                              errors::ErrorModel,
                               log_actual_error_std::Float64,
                               log_reported_error_std::Float64)
+    if errors.codon_insertion > -Inf || errors.codon_deletion > -Inf
+        error("non-codon indels are not allowed in template")
+    end
     # add noise to simulate measurement error
     jittered_error_p = jitter_vector(template_error_p,
                                      log_actual_error_std)
 
     seq, actual_error_p = hmm_sample(template, jittered_error_p,
-                                     error_ratios, codon=false)
+                                     errors)
 
     # add noise to simulate quality score estimation error
     reported_error_p = jitter_vector(actual_error_p,
@@ -235,12 +241,12 @@ seq_error_ratios: (sub, ins, del) sequence error ratios
 """
 function sample(nseqs::Int, len::Int,
                 template_error_rate::Float64,
-                template_error_ratios::Tuple{Float64, Float64, Float64},
+                template_errors::ErrorModel,
                 template_error_mean::Float64,
                 template_error_std::Float64,
                 log_seq_actual_std::Float64,
                 log_seq_reported_std::Float64,
-                seq_error_ratios::Tuple{Float64, Float64, Float64})
+                seq_errors::ErrorModel)
     if len % 3 != 0
         error("Reference length must be a multiple of three")
     end
@@ -248,7 +254,7 @@ function sample(nseqs::Int, len::Int,
     reference = random_seq(len)
     template = sample_from_reference(reference,
                                      template_error_rate,
-                                     template_error_ratios)
+                                     template_errors)
     dist = BetaAlt(template_error_mean, template_error_std,
                    minval=MIN_PROB, maxval=MAX_PROB)
     template_error_p = Float64[rand(dist) for i = 1:length(template)]
@@ -261,7 +267,7 @@ function sample(nseqs::Int, len::Int,
     for i = 1:nseqs
         (seq, actual_error_p, phred) = sample_from_template(template,
                                                             template_error_p,
-                                                            seq_error_ratios,
+                                                            seq_errors,
                                                             log_seq_actual_std,
                                                             log_seq_reported_std)
         push!(seqs, seq)

@@ -4,9 +4,9 @@ include("Util.jl")
 include("Mutations.jl")
 include("BandedArrays.jl")
 include("QIO.jl")
-include("Sample.jl")
 include("Model.jl")
-include("PartialOrderaligner.jl")
+include("Sample.jl")
+include("PartialOrderAligner.jl")
 
 using Quiver2.Mutations
 using Quiver2.BandedArrays
