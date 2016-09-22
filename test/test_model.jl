@@ -117,7 +117,12 @@ function test_random_mutation(mutation, template_len)
     template = convert(AbstractString, template_seq)
 
     template_error_p = Float64[0.1 for i=1:length(template)]
-    errors = ErrorModel(2.0 / 10.0, 4.0 / 10.0, 4.0 / 10.0, 0.0, 0.0)
+    codon_moves = rand([true, false])
+    if codon_moves
+        error_model = ErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
+    else
+        error_model = ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
+    end
     log_actual_error_std = 0.5
     log_reported_error_std = 0.5
 
@@ -130,21 +135,21 @@ function test_random_mutation(mutation, template_len)
     seq = convert(AbstractString, bioseq)
     bandwidth = max(3 * abs(length(template) - length(seq)), 5)
     new_template = Mutations.update_template(template, mutation)
-    Anew = Model.forward(new_template, seq, log_p, errors, bandwidth)
-    Bnew = Model.backward(new_template, seq, log_p, errors, bandwidth)
+    Anew = Model.forward(new_template, seq, log_p, error_model, bandwidth)
+    Bnew = Model.backward(new_template, seq, log_p, error_model, bandwidth)
     @test_approx_eq Anew[end, end] Bnew[1, 1]
 
     A = Model.forward(template, seq, log_p, errors, bandwidth)
     B = Model.backward(template, seq, log_p, errors, bandwidth)
     score = Model.seq_score_mutation(mutation, A, B, template, seq, log_p,
-                                     errors, false)
+                                     error_model, codon_moves)
     @test_approx_eq score Anew[end, end]
     # TODO: test that inband values are equal in A and Acols.
 end
 
 function test_random_substitutions()
-    for i = 1:30
-        template_len = rand(10:20)
+    for i = 1:1000
+        template_len = rand(30:50)
         pos = rand(1:template_len)
         mutation = Mutations.Substitution(pos, rbase())
         test_random_mutation(mutation, template_len)
@@ -152,8 +157,8 @@ function test_random_substitutions()
 end
 
 function test_random_insertions()
-    for i = 1:30
-        template_len = rand(10:20)
+    for i = 1:1000
+        template_len = rand(30:50)
         pos = rand(0:template_len)
         mutation = Mutations.Insertion(pos, rbase())
         test_random_mutation(mutation, template_len)
@@ -161,8 +166,8 @@ function test_random_insertions()
 end
 
 function test_random_codon_insertions()
-    for i = 1:30
-        template_len = rand(10:20)
+    for i = 1:1000
+        template_len = rand(30:50)
         pos = rand(0:template_len)
         mutation = Mutations.CodonInsertion(pos, random_codon())
         test_random_mutation(mutation, template_len)
@@ -170,8 +175,8 @@ function test_random_codon_insertions()
 end
 
 function test_random_deletions()
-    for i = 1:30
-        template_len = rand(10:20)
+    for i = 1:1000
+        template_len = rand(30:50)
         pos = rand(1:template_len)
         mutation = Mutations.Deletion(pos)
         test_random_mutation(mutation, template_len)
@@ -180,8 +185,8 @@ end
 
 
 function test_random_codon_deletions()
-    for i = 1:30
-        template_len = rand(10:20)
+    for i = 1:1000
+        template_len = rand(30:50)
         pos = rand(1:(template_len - 2))
         mutation = Mutations.CodonDeletion(pos)
         test_random_mutation(mutation, template_len)
