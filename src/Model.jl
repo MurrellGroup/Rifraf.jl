@@ -108,10 +108,12 @@ function codon_move_scores(t_base::Char,
                            seq_i::Int,
                            log_p::Vector{Float64},
                            errors::ErrorModel)
-    cur_log_p = log_p[max(seq_i, 1)]
-    next_log_p = log_p[min(seq_i + 1, length(log_p))]
-    codon_ins_score = cur_log_p + errors.codon_insertion
-    codon_del_score = max(cur_log_p, next_log_p) + errors.codon_deletion
+    log_p_1 = log_p[max(seq_i, 1)]
+    log_p_2 = log_p[min(seq_i + 1, length(log_p))]
+    log_p_3 = log_p[min(seq_i + 2, length(log_p))]
+    max_p = maximum([log_p_1, log_p_2, log_p_3])
+    codon_ins_score = max_p + errors.codon_insertion
+    codon_del_score = max(log_p_1, log_p_2) + errors.codon_deletion
     return codon_ins_score, codon_del_score
 end
 
