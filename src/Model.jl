@@ -122,7 +122,7 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
                 log_p::Vector{Float64},
                 errors::ErrorModel)
-    result = (typemin(Float64), dp_none)
+    result = (-Inf, dp_none)
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, errors)
     result = update_helper(A, i, j, dp_match, match_score, result...)
     result = update_helper(A, i, j, dp_ins, ins_score, result...)
@@ -299,206 +299,173 @@ end
     end
 end
 
-function seq_score_mutation(mutation::Union{Deletion,CodonDeletion},
-                            A::BandedArray{Float64}, B::BandedArray{Float64},
-                            template::AbstractString,
-                            seq::AbstractString, log_p::Vector{Float64},
-                            errors::ErrorModel, codon_moves::Bool)
-    offset = typeof(mutation) == Deletion ? 1 : 3
-    aj = mutation.pos           # column before base to delete (new last column before change)
-    bj = mutation.pos + offset  # column after bases to delete
-    Acol = sparsecol(A, aj)
-    Bcol = sparsecol(B, bj)
-    (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, aj),
-                                              row_range(B, bj))
+
+# key: (mutation, codon_moves)
+# value: (last valid forward position,
+#         n cols to recompute,
+#         n cols to use for score,
+#         first b position)
+const mutation_offsets = Dict((Substitution, false) => (-1, 1, 1),
+                              (Substitution, true) => (-1, 3, 1),
+                              (Insertion, false) => (0, 1, 1),
+                              (Insertion, true) => (0, 3, 3),
+                              (Deletion, false) => (-1, 0, +1),
+                              (Deletion, true) => (-1, 3, +2),
+                              (CodonInsertion, false) => (0, 3, 1),
+                              (CodonInsertion, true) => (0, 6, 2),
+                              (CodonDeletion, false) => (-1, 0, 3),
+                              (CodonDeletion, true) => (-1, 3, 4),)
+
+function update_helper_newcols(newcols::Array{Float64, 2},
+                               A::BandedArray{Float64},
+                               i::Int, j::Int, acol::Int,
+                               move::DPMove, move_score::Float64,
+                               final_score::Float64, final_move::DPMove)
+    # TODO: combine these with non-newcols versions
+    offset = offsets[Int(move)]
+    prev_i = i + offset[1]
+    prev_j = j + offset[2]
+    if inband(A, prev_i, prev_j)
+        score = -Inf
+        if prev_j <= acol
+            score = A[prev_i, prev_j] + move_score
+        else
+            score = newcols[prev_i, prev_j - acol] + move_score
+        end
+        if score > final_score
+            return score, move
+        end
+    end
+    return final_score, final_move
+end
+
+function update_newcols(newcols::Array{Float64, 2},
+                        A::BandedArray{Float64},
+                        i::Int, j::Int, acol::Int,
+                        s_base::Char, t_base::Char,
+                        log_p::Vector{Float64},
+                        errors::ErrorModel)
+    result = (-Inf, dp_none)
+    match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, errors)
+    result = update_helper_newcols(newcols, A, i, j, acol, dp_match, match_score, result...)
+    result = update_helper_newcols(newcols, A, i, j, acol, dp_ins, ins_score, result...)
+    result = update_helper_newcols(newcols, A, i, j, acol, dp_del, del_score, result...)
+    codon_ins_score, codon_del_score = codon_move_scores(t_base, s_base, i-1,
+                                                         log_p, errors)
+    if errors.codon_insertion > -Inf && i > 3
+        result = update_helper_newcols(newcols, A, i, j, acol, dp_codon_ins,
+                                       codon_ins_score, result...)
+    end
+    if errors.codon_deletion > -Inf && j > 3
+        result = update_helper_newcols(newcols, A, i, j, acol, dp_codon_del,
+                                       codon_del_score, result...)
+    end
+    if result[1] == -Inf
+        error("new score is invalid")
+    end
+    if result[2] == dp_none
+        error("failed to find a move")
+    end
+    return result
+end
+
+function get_sub_template(mutation::Mutation, seq::AbstractString, codon_moves::Bool)
+    t = typeof(mutation)
+    pos = mutation.pos
+    sub_template = ""
+    if t == Substitution
+        if codon_moves
+            sub_template = string(mutation.base, seq[pos+1:pos+2])
+        else
+            sub_template = string(mutation.base)
+        end
+    elseif t == Insertion
+        if codon_moves
+            sub_template = string(mutation.base, seq[pos+1:pos+2])
+        else
+            sub_template = string(mutation.base)
+        end
+    elseif t == CodonInsertion
+        if codon_moves
+            sub_template = string(mutation.bases, seq[pos+1:pos+3])
+        else
+            sub_template = string(mutation.bases)
+        end
+    elseif t == Deletion
+        # codon moves allowed
+        sub_template = seq[pos+1:pos+1+ncols]
+    elseif t == CodonDeletion
+        # codon moves allowed
+        sub_template = seq[pos+3:pos+3+ncols]
+    end
+    return sub_template
+end
+
+function seq_score_deletion(A::BandedArray{Float64}, B::BandedArray{Float64},
+                            acol::Int, bcol::Int)
+    Acol = sparsecol(A, acol)
+    Bcol = sparsecol(B, bcol)
+    (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, acol),
+                                              row_range(B, bcol))
     asub = sub(Acol, amin:amax)
     bsub = sub(Bcol, bmin:bmax)
     return summax(asub, bsub)
 end
 
-function seq_score_mutation(mutation::Union{Insertion,Substitution},
+function seq_score_mutation(mutation::Mutation,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
                             template::AbstractString,
                             seq::AbstractString, log_p::Vector{Float64},
                             errors::ErrorModel, codon_moves::Bool)
-    bj = mutation.pos + 1 # column after base to mutate or insert
-    Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
-    b_start, b_stop = row_range(B, bj)  # row range of B column
+    t = typeof(mutation)
+    a_off, ncols, b_off = mutation_offsets[(t, codon_moves)]
+    pos = mutation.pos
+    acol = pos + a_off + 1
+    bcol = pos + b_off
 
-    aj = mutation.pos + 1  # index of new column to compute
-
-    ajprev = mutation.pos + (typeof(mutation) == Substitution ? 0 : 1)  # index of last unchanged column in A
-    prev_start, prev_stop = row_range(A, ajprev)  # row range of column before base to mutate or insert
-
-    ajprev3 = ajprev - 2
-    prev_start::Int
-    prev_stop::Int
-    if ajprev3 > 0
-        prev3_start, prev3_stop = row_range(A, ajprev3)
+    if ncols == 0
+        return seq_score_deletion(A, B, acol, bcol)
     end
 
-    row_start, row_stop = row_range(A, aj)  # row range of column to compute
-    offset = 1 - (row_start - prev_start)
-    result::Float64 = typemin(Float64)
+    # TODO: adjust for being at the beginning/end
+    # TODO: reuse an array for `newcols`
+    nrows = size(A)[1]
+    newcols = Array(Float64, (nrows, ncols))
 
-    if (row_start != b_start || row_stop != b_stop)
-        error("Acol does not align to Bcol")
+    # TODO: fill in first column/row
+    sub_template = get_sub_template(mutation, seq, codon_moves)
+    for j in 1:ncols
+        amin, amax = row_range(A, acol + j)
+        for i in amin:amax
+            x = update_newcols(newcols, A, i, acol + j, acol,
+                               seq[i-1], sub_template[j],
+                               log_p, errors)
+            newcols[i, j] = x[1]
+        end
     end
 
-    # for efficiency, do not allocate and compute complete column of
-    # A. Just keep last four positions.
-    # `scores[1]` is the score of the current entry
-    # `scores[4]` is the score of the entry one codon above the current entry
-    scores = [0.0, 0.0, 0.0, 0.0]
-    for real_i in row_start:row_stop
-        seq_i = real_i - 1  # position in the sequence
-        i = real_i - row_start + 1  # position in this iteration
-        prev_i = i - offset + 1 # position in `prev` matching i
-        scores[1] = typemin(Float64)
-        sbase = seq_i > 0 ? seq[seq_i] : 'X'
-        match_score, ins_score, del_score = move_scores(mutation.base, sbase, seq_i, log_p, errors)
-        if i > 1
-            # insertion
-            scores[1] = max(scores[1], scores[2] + ins_score)
+    best_score = -Inf
+    n_to_use = codon_moves ? 3 : 1
+    for j in (ncols - n_to_use + 1):ncols
+        aj = acol + j
+        bj = bcol + j - 1
+        imin, imax = row_range(A, aj)
+        Acol = newcols[imin:imax, j]
+        Bcol = sparsecol(B, bcol)
+        (amin, amax), (bmin, bmax) = equal_ranges((imin, imax),
+                                                  row_range(B, bj))
+        asub = sub(Acol, amin:amax)
+        bsub = sub(Bcol, bmin:bmax)
+        score = summax(asub, bsub)
+        if score > best_score
+            best_score = score
         end
-        if prev_start < real_i <= (prev_stop + 1)
-            # (mis)match
-            scores[1] = max(scores[1], A[real_i - 1, ajprev] + match_score)
-        end
-        if prev_start <= real_i <= prev_stop
-            # deletion
-            scores[1] = max(scores[1], A[real_i, ajprev] + del_score)
-        end
-        if codon_moves
-            codon_ins_score, codon_del_score = codon_move_scores(mutation.base, sbase, seq_i, log_p, errors)
-            if i > 3
-                # insertion
-                scores[1] = max(scores[1], scores[4] + codon_ins_score)
-            end
-            if ajprev3 > 0 && (prev3_start <= real_i <= prev3_stop) && inband(A, real_i, ajprev3)
-                # deletion
-                scores[1] = max(scores[1], A[real_i, ajprev-2] + codon_del_score)
-            end
-        end
-        b_i = i  #  this is okay because we've chosen aj so it has the same range as bj
-        result = max(result, scores[1] + Bcol[b_i])
-        scores[2:4] = scores[1:3]
     end
-    return result
+    if best_score == -Inf
+        error("failed to compute a valid score")
+    end
+    return best_score
 end
-
-
-function compute_subcol(row_start, row_stop,
-                        prev, prev_start, prev_stop,
-                        prev3, prev3_start, prev3_stop,
-                        has_prev3,
-                        base, seq, log_p, errors, codon_moves)
-    col = fill(typemin(Float64), row_stop - row_start + 1)
-    offset = 1 - (row_start - prev_start)
-    for i in 1:length(col)
-        real_i = i + row_start - 1
-        seq_i = real_i - 1  # position in the sequence
-        prev_i = i - offset + 1 # position in `prev` matching i
-        sbase = seq_i > 0 ? seq[seq_i] : 'X'
-        match_score, ins_score, del_score = move_scores(base, sbase, seq_i, log_p, errors)
-        if i > 1
-            # insertion
-            col[i] = max(col[i], col[i-1] + ins_score)
-        end
-        if prev_start < real_i <= (prev_stop + 1)
-            # (mis)match
-            col[i] = max(col[i], prev[prev_i-1] + match_score)
-        end
-        if prev_start <= real_i <= prev_stop
-            # deletion
-            col[i] = max(col[i], prev[prev_i] + del_score)
-        end
-        if codon_moves
-            codon_ins_score, codon_del_score = codon_move_scores(base, sbase, seq_i, log_p, errors)
-            if i > 3
-                # insertion
-                col[i] = max(col[i], col[i-3] + codon_ins_score)
-            end
-            if has_prev3 && prev3_start <= real_i <= prev3_stop
-                # deletion
-                prev3_i = real_i - prev3_start + 1
-                col[i] = max(col[i], prev3[prev3_i] + codon_del_score)
-            end
-        end
-    end
-    return col
-end
-
-function seq_score_mutation(mutation::CodonInsertion,
-                            A::BandedArray{Float64}, B::BandedArray{Float64},
-                            template::AbstractString,
-                            seq::AbstractString, log_p::Vector{Float64},
-                            errors::ErrorModel, codon_moves::Bool)
-    bj = mutation.pos + 1 # column after base to mutate or insert
-    Bcol::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(B, bj)
-    b_start, b_stop = row_range(B, bj)  # row range of B column
-
-    aj = mutation.pos + 1  # index of new column to compute
-    row_start, row_stop = row_range(A, aj)  # row range of column to compute
-    if (row_start != b_start || row_stop != b_stop)
-        error("Acol does not align to Bcol")
-    end
-    nrows = row_stop - row_start + 1
-    Acols = Array(Float64, (nrows, 3))
-
-    ajprev = aj
-    prev::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = sparsecol(A, ajprev)
-    prev_start, prev_stop = row_range(A, ajprev)  # row range of column before base to mutate or insert
-
-    has_prev3 = false
-    ajprev3 = ajprev - 2
-    prev3::SubArray{Float64,1,Array{Float64,2},Tuple{UnitRange{Int64},Int64},2} = prev
-    prev3_start::Int = -1
-    prev3_stop::Int = -1
-    if ajprev3 > 0
-        has_prev3 = true
-        prev3 = sparsecol(A, ajprev3)
-        prev3_start, prev3_stop = row_range(A, ajprev3)
-    end
-
-    # FIXME: code duplication
-    Acols[:, 1] = compute_subcol(row_start, row_stop,
-                                 prev, prev_start, prev_stop,
-                                 prev3, prev3_start, prev3_stop,
-                                 has_prev3,
-                                 mutation.bases[1], seq, log_p,
-                                 errors, codon_moves)
-
-    ajprev3 = ajprev - 1
-    if ajprev3 > 0
-        has_prev3 = true
-        prev3 = sparsecol(A, ajprev3)
-        prev3_start, prev3_stop = row_range(A, ajprev3)
-    end
-    Acols[:, 2] = compute_subcol(row_start, row_stop,
-                                 Acols[:, 1], row_start, row_stop,
-                                 prev3, prev3_start, prev3_stop,
-                                 has_prev3,
-                                 mutation.bases[2], seq, log_p,
-                                 errors, codon_moves)
-
-    ajprev3 = ajprev
-    if ajprev3 > 0
-        has_prev3 = true
-        prev3 = sparsecol(A, ajprev3)
-        prev3_start, prev3_stop = row_range(A, ajprev3)
-    end
-    Acols[:, 3] = compute_subcol(row_start, row_stop,
-                                 Acols[:, 2], row_start, row_stop,
-                                 prev3, prev3_start, prev3_stop,
-                                 has_prev3,
-                                 mutation.bases[3], seq, log_p,
-                                 errors, codon_moves)
-
-    result = maximum(Acols[:, end] + Bcol)
-    return result
-end
-
 
 function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
     final_cands = CandMutation[]
