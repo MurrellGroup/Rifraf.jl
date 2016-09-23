@@ -11,6 +11,22 @@ using Base.Test
 
 const errors = Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0)
 
+function test_cols(A, B)
+    expected = A[end, end]
+    @test_approx_eq A[end, end] B[1, 1]
+    for j in 1:size(A)[2]
+        Acol = sparsecol(A, j)
+        Bcol = sparsecol(B, j)
+        (amin, amax), (bmin, bmax) = Quiver2.Model.equal_ranges(row_range(A, j),
+                                                                row_range(B, j))
+        asub = sub(Acol, amin:amax)
+        bsub = sub(Bcol, bmin:bmax)
+        score = maximum(asub + bsub)
+        @test_approx_eq expected score
+    end
+    @test_approx_eq A[end, end] B[1, 1]
+end
+
 
 function test_perfect_forward()
     bandwidth = 1
@@ -52,13 +68,13 @@ function test_imperfect_forward()
     log_p = fill(lp, length(seq))
     A = Model.forward(template, seq, log_p, errors, bandwidth)
     B = Model.backward(template, seq, log_p, errors, bandwidth)
+    test_cols(A, B)
     expected = transpose(reshape([[0.0, lp + errors.deletion, 0.0];
                                   [lp + errors.insertion, match, match + lp + errors.deletion];
                                   [0.0, match + lp + errors.insertion, match + lp + errors.mismatch]],
                                  (3, 3)))
 
     @test full(A) == expected
-    @test A[end, end] == B[1, 1]
 end
 
 function test_equal_ranges()
@@ -67,6 +83,19 @@ function test_equal_ranges()
     @test Model.equal_ranges((1, 5), (4, 5)) == ((4, 5), (1, 2))
 end
 
+function test_forward_backward_agreement()
+    template = "AAGACGCCGGCACGGTCGTGTGGTGGTAGTGGTCTCCGGT"
+    seq = "CAGCCGCCGGACACGTGTCGGTGGTGGTAGTGGCCTCGT"
+    log_p = [-1.9,-1.6,-0.3,-0.3,-0.7,-1.7,-1.7,-0.6,-1.2,-1.1,
+             -1.1,-0.4,-1.0,-0.7,-1.3,-1.1,-1.2,-0.8,-0.7,-1.0,
+             -1.3,-1.5,-0.7,-0.6,-0.3,-0.4,-0.9,-1.2,-1.6,-0.7,
+             -1.2,-1.3,-0.4,-0.3,-1.3,-1.7,-1.2,-1.2,-0.5]
+    error_model = ErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
+    bandwidth = 5
+    A = Model.forward(template, seq, log_p, error_model, bandwidth)
+    B = Model.backward(template, seq, log_p, error_model, bandwidth)
+    test_cols(A, B)
+end
 
 function test_insertion_agreement()
     template = "AA"
@@ -79,7 +108,7 @@ function test_insertion_agreement()
              log_p[2] + errors.insertion +
              Util.inv_log10(log_p[3]))
     @test_approx_eq A[end, end] score
-    @test_approx_eq B[1, 1] score
+    test_cols(A, B)
 end
 
 function test_deletion_agreement()
@@ -95,7 +124,7 @@ function test_deletion_agreement()
              Util.inv_log10(log_p[3]) +
              Util.inv_log10(log_p[4]))
     @test_approx_eq A[end, end] score
-    @test_approx_eq B[1, 1] score
+    test_cols(A, B)
 end
 
 function test_deletion_agreement2()
@@ -109,7 +138,7 @@ function test_deletion_agreement2()
              maximum(log_p[1:2]) + errors.deletion +
              Util.inv_log10(log_p[2]))
     @test_approx_eq A[end, end] score
-    @test_approx_eq B[1, 1] score
+    test_cols(A, B)
 end
 
 function test_random_mutation(mutation, template_len)
@@ -137,12 +166,21 @@ function test_random_mutation(mutation, template_len)
     new_template = Mutations.update_template(template, mutation)
     Anew = Model.forward(new_template, seq, log_p, error_model, bandwidth)
     Bnew = Model.backward(new_template, seq, log_p, error_model, bandwidth)
-    @test_approx_eq Anew[end, end] Bnew[1, 1]
+    test_cols(Anew, Bnew)
 
-    A = Model.forward(template, seq, log_p, errors, bandwidth)
-    B = Model.backward(template, seq, log_p, errors, bandwidth)
+    A = Model.forward(template, seq, log_p, error_model, bandwidth)
+    B = Model.backward(template, seq, log_p, error_model, bandwidth)
+    test_cols(A, B)
     score = Model.seq_score_mutation(mutation, A, B, template, seq, log_p,
                                      error_model, codon_moves)
+    aj = mutation.pos + 1
+    bj = mutation.pos + 1
+    Acol = sparsecol(Anew, aj)
+    Bcol = sparsecol(Bnew, bj)
+    (amin, amax), (bmin, bmax) = Quiver2.Model.equal_ranges(row_range(Anew, aj),
+                                                            row_range(Bnew, bj))
+    asub = sub(Acol, amin:amax)
+    bsub = sub(Bcol, bmin:bmax)
     @test_approx_eq score Anew[end, end]
     # TODO: test that inband values are equal in A and Acols.
 end
@@ -346,6 +384,7 @@ test_perfect_forward()
 test_imperfect_backward()
 test_imperfect_forward()
 test_equal_ranges()
+test_forward_backward_agreement()
 test_insertion_agreement()
 test_deletion_agreement()
 test_deletion_agreement2()
