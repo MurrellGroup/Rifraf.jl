@@ -63,7 +63,7 @@ function data_row_range(A::BandedArray, j::Int)
 end
 
 function inband(A::BandedArray, i::Int, j::Int)
-    nrows, ncols = size(A.data)
+    nrows, ncols = size(A)
     if i < 1 || j < 1 || i > nrows || j > ncols
         return false
     end
