@@ -108,19 +108,19 @@ end
 function hmm_sample(sequence::DNASequence,
                     error_p::Vector{Float64},
                     errors::ErrorModel)
-    codon = errors.codon_insertion > -Inf || errors.codon_deletion > -Inf
-    if codon && (errors.insertion > -Inf || errors.deletion > -Inf)
+    codon = errors.codon_insertion > 0.0 || errors.codon_deletion > 0.0
+    if codon && (errors.insertion > 0.0 || errors.deletion > 0.0)
         error("codon and non-codon indels are not both allowed")
     end
     if codon && length(sequence) % 3 != 0
         error("sequence length is not multiple of 3")
     end
-    sub_ratio = exp10(errors.mismatch)
-    ins_ratio = exp10(errors.insertion)
-    del_ratio = exp10(errors.deletion)
+    sub_ratio = errors.mismatch
+    ins_ratio = errors.insertion
+    del_ratio = errors.deletion
     if codon
-        ins_ratio = exp10(errors.codon_insertion)
-        del_ratio = exp10(errors.codon_deletion)
+        ins_ratio = errors.codon_insertion
+        del_ratio = errors.codon_deletion
     end
     final_seq = []
     final_error_p = Float64[]
@@ -182,7 +182,7 @@ end
 function sample_from_reference(reference::DNASequence,
                                error_rate::Float64,
                                errors::ErrorModel)
-    if errors.insertion > -Inf || errors.deletion > -Inf
+    if errors.insertion > 0.0 || errors.deletion > 0.0
         error("non-codon indels are not allowed in template")
     end
     error_p = error_rate * ones(length(reference))
@@ -205,8 +205,8 @@ function sample_from_template(template::DNASequence,
                               errors::ErrorModel,
                               log_actual_error_std::Float64,
                               log_reported_error_std::Float64)
-    if errors.codon_insertion > -Inf || errors.codon_deletion > -Inf
-        error("non-codon indels are not allowed in template")
+    if errors.codon_insertion > 0.0 || errors.codon_deletion > 0.0
+        error("codon indels are not allowed in sequences")
     end
     # add noise to simulate measurement error
     jittered_error_p = jitter_vector(template_error_p,

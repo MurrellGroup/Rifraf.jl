@@ -7,7 +7,7 @@ using Quiver2.BandedArrays
 using Quiver2.Mutations
 using Quiver2.Util
 
-export quiver2, ErrorModel
+export quiver2, ErrorModel, LogErrorModel
 
 # initial_stage:
 #   - do not use reference.
@@ -33,13 +33,43 @@ immutable ErrorModel
     codon_insertion::Float64
     codon_deletion::Float64
 
-    function ErrorModel(mismatch::Float64,
-                        insertion::Float64,
-                        deletion::Float64,
-                        codon_insertion::Float64,
-                        codon_deletion::Float64)
-        args = Float64[mismatch, insertion, deletion, codon_insertion, codon_deletion]
-        m, i, d, ci, cd = log10(normalize(args))
+    function ErrorModel(mismatch, insertion, deletion,
+                        codon_insertion, codon_deletion)
+        args = Float64[mismatch,
+                       insertion,
+                       deletion,
+                       codon_insertion,
+                       codon_deletion]
+        m, i, d, ci, cd = normalize(args)
+        return new(m, i, d, ci, cd)
+    end
+end
+
+immutable LogErrorModel
+    mismatch::Float64
+    insertion::Float64
+    deletion::Float64
+    codon_insertion::Float64
+    codon_deletion::Float64
+
+    function LogErrorModel(mismatch, insertion, deletion,
+                           codon_insertion, codon_deletion)
+        args = Float64[mismatch,
+                       insertion,
+                       deletion,
+                       codon_insertion,
+                       codon_deletion]
+        m, i, d, ci, cd = normalize(log10(args))
+        return new(m, i, d, ci, cd)
+    end
+
+    function LogErrorModel(model::ErrorModel)
+        args = Float64[model.mismatch,
+                       model.insertion,
+                       model.deletion,
+                       model.codon_insertion,
+                       model.codon_deletion]
+        m, i, d, ci, cd = log10(args)
         return new(m, i, d, ci, cd)
     end
 end
@@ -93,7 +123,7 @@ function move_scores(t_base::Char,
                      s_base::Char,
                      seq_i::Int,
                      log_p::Vector{Float64},
-                     errors::ErrorModel)
+                     errors::LogErrorModel)
     cur_log_p = log_p[max(seq_i, 1)]
     next_log_p = log_p[min(seq_i + 1, length(log_p))]
     match_score = s_base == t_base ? inv_log10(cur_log_p) : cur_log_p + errors.mismatch
@@ -103,17 +133,17 @@ function move_scores(t_base::Char,
 end
 
 
-function codon_move_scores(t_base::Char,
-                           s_base::Char,
-                           seq_i::Int,
+function codon_move_scores(seq_i::Int,
                            log_p::Vector{Float64},
-                           errors::ErrorModel)
-    log_p_1 = log_p[max(seq_i, 1)]
-    log_p_2 = log_p[min(seq_i + 1, length(log_p))]
-    log_p_3 = log_p[min(seq_i + 2, length(log_p))]
-    max_p = maximum([log_p_1, log_p_2, log_p_3])
+                           errors::LogErrorModel)
+    # we're moving INTO seq_i. so need previous two.
+    start = max(1, seq_i-2)
+    stop = min(seq_i, length(log_p))
+    max_p = maximum(log_p[start:stop])
     codon_ins_score = max_p + errors.codon_insertion
-    codon_del_score = max(log_p_1, log_p_2) + errors.codon_deletion
+    cur_log_p = log_p[max(seq_i, 1)]
+    next_log_p = log_p[min(seq_i + 1, length(log_p))]
+    codon_del_score = max(cur_log_p, next_log_p) + errors.codon_deletion
     return codon_ins_score, codon_del_score
 end
 
@@ -121,14 +151,13 @@ end
 function update(A::BandedArray{Float64}, i::Int, j::Int,
                 s_base::Char, t_base::Char,
                 log_p::Vector{Float64},
-                errors::ErrorModel)
+                errors::LogErrorModel)
     result = (-Inf, dp_none)
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, errors)
     result = update_helper(A, i, j, dp_match, match_score, result...)
     result = update_helper(A, i, j, dp_ins, ins_score, result...)
     result = update_helper(A, i, j, dp_del, del_score, result...)
-    codon_ins_score, codon_del_score = codon_move_scores(t_base, s_base, i-1,
-                                                         log_p, errors)
+    codon_ins_score, codon_del_score = codon_move_scores(i-1, log_p, errors)
     if errors.codon_insertion > -Inf && i > 3
         result = update_helper(A, i, j, dp_codon_ins,
                                codon_ins_score, result...)
@@ -147,11 +176,15 @@ function update(A::BandedArray{Float64}, i::Int, j::Int,
 end
 
 
-function backtrace(t::AbstractString, s::AbstractString, moves::BandedArray{Int})
+function backtrace(t::AbstractString, s::AbstractString,
+                   moves::BandedArray{Int},
+                   A::BandedArray{Float64})
     aligned_t = Char[]
     aligned_s = Char[]
+    scores = Float64[]
     i, j = moves.shape
     while i > 1 || j > 1
+        push!(scores, A[i, j])
         m = moves[i, j]
         move = DPMove(m)
         si = i - 1
@@ -176,13 +209,13 @@ function backtrace(t::AbstractString, s::AbstractString, moves::BandedArray{Int}
         i += offset[1]
         j += offset[2]
     end
-    return join(reverse(aligned_t)), join(reverse(aligned_s))
+    return join(reverse(aligned_t)), join(reverse(aligned_s)), reverse(scores)
 end
 
 
 function prepare_array(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
-                       errors::ErrorModel,
+                       errors::LogErrorModel,
                        bandwidth::Int)
     # FIXME: consider codon moves in initialization
     if length(s) != length(log_p)
@@ -204,14 +237,14 @@ function prepare_array(t::AbstractString, s::AbstractString,
 end
 
 
-"""Does some work as forward_codon, but also keeps track of moves
+"""Does some work as forward_codon, but also keeps track of moves.
 
 Does backtracing to find best alignment.
 
 """
 function forward_moves(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
-                       errors::ErrorModel,
+                       errors::LogErrorModel,
                        bandwidth::Int)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
@@ -235,7 +268,7 @@ function forward_moves(t::AbstractString, s::AbstractString,
             moves[i, j] = x[2]
         end
     end
-    return moves
+    return result, moves
 end
 
 
@@ -244,7 +277,7 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
 function forward(t::AbstractString, s::AbstractString,
-                 log_p::Vector{Float64}, errors::ErrorModel,
+                 log_p::Vector{Float64}, errors::LogErrorModel,
                  bandwidth::Int)
     result = prepare_array(t, s, log_p, errors, bandwidth)
     for j = 2:size(result)[2]
@@ -266,7 +299,7 @@ B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 """
 function backward(t::AbstractString, s::AbstractString,
                   log_p::Vector{Float64},
-                  errors::ErrorModel,
+                  errors::LogErrorModel,
                   bandwidth::Int)
     s = reverse(s)
     log_p = flipdim(log_p, 1)
@@ -300,22 +333,6 @@ end
 end
 
 
-# key: (mutation, codon_moves)
-# value: (last valid forward position,
-#         n cols to recompute,
-#         n cols to use for score,
-#         first b position)
-const mutation_offsets = Dict((Substitution, false) => (-1, 1, 1),
-                              (Substitution, true) => (-1, 3, 1),
-                              (Insertion, false) => (0, 1, 1),
-                              (Insertion, true) => (0, 3, 3),
-                              (Deletion, false) => (-1, 0, +1),
-                              (Deletion, true) => (-1, 3, +2),
-                              (CodonInsertion, false) => (0, 3, 1),
-                              (CodonInsertion, true) => (0, 6, 2),
-                              (CodonDeletion, false) => (-1, 0, 3),
-                              (CodonDeletion, true) => (-1, 3, 4),)
-
 function update_helper_newcols(newcols::Array{Float64, 2},
                                A::BandedArray{Float64},
                                i::Int, j::Int, acol::Int,
@@ -344,7 +361,7 @@ function update_newcols(newcols::Array{Float64, 2},
                         i::Int, j::Int, acol::Int,
                         s_base::Char, t_base::Char,
                         log_p::Vector{Float64},
-                        errors::ErrorModel)
+                        errors::LogErrorModel)
     result = (-Inf, dp_none)
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, errors)
     result = update_helper_newcols(newcols, A, i, j, acol, dp_match, match_score, result...)
@@ -369,36 +386,20 @@ function update_newcols(newcols::Array{Float64, 2},
     return result
 end
 
-function get_sub_template(mutation::Mutation, seq::AbstractString, codon_moves::Bool)
+function get_sub_template(mutation::Mutation, seq::AbstractString,
+                          next_posn::Int, n_after::Int)
+    # FIXME: clip at end of sequence, if necessary
     t = typeof(mutation)
     pos = mutation.pos
-    sub_template = ""
-    if t == Substitution
-        if codon_moves
-            sub_template = string(mutation.base, seq[pos+1:pos+2])
-        else
-            sub_template = string(mutation.base)
-        end
-    elseif t == Insertion
-        if codon_moves
-            sub_template = string(mutation.base, seq[pos+1:pos+2])
-        else
-            sub_template = string(mutation.base)
-        end
+    prefix = ""
+    stop = min(next_posn + n_after - 1, length(seq))
+    suffix = seq[next_posn:stop]
+    if t in (Substitution, Insertion)
+        prefix = string(mutation.base)
     elseif t == CodonInsertion
-        if codon_moves
-            sub_template = string(mutation.bases, seq[pos+1:pos+3])
-        else
-            sub_template = string(mutation.bases)
-        end
-    elseif t == Deletion
-        # codon moves allowed
-        sub_template = seq[pos+1:pos+1+ncols]
-    elseif t == CodonDeletion
-        # codon moves allowed
-        sub_template = seq[pos+3:pos+3+ncols]
+        prefix = string(mutation.bases...)
     end
-    return sub_template
+    return string(prefix, suffix)
 end
 
 function seq_score_deletion(A::BandedArray{Float64}, B::BandedArray{Float64},
@@ -412,51 +413,91 @@ function seq_score_deletion(A::BandedArray{Float64}, B::BandedArray{Float64},
     return summax(asub, bsub)
 end
 
+
+const n_mutation_bases = Dict(Substitution => 1,
+                              Insertion => 1,
+                              Deletion => 0,
+                              CodonInsertion => 3,
+                              CodonDeletion => 0)
+
 function seq_score_mutation(mutation::Mutation,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
                             template::AbstractString,
                             seq::AbstractString, log_p::Vector{Float64},
-                            errors::ErrorModel, codon_moves::Bool)
+                            errors::LogErrorModel, codon_moves::Bool)
     t = typeof(mutation)
-    a_off, ncols, b_off = mutation_offsets[(t, codon_moves)]
-    pos = mutation.pos
-    acol = pos + a_off + 1
-    bcol = pos + b_off
 
-    if ncols == 0
+    first_b_base = codon_moves ? 2 : 1
+    if t == CodonDeletion
+        first_b_base = codon_moves ? 4 : 3
+    end
+    last_valid_abase = t in (Insertion, CodonInsertion) ? 0 : -1
+
+    pos = mutation.pos
+    # last valid column of A
+    acol = pos + last_valid_abase + 1
+    # first column of B to use
+    bcol = pos + first_b_base
+
+    if t in (Deletion, CodonDeletion) & !codon_moves
         return seq_score_deletion(A, B, acol, bcol)
     end
 
-    # TODO: adjust for being at the beginning/end
+    # FIXME: ncols may need to be reduced if in last few columns
+    # if so, adjust bcol to be -1 or some other indicator
+
+    # next valid position in sequence after this mutation
+    next_posn =  mutation.posn + (t == CodonDeletion ? 3 : 1)
+    # number of bases changed/inserted
+    n_bases = n_mutation_bases[t]
+    # number of columns that depend on mutation columns
+    n_after = (codon_moves ? 3 : 0)
+    if next_posn + n_after > length(seq)
+        n_after = max(0, length(seq) - next_posn)
+    end
+
+    # handle if n_after will go over the end of the sequence
+    # TODO: should not need to pass ints
+    sub_template = get_sub_template(mutation, seq, next_posn, n_after)
+
     # TODO: reuse an array for `newcols`
-    nrows = size(A)[1]
+    nrows, maxcol = size(A)
+    ncols = n_bases + n_after
     newcols = Array(Float64, (nrows, ncols))
 
-    # TODO: fill in first column/row
-    sub_template = get_sub_template(mutation, seq, codon_moves)
+    # compute new columns
     for j in 1:ncols
-        amin, amax = row_range(A, acol + j)
+        range_col = min(acol + j, maxcol)
+        amin, amax = row_range(A, range_col)
         for i in amin:amax
+            seq_base = i > 1 ? seq[i-1] : 'X'
             x = update_newcols(newcols, A, i, acol + j, acol,
-                               seq[i-1], sub_template[j],
+                               seq_base, sub_template[j],
                                log_p, errors)
             newcols[i, j] = x[1]
         end
     end
 
+    # add up results
     best_score = -Inf
     n_to_use = codon_moves ? 3 : 1
+    if n_to_use > ncols
+        error("trying to use more columns than we computed")
+    end
     for j in (ncols - n_to_use + 1):ncols
-        aj = acol + j
-        bj = bcol + j - 1
-        imin, imax = row_range(A, aj)
+        imin, imax = row_range(A, min(acol + j, maxcol))
         Acol = newcols[imin:imax, j]
-        Bcol = sparsecol(B, bcol)
-        (amin, amax), (bmin, bmax) = equal_ranges((imin, imax),
-                                                  row_range(B, bj))
-        asub = sub(Acol, amin:amax)
-        bsub = sub(Bcol, bmin:bmax)
-        score = summax(asub, bsub)
+        bj = bcol + j - 1
+        if bj > size(B)[2]
+            score = Acol[end]
+        else
+            Bcol = sparsecol(B, bj)
+            (amin, amax), (bmin, bmax) = equal_ranges((imin, imax),
+                                                      row_range(B, bj))
+            asub = sub(Acol, amin:amax)
+            bsub = sub(Bcol, bmin:bmax)
+            score = summax(asub, bsub)
+        end
         if score > best_score
             best_score = score
         end
@@ -485,11 +526,11 @@ function score_mutation(m::Mutation,
                         state::State,
                         sequences::Vector{ASCIIString},
                         log_ps::Vector{Vector{Float64}},
-                        errors::ErrorModel,
+                        errors::LogErrorModel,
                         use_ref::Bool,
                         reference::ASCIIString,
                         ref_log_p::Vector{Float64},
-                        ref_errors::ErrorModel)
+                        ref_errors::LogErrorModel)
     score = 0.0
     for si in 1:length(sequences)
         score += seq_score_mutation(m, state.As[si], state.Bs[si], state.template,
@@ -549,10 +590,10 @@ end
 function getcands(state::State,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
-                  errors::ErrorModel,
+                  errors::LogErrorModel,
                   reference::ASCIIString,
                   ref_log_p::Vector{Float64},
-                  ref_errors::ErrorModel)
+                  ref_errors::LogErrorModel)
     candidates = CandMutation[]
     use_ref = (state.stage == frame_correction_stage)
     for m in candstask(state.stage, state.template)
@@ -586,17 +627,17 @@ end
 
 function align(t::AbstractString, s::AbstractString,
                log_p::Vector{Float64},
-               errors::ErrorModel,
+               errors::LogErrorModel,
                bandwidth::Int)
-    moves = forward_moves(t, s, log_p, errors, bandwidth)
-    return backtrace(t, s, moves)
+    A, moves = forward_moves(t, s, log_p, errors, bandwidth)
+    return backtrace(t, s, moves, A)
 end
 
 
 function no_single_indels(template::AbstractString,
                           reference::AbstractString,
                           ref_log_p::Vector{Float64},
-                          ref_errors::ErrorModel,
+                          ref_errors::LogErrorModel,
                           bandwidth::Int)
     has_right_length = length(template) % 3 == 0
     t_aln, r_aln = align(template, reference, ref_log_p, ref_errors, bandwidth)
@@ -624,10 +665,10 @@ end
 
 function recompute!(state::State, seqs::Vector{ASCIIString},
                     lps::Vector{Vector{Float64}},
-                    errors::ErrorModel,
+                    errors::LogErrorModel,
                     reference::AbstractString,
                     ref_log_p::Vector{Float64},
-                    ref_errors::ErrorModel,
+                    ref_errors::LogErrorModel,
                     bandwidth::Int, recompute_As::Bool, recompute_Bs::Bool)
     if recompute_As
         state.As = [forward(state.template, s, p, errors, bandwidth)
@@ -672,10 +713,10 @@ end
 function estimate_probs(state::State,
                         sequences::Vector{ASCIIString},
                         log_ps::Vector{Vector{Float64}},
-                        errors::ErrorModel,
+                        errors::LogErrorModel,
                         reference::AbstractString,
                         ref_log_p::Vector{Float64},
-                        ref_errors::ErrorModel)
+                        ref_errors::LogErrorModel)
     # `position_scores[i]` gives the following log probabilities
     # for `template[i]`: [A, C, G, T, -]
     position_scores = zeros(length(state.template), 5) + state.score
@@ -747,12 +788,14 @@ function quiver2(template::AbstractString,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
-    if errors.codon_insertion > -Inf || errors.codon_deletion > -Inf
-        error("error model allows codon indels")
+    if errors.codon_insertion > 0.0 || errors.codon_deletion > 0.0
+        error("error model cannot allow codon indels")
     end
-    if errors.insertion == -Inf || errors.deletion == -Inf
+    if errors.insertion == 0.0 || errors.deletion == 0.0
         error("indel probabilities cannot be 0.0")
     end
+    log_errors = LogErrorModel(errors)
+    ref_log_errors = LogErrorModel(ref_errors)
 
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
@@ -762,7 +805,7 @@ function quiver2(template::AbstractString,
         if (ref_log_p == -Inf || ref_log_p >= 0.0)
             error("ref_log_p=$ref_log_p but should be less than 0.0")
         end
-        if ref_errors.insertion == -Inf || ref_errors.deletion == -Inf
+        if ref_log_errors.insertion == -Inf || ref_log_errors.deletion == -Inf
             error("ref indel probabilities cannot be 0.0")
         end
     end
@@ -799,7 +842,7 @@ function quiver2(template::AbstractString,
     if verbose > 1
         println(STDERR, "computing initial alignments")
     end
-    state = initial_state(template, seqs, lps, errors, bandwidth)
+    state = initial_state(template, seqs, lps, log_errors, bandwidth)
     empty_ref = length(reference) == 0
 
     if verbose > 1
@@ -819,8 +862,8 @@ function quiver2(template::AbstractString,
             println(STDERR, "iteration $i : $(state.stage)")
         end
 
-        candidates = getcands(state, seqs, lps, errors,
-                              reference, ref_log_p_vec, ref_errors)
+        candidates = getcands(state, seqs, lps, log_errors,
+                              reference, ref_log_p_vec, ref_log_errors)
 
         recompute_As = true
         if length(candidates) == 0
@@ -836,7 +879,7 @@ function quiver2(template::AbstractString,
                 end
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
-                if no_single_indels(state.template, reference, ref_log_p_vec, ref_errors, bandwidth)
+                if no_single_indels(state.template, reference, ref_log_p_vec, ref_log_errors, bandwidth)
                     consensus_ref = state.template
                     state.stage = refinement_stage
                 else
@@ -863,8 +906,8 @@ function quiver2(template::AbstractString,
             state.template = apply_mutations(old_template,
                                              Mutation[c.mutation
                                                       for c in chosen_cands])
-            recompute!(state, seqs, lps, errors,
-                       reference, ref_log_p_vec, ref_errors,
+            recompute!(state, seqs, lps, log_errors,
+                       reference, ref_log_p_vec, ref_log_errors,
                        bandwidth, true, false)
             # detect if a single mutation is better
             # note: this may not always be correct, because score_mutation() is not exact
@@ -893,8 +936,8 @@ function quiver2(template::AbstractString,
             lps = log_ps[indices]
             recompute_As = true
         end
-        recompute!(state, seqs, lps, errors,
-                   reference, ref_log_p_vec, ref_errors,
+        recompute!(state, seqs, lps, log_errors,
+                   reference, ref_log_p_vec, ref_log_errors,
                    bandwidth, recompute_As, true)
         if verbose > 1
             println(STDERR, "  score: $(state.score)")
@@ -908,8 +951,8 @@ function quiver2(template::AbstractString,
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
             lps = log_ps[indices]
-            recompute!(state, seqs, lps, errors,
-                       reference, ref_log_p_vec, ref_errors,
+            recompute!(state, seqs, lps, log_errors,
+                       reference, ref_log_p_vec, ref_log_errors,
                        bandwidth, true, true)
             if verbose > 1
                 println(STDERR, "  new score: $(state.score)")
@@ -935,11 +978,11 @@ function quiver2(template::AbstractString,
                 )
 
     # FIXME: recomputing for all sequences may be costly
-    recompute!(state, sequences, log_ps, errors,
-               reference, ref_log_p_vec, ref_errors,
+    recompute!(state, sequences, log_ps, log_errors,
+               reference, ref_log_p_vec, ref_log_errors,
                bandwidth, true, true)
-    base_probs, ins_probs = estimate_probs(state, sequences, log_ps, errors,
-                                           reference, ref_log_p_vec, ref_errors)
+    base_probs, ins_probs = estimate_probs(state, sequences, log_ps, log_errors,
+                                           reference, ref_log_p_vec, ref_log_errors)
     return state.template, base_probs, ins_probs, info
 end
 

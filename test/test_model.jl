@@ -10,6 +10,33 @@ using Base.Test
 
 
 const errors = Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0)
+const log_errors = Model.LogErrorModel(errors)
+
+
+function test_get_sub_template()
+    seq = "ACGT"
+    codon = ('A', 'A', 'A')
+    mutation = Mutations.CodonInsertion(0, codon)
+    next_posn = 1
+    n_after = 3
+    expected = "AAAACG"
+    result = Quiver2.Model.get_sub_template(mutation, seq, next_posn, n_after)
+    @test expected == result
+
+    mutation = Mutations.CodonInsertion(3, codon)
+    next_posn = 4
+    n_after = 1
+    expected = "AAAT"
+    result = Quiver2.Model.get_sub_template(mutation, seq, next_posn, n_after)
+    @test expected == result
+
+    mutation = Mutations.CodonInsertion(4, codon)
+    next_posn = 5
+    n_after = 0
+    expected = "AAA"
+    result = Quiver2.Model.get_sub_template(mutation, seq, next_posn, n_after)
+    @test expected == result
+end
 
 function test_cols(A, B)
     expected = A[end, end]
@@ -35,11 +62,11 @@ function test_perfect_forward()
     lp = -3.0
     match = Util.inv_log10(lp)
     log_p = fill(lp, length(seq))
-    A = Model.forward(template, seq, log_p, errors, bandwidth)
+    A = Model.forward(template, seq, log_p, log_errors, bandwidth)
     # transpose because of column-major order
-    expected = transpose(reshape([[0.0, lp + errors.deletion, 0.0];
-                                  [lp + errors.insertion, match, match + lp + errors.deletion];
-                                  [0.0, match + lp + errors.insertion, 2 * match]],
+    expected = transpose(reshape([[0.0, lp + log_errors.deletion, 0.0];
+                                  [lp + log_errors.insertion, match, match + lp + log_errors.deletion];
+                                  [0.0, match + lp + log_errors.insertion, 2 * match]],
                                  (3, 3)))
     @test full(A) == expected
 end
@@ -51,10 +78,10 @@ function test_imperfect_backward()
     lp = -3.0
     match = Util.inv_log10(lp)
     log_p = fill(lp, length(seq))
-    B = Model.backward(template, seq, log_p, errors, bandwidth)
-    expected = transpose(reshape([[lp + errors.mismatch + match, lp + errors.insertion + match, 0.0];
-                                  [2*lp + errors.deletion + errors.mismatch, lp + errors.mismatch, lp + errors.insertion];
-                                  [0.0, lp + errors.deletion, 0.0]],
+    B = Model.backward(template, seq, log_p, log_errors, bandwidth)
+    expected = transpose(reshape([[lp + log_errors.mismatch + match, lp + log_errors.insertion + match, 0.0];
+                                  [2*lp + log_errors.deletion + log_errors.mismatch, lp + log_errors.mismatch, lp + log_errors.insertion];
+                                  [0.0, lp + log_errors.deletion, 0.0]],
                                  (3, 3)))
     @test full(B) == expected
 end
@@ -66,12 +93,12 @@ function test_imperfect_forward()
     lp = -3.0
     match = Util.inv_log10(lp)
     log_p = fill(lp, length(seq))
-    A = Model.forward(template, seq, log_p, errors, bandwidth)
-    B = Model.backward(template, seq, log_p, errors, bandwidth)
+    A = Model.forward(template, seq, log_p, log_errors, bandwidth)
+    B = Model.backward(template, seq, log_p, log_errors, bandwidth)
     test_cols(A, B)
-    expected = transpose(reshape([[0.0, lp + errors.deletion, 0.0];
-                                  [lp + errors.insertion, match, match + lp + errors.deletion];
-                                  [0.0, match + lp + errors.insertion, match + lp + errors.mismatch]],
+    expected = transpose(reshape([[0.0, lp + log_errors.deletion, 0.0];
+                                  [lp + log_errors.insertion, match, match + lp + log_errors.deletion];
+                                  [0.0, match + lp + log_errors.insertion, match + lp + log_errors.mismatch]],
                                  (3, 3)))
 
     @test full(A) == expected
@@ -84,13 +111,21 @@ function test_equal_ranges()
 end
 
 function test_forward_backward_agreement()
-    template = "AAGACGCCGGCACGGTCGTGTGGTGGTAGTGGTCTCCGGT"
-    seq = "CAGCCGCCGGACACGTGTCGGTGGTGGTAGTGGCCTCGT"
-    log_p = [-1.9,-1.6,-0.3,-0.3,-0.7,-1.7,-1.7,-0.6,-1.2,-1.1,
-             -1.1,-0.4,-1.0,-0.7,-1.3,-1.1,-1.2,-0.8,-0.7,-1.0,
-             -1.3,-1.5,-0.7,-0.6,-0.3,-0.4,-0.9,-1.2,-1.6,-0.7,
-             -1.2,-1.3,-0.4,-0.3,-1.3,-1.7,-1.2,-1.2,-0.5]
-    error_model = ErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
+    template = "TG"
+    seq = "GTCG"
+    log_p = [-1.2,-0.8,-0.7,-1.0]
+    error_model = Model.LogErrorModel(2.0, 1.0, 1.0, 3.0, 3.0)
+    bandwidth = 5
+    A = Model.forward(template, seq, log_p, error_model, bandwidth)
+    B = Model.backward(template, seq, log_p, error_model, bandwidth)
+    test_cols(A, B)
+end
+
+function test_forward_backward_agreement_2()
+    template = "GCACGGTC"
+    seq = "GACAC"
+    log_p = [-1.1, -1.1, -0.4, -1.0, -0.7]
+    error_model = Model.LogErrorModel(2.0, 1.0, 1.0, 3.0, 3.0)
     bandwidth = 5
     A = Model.forward(template, seq, log_p, error_model, bandwidth)
     B = Model.backward(template, seq, log_p, error_model, bandwidth)
@@ -102,10 +137,10 @@ function test_insertion_agreement()
     seq = "ATA"
     bandwidth = 10
     log_p = [-5.0, -1.0, -6.0]
-    A = Model.forward(template, seq, log_p, errors, bandwidth)
-    B = Model.backward(template, seq, log_p, errors, bandwidth)
+    A = Model.forward(template, seq, log_p, log_errors, bandwidth)
+    B = Model.backward(template, seq, log_p, log_errors, bandwidth)
     score = (Util.inv_log10(log_p[1]) +
-             log_p[2] + errors.insertion +
+             log_p[2] + log_errors.insertion +
              Util.inv_log10(log_p[3]))
     @test_approx_eq A[end, end] score
     test_cols(A, B)
@@ -116,11 +151,11 @@ function test_deletion_agreement()
     seq = "GAAG"
     bandwidth = 10
     log_p = [-5.0, -2.0, -1.0, -6.0]
-    A = Model.forward(template, seq, log_p, errors, bandwidth)
-    B = Model.backward(template, seq, log_p, errors, bandwidth)
+    A = Model.forward(template, seq, log_p, log_errors, bandwidth)
+    B = Model.backward(template, seq, log_p, log_errors, bandwidth)
     score = (Util.inv_log10(log_p[1]) +
              Util.inv_log10(log_p[2]) +
-             maximum(log_p[2:3]) + errors.deletion +
+             maximum(log_p[2:3]) + log_errors.deletion +
              Util.inv_log10(log_p[3]) +
              Util.inv_log10(log_p[4]))
     @test_approx_eq A[end, end] score
@@ -132,10 +167,10 @@ function test_deletion_agreement2()
     seq = "AA"
     bandwidth = 10
     log_p = [-2.0, -3.0]
-    A = Model.forward(template, seq, log_p, errors, bandwidth)
-    B = Model.backward(template, seq, log_p, errors, bandwidth)
+    A = Model.forward(template, seq, log_p, log_errors, bandwidth)
+    B = Model.backward(template, seq, log_p, log_errors, bandwidth)
     score = (Util.inv_log10(log_p[1]) +
-             maximum(log_p[1:2]) + errors.deletion +
+             maximum(log_p[1:2]) + log_errors.deletion +
              Util.inv_log10(log_p[2]))
     @test_approx_eq A[end, end] score
     test_cols(A, B)
@@ -148,16 +183,16 @@ function test_random_mutation(mutation, template_len)
     template_error_p = Float64[0.1 for i=1:length(template)]
     codon_moves = rand([true, false])
     if codon_moves
-        error_model = ErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
+        error_model = Model.LogErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
     else
-        error_model = ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
+        error_model = Model.LogErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
     end
     log_actual_error_std = 0.5
     log_reported_error_std = 0.5
 
     bioseq, actual, phreds = sample_from_template(template_seq,
                                                   template_error_p,
-                                                  errors,
+                                                  log_errors,
                                                   log_actual_error_std,
                                                   log_reported_error_std)
     log_p = Float64[Float64(q) / (-10.0) for q in phreds]
@@ -239,17 +274,17 @@ function test_no_single_indels()
 
     template = "AAACCCGGGTTT"
     @test Quiver2.Model.no_single_indels(template, reference,
-                                         ref_log_p, errors,
+                                         ref_log_p, log_errors,
                                          bandwidth)
 
     template = "AAACCCGGGTTTT"
     @test !Quiver2.Model.no_single_indels(template, reference,
-                                          ref_log_p, errors,
+                                          ref_log_p, log_errors,
                                           bandwidth)
 
     template = "AAA"
     @test Quiver2.Model.no_single_indels(template, reference,
-                                         ref_log_p, errors,
+                                         ref_log_p, log_errors,
                                          bandwidth)
 end
 
@@ -323,9 +358,9 @@ function test_base_probs()
                           [-9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0]]
     bandwidth = 3
-    state = Quiver2.Model.initial_state(template, seqs, lps, errors, bandwidth)
-    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, errors,
-                                             "", Float64[], errors)
+    state = Quiver2.Model.initial_state(template, seqs, lps, log_errors, bandwidth)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, log_errors,
+                                             "", Float64[], log_errors)
     @test base[1, 2] > 0.9
     del_probs = base[:, end]
     @test del_probs[1] < 1e-9
@@ -342,9 +377,9 @@ function test_ins_probs()
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
-    state = Quiver2.Model.initial_state(template, seqs, lps, errors, bandwidth)
-    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, errors,
-                                             "", Float64[], errors)
+    state = Quiver2.Model.initial_state(template, seqs, lps, log_errors, bandwidth)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, log_errors,
+                                             "", Float64[], log_errors)
     @test maximum(ins[1, :]) < 1e-9
     @test ins[3, 4] > 0.9
 end
@@ -358,9 +393,9 @@ function test_indel_probs()
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
-    state = Quiver2.Model.initial_state(template, seqs, lps, errors, bandwidth)
-    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, errors,
-                                             "", Float64[], errors)
+    state = Quiver2.Model.initial_state(template, seqs, lps, log_errors, bandwidth)
+    base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, log_errors,
+                                             "", Float64[], log_errors)
     probs = Quiver2.Model.estimate_indel_probs(base, ins)
     @test probs[1] == probs[4]
     @test probs[1] < 0.5
@@ -373,18 +408,20 @@ function test_align()
     seq = "AA"
     bandwidth = 10
     log_p = [-2.0, -3.0]
-    t, s = Model.align(template, seq, log_p, errors, bandwidth)
+    t, s = Model.align(template, seq, log_p, log_errors, bandwidth)
     @test t == "ATA"
     @test s == "A-A"
 end
 
 srand(1234)
 
+test_get_sub_template()
 test_perfect_forward()
 test_imperfect_backward()
 test_imperfect_forward()
 test_equal_ranges()
 test_forward_backward_agreement()
+test_forward_backward_agreement_2()
 test_insertion_agreement()
 test_deletion_agreement()
 test_deletion_agreement2()
