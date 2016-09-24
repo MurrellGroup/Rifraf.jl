@@ -459,10 +459,7 @@ function seq_score_mutation(mutation::Mutation,
 
     # add up results
     best_score = -Inf
-    n_to_use = codon_moves ? 3 : 1
-    if n_to_use > ncols
-        error("trying to use more columns than we computed")
-    end
+    n_to_use = min(ncols, codon_moves ? 3 : 1)
     for j in (ncols - n_to_use + 1):ncols
         imin, imax = row_range(A, min(acol + j, maxcol))
         Acol = newcols[imin:imax, j]
