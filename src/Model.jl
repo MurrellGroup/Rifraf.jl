@@ -102,7 +102,6 @@ const baseints = Dict('A' => 1,
                       '-' => 5,
                       )
 
-
 function update_helper(A::BandedArray{Float64}, i::Int, j::Int,
                        move::DPMove, move_score::Float64,
                        final_score::Float64, final_move::DPMove)
@@ -136,7 +135,10 @@ end
 function codon_move_scores(seq_i::Int,
                            log_p::Vector{Float64},
                            errors::LogErrorModel)
-    # we're moving INTO seq_i. so need previous two.
+    # we're moving INTO seq_i. so need previous three
+    if seq_i < 1 || seq_i > length(log_p)
+        return -Inf, -Inf
+    end
     start = max(1, seq_i-2)
     stop = min(seq_i, length(log_p))
     max_p = maximum(log_p[start:stop])
@@ -213,30 +215,6 @@ function backtrace(t::AbstractString, s::AbstractString,
 end
 
 
-function prepare_array(t::AbstractString, s::AbstractString,
-                       log_p::Vector{Float64},
-                       errors::LogErrorModel,
-                       bandwidth::Int)
-    # FIXME: consider codon moves in initialization
-    if length(s) != length(log_p)
-        error("sequence length does not match quality score length")
-    end
-    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
-    if errors.insertion == -Inf || errors.deletion == -Inf
-        error("indel probabilities cannot be 0.0")
-    end
-    for i = 2:min(size(result)[1], result.v_offset + bandwidth + 1)
-        ins_score = log_p[i-1] + errors.insertion
-        result[i, 1] = result[i-1, 1] + ins_score
-    end
-    del_score = log_p[1] + + errors.deletion
-    for j = 2:min(size(result)[2], result.h_offset + bandwidth + 1)
-        result[1, j] = result[1, j-1] + del_score
-    end
-    return result
-end
-
-
 """Does some work as forward_codon, but also keeps track of moves.
 
 Does backtracing to find best alignment.
@@ -249,21 +227,20 @@ function forward_moves(t::AbstractString, s::AbstractString,
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
-    result = prepare_array(t, s, log_p, errors, bandwidth)
+    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     moves = BandedArray(Int, result.shape, bandwidth)
     moves[1, 1] = Int(dp_none)
-    for i = 2:min(size(moves)[1], moves.v_offset + bandwidth + 1)
-        moves[i, 1] = Int(dp_ins)
-    end
-    for j = 2:min(size(moves)[2], moves.h_offset + bandwidth + 1)
-        moves[1, j] = Int(dp_del)
-    end
-
-    for j = 2:size(result)[2]
+    nrows, ncols = size(result)
+    for j = 1:ncols
         start, stop = row_range(result, j)
-        start = max(start, 2)
         for i = start:stop
-            x = update(result, i, j, s[i-1], t[j-1], log_p, errors)
+            if i == 1 && j == 1
+                continue
+            end
+            sbase = i > 1 ? s[i-1] : 'X'
+            tbase = j > 1 ? t[j-1] : 'X'
+            x = update(result, i, j, sbase, tbase,
+                       log_p, errors)
             result[i, j] = x[1]
             moves[i, j] = x[2]
         end
@@ -279,12 +256,17 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 function forward(t::AbstractString, s::AbstractString,
                  log_p::Vector{Float64}, errors::LogErrorModel,
                  bandwidth::Int)
-    result = prepare_array(t, s, log_p, errors, bandwidth)
-    for j = 2:size(result)[2]
+    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
+    nrows, ncols = size(result)
+    for j = 1:ncols
         start, stop = row_range(result, j)
-        start = max(start, 2)
         for i = start:stop
-            x = update(result, i, j, s[i-1], t[j-1],
+            if i == 1 && j == 1
+                continue
+            end
+            sbase = i > 1 ? s[i-1] : 'X'
+            tbase = j > 1 ? t[j-1] : 'X'
+            x = update(result, i, j, sbase, tbase,
                        log_p, errors)
             result[i, j] = x[1]
         end
@@ -301,10 +283,8 @@ function backward(t::AbstractString, s::AbstractString,
                   log_p::Vector{Float64},
                   errors::LogErrorModel,
                   bandwidth::Int)
-    s = reverse(s)
-    log_p = flipdim(log_p, 1)
-    t = reverse(t)
-    result = forward(t, s, log_p, errors, bandwidth)
+    result = forward(reverse(t), reverse(s), reverse(log_p),
+                     errors, bandwidth)
     return flip(result)
 end
 

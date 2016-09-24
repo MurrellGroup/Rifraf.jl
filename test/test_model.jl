@@ -113,7 +113,7 @@ end
 function test_forward_backward_agreement()
     template = "TG"
     seq = "GTCG"
-    log_p = [-1.2,-0.8,-0.7,-1.0]
+    log_p = [-1.2, -0.8, -0.7, -1.0]
     error_model = Model.LogErrorModel(2.0, 1.0, 1.0, 3.0, 3.0)
     bandwidth = 5
     A = Model.forward(template, seq, log_p, error_model, bandwidth)
