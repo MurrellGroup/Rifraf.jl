@@ -38,22 +38,23 @@ function test_get_sub_template()
     @test expected == result
 end
 
-function test_cols(A, B)
+function test_cols(A, B, codon_moves)
     expected = A[end, end]
     @test_approx_eq A[end, end] B[1, 1]
-    for j in 1:size(A)[2]
-        Acol = sparsecol(A, j)
-        Bcol = sparsecol(B, j)
-        (amin, amax), (bmin, bmax) = Quiver2.Model.equal_ranges(row_range(A, j),
-                                                                row_range(B, j))
-        asub = sub(Acol, amin:amax)
-        bsub = sub(Bcol, bmin:bmax)
-        score = maximum(asub + bsub)
-        @test_approx_eq expected score
+    ncols = size(A)[2]
+    # if codon_moves is true, we cannot expect every column to contain
+    # the correct score
+    # TODO: every three columns should
+    if !codon_moves
+        for j in 1:ncols
+            Acol = sparsecol(A, j)
+            Bcol = sparsecol(B, j)
+            score = maximum(Acol + Bcol)
+            @test_approx_eq expected score
+        end
     end
     @test_approx_eq A[end, end] B[1, 1]
 end
-
 
 function test_perfect_forward()
     bandwidth = 1
@@ -95,7 +96,7 @@ function test_imperfect_forward()
     log_p = fill(lp, length(seq))
     A = Model.forward(template, seq, log_p, log_errors, bandwidth)
     B = Model.backward(template, seq, log_p, log_errors, bandwidth)
-    test_cols(A, B)
+    test_cols(A, B, false)
     expected = transpose(reshape([[0.0, lp + log_errors.deletion, 0.0];
                                   [lp + log_errors.insertion, match, match + lp + log_errors.deletion];
                                   [0.0, match + lp + log_errors.insertion, match + lp + log_errors.mismatch]],
@@ -118,7 +119,7 @@ function test_forward_backward_agreement()
     bandwidth = 5
     A = Model.forward(template, seq, log_p, error_model, bandwidth)
     B = Model.backward(template, seq, log_p, error_model, bandwidth)
-    test_cols(A, B)
+    test_cols(A, B, true)
 end
 
 function test_forward_backward_agreement_2()
@@ -129,7 +130,7 @@ function test_forward_backward_agreement_2()
     bandwidth = 5
     A = Model.forward(template, seq, log_p, error_model, bandwidth)
     B = Model.backward(template, seq, log_p, error_model, bandwidth)
-    test_cols(A, B)
+    test_cols(A, B, true)
 end
 
 function test_insertion_agreement()
@@ -143,7 +144,7 @@ function test_insertion_agreement()
              log_p[2] + log_errors.insertion +
              Util.inv_log10(log_p[3]))
     @test_approx_eq A[end, end] score
-    test_cols(A, B)
+    test_cols(A, B, false)
 end
 
 function test_deletion_agreement()
@@ -159,7 +160,7 @@ function test_deletion_agreement()
              Util.inv_log10(log_p[3]) +
              Util.inv_log10(log_p[4]))
     @test_approx_eq A[end, end] score
-    test_cols(A, B)
+    test_cols(A, B, false)
 end
 
 function test_deletion_agreement2()
@@ -173,7 +174,7 @@ function test_deletion_agreement2()
              maximum(log_p[1:2]) + log_errors.deletion +
              Util.inv_log10(log_p[2]))
     @test_approx_eq A[end, end] score
-    test_cols(A, B)
+    test_cols(A, B, false)
 end
 
 function test_random_mutation(mutation, template_len)
@@ -192,7 +193,7 @@ function test_random_mutation(mutation, template_len)
 
     bioseq, actual, phreds = sample_from_template(template_seq,
                                                   template_error_p,
-                                                  log_errors,
+                                                  errors,
                                                   log_actual_error_std,
                                                   log_reported_error_std)
     log_p = Float64[Float64(q) / (-10.0) for q in phreds]
@@ -201,11 +202,11 @@ function test_random_mutation(mutation, template_len)
     new_template = Mutations.update_template(template, mutation)
     Anew = Model.forward(new_template, seq, log_p, error_model, bandwidth)
     Bnew = Model.backward(new_template, seq, log_p, error_model, bandwidth)
-    test_cols(Anew, Bnew)
+    test_cols(Anew, Bnew, codon_moves)
 
     A = Model.forward(template, seq, log_p, error_model, bandwidth)
     B = Model.backward(template, seq, log_p, error_model, bandwidth)
-    test_cols(A, B)
+    test_cols(A, B, codon_moves)
     score = Model.seq_score_mutation(mutation, A, B, template, seq, log_p,
                                      error_model, codon_moves)
     aj = mutation.pos + 1

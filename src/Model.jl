@@ -347,8 +347,7 @@ function update_newcols(newcols::Array{Float64, 2},
     result = update_helper_newcols(newcols, A, i, j, acol, dp_match, match_score, result...)
     result = update_helper_newcols(newcols, A, i, j, acol, dp_ins, ins_score, result...)
     result = update_helper_newcols(newcols, A, i, j, acol, dp_del, del_score, result...)
-    codon_ins_score, codon_del_score = codon_move_scores(t_base, s_base, i-1,
-                                                         log_p, errors)
+    codon_ins_score, codon_del_score = codon_move_scores(i-1, log_p, errors)
     if errors.codon_insertion > -Inf && i > 3
         result = update_helper_newcols(newcols, A, i, j, acol, dp_codon_ins,
                                        codon_ins_score, result...)
@@ -419,7 +418,7 @@ function seq_score_mutation(mutation::Mutation,
     # first column of B to use
     bcol = pos + first_b_base
 
-    if t in (Deletion, CodonDeletion) & !codon_moves
+    if t in (Deletion, CodonDeletion) && !codon_moves
         return seq_score_deletion(A, B, acol, bcol)
     end
 
@@ -427,7 +426,7 @@ function seq_score_mutation(mutation::Mutation,
     # if so, adjust bcol to be -1 or some other indicator
 
     # next valid position in sequence after this mutation
-    next_posn =  mutation.posn + (t == CodonDeletion ? 3 : 1)
+    next_posn =  mutation.pos + (t == CodonDeletion ? 3 : 1)
     # number of bases changed/inserted
     n_bases = n_mutation_bases[t]
     # number of columns that depend on mutation columns
