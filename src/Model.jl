@@ -431,13 +431,13 @@ function seq_score_mutation(mutation::Mutation,
     n_bases = n_mutation_bases[t]
     # number of columns that depend on mutation columns
     n_after = (codon_moves ? 3 : 0)
-    if next_posn + n_after > length(seq)
-        n_after = max(0, length(seq) - next_posn)
+    if next_posn + n_after - 1 > length(template)
+        n_after = max(0, length(template) - next_posn + 1)
     end
 
     # handle if n_after will go over the end of the sequence
     # TODO: should not need to pass ints
-    sub_template = get_sub_template(mutation, seq, next_posn, n_after)
+    sub_template = get_sub_template(mutation, template, next_posn, n_after)
 
     # TODO: reuse an array for `newcols`
     nrows, maxcol = size(A)
