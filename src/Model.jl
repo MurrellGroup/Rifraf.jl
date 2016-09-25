@@ -418,8 +418,15 @@ function seq_score_mutation(mutation::Mutation,
     # first column of B to use
     bcol = pos + first_b_base
 
-    if t in (Deletion, CodonDeletion) && !codon_moves
-        return seq_score_deletion(A, B, acol, bcol)
+    if t in (Deletion, CodonDeletion)
+        n_del = (t == Deletion ? 1 : 3)
+        if codon_moves && acol == (size(A)[2] - n_del)
+            # suffix deletions do not need recomputation
+            return A[end, end-n_del]
+        else
+            # deletions without codon moves do not need recomputation
+            return seq_score_deletion(A, B, acol, bcol)
+        end
     end
 
     # FIXME: ncols may need to be reduced if in last few columns
@@ -430,9 +437,15 @@ function seq_score_mutation(mutation::Mutation,
     # number of bases changed/inserted
     n_bases = n_mutation_bases[t]
     # number of columns that depend on mutation columns
+    # NEXT: something in here is wrong
     n_after = (codon_moves ? 3 : 0)
+
     if next_posn + n_after - 1 > length(template)
         n_after = max(0, length(template) - next_posn + 1)
+    end
+
+    if n_bases == 0 && n_after == 0
+        error("no new columns need to be recomputed.")
     end
 
     # handle if n_after will go over the end of the sequence
