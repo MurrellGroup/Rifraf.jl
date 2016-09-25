@@ -59,7 +59,7 @@ immutable LogErrorModel
                        deletion,
                        codon_insertion,
                        codon_deletion]
-        m, i, d, ci, cd = normalize(log10(args))
+        m, i, d, ci, cd = log10(normalize(args))
         return new(m, i, d, ci, cd)
     end
 
@@ -136,13 +136,10 @@ function codon_move_scores(seq_i::Int,
                            log_p::Vector{Float64},
                            errors::LogErrorModel)
     # we're moving INTO seq_i. so need previous three
-    if seq_i < 1 || seq_i > length(log_p)
-        return -Inf, -Inf
-    end
     start = max(1, seq_i-2)
     stop = min(seq_i, length(log_p))
-    max_p = maximum(log_p[start:stop])
-    codon_ins_score = max_p + errors.codon_insertion
+    max_p = start <= stop ? maximum(log_p[start:stop]) : -Inf
+    codon_ins_score =  max_p + errors.codon_insertion
     cur_log_p = log_p[max(seq_i, 1)]
     next_log_p = log_p[min(seq_i + 1, length(log_p))]
     codon_del_score = max(cur_log_p, next_log_p) + errors.codon_deletion
@@ -369,7 +366,6 @@ end
 
 function get_sub_template(mutation::Mutation, seq::AbstractString,
                           next_posn::Int, n_after::Int)
-    # FIXME: clip at end of sequence, if necessary
     t = typeof(mutation)
     pos = mutation.pos
     prefix = ""
@@ -457,7 +453,7 @@ function seq_score_mutation(mutation::Mutation,
     # TODO: reuse an array for `newcols`
     nrows, maxcol = size(A)
     ncols = n_bases + n_after
-    newcols = Array(Float64, (nrows, ncols))
+    newcols = zeros(Float64, (nrows, ncols))
 
     # compute new columns
     for j in 1:ncols
@@ -475,9 +471,10 @@ function seq_score_mutation(mutation::Mutation,
     # add up results
     best_score = -Inf
     n_to_use = min(ncols, codon_moves ? 3 : 1)
-    for j in (ncols - n_to_use + 1):ncols
-        imin, imax = row_range(A, min(acol + j, maxcol))
-        Acol = newcols[imin:imax, j]
+    for j in 1:n_to_use
+        new_j = ncols - n_to_use + j
+        imin, imax = row_range(A, min(acol + new_j, maxcol))
+        Acol = newcols[imin:imax, new_j]
         bj = bcol + j - 1
         if bj > size(B)[2]
             score = Acol[end]
