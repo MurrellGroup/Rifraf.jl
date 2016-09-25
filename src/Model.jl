@@ -322,7 +322,9 @@ function update_helper_newcols(newcols::Array{Float64, 2},
     offset = offsets[Int(move)]
     prev_i = i + offset[1]
     prev_j = j + offset[2]
-    if inband(A, prev_i, prev_j)
+
+    rangecol = min(prev_j, size(A)[2])
+    if inband(A, prev_i, rangecol)
         score = -Inf
         if prev_j <= acol
             score = A[prev_i, prev_j] + move_score
