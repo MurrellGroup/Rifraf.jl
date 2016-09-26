@@ -529,10 +529,9 @@ function seq_score_mutation(mutation::Mutation,
 
     # add up results
     best_score = -Inf
-    n_to_use = min(ncols, codon_moves ? 3 : 1)
     for j in 1:codon_length
         new_j = n_new - codon_length + j
-        imin, imax = row_range(A, min(acol + j, ncols))
+        imin, imax = row_range(A, min(acol + new_j, ncols))
         Acol = newcols[imin:imax, new_j]
         bj = first_bcol + j - 1
         if bj > size(B)[2]
