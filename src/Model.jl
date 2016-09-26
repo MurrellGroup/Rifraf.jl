@@ -580,18 +580,6 @@ function candstask(stage::Stage,
                 produce(Deletion(j))
             end
         end
-        if stage == frame_correction_stage
-            # codon deletions
-            for j in 1:(len-2)
-                produce(CodonDeletion(j))
-            end
-            # codon insertions
-            for codon in product("ACGT", "ACGT", "ACGT")
-                for j in 0:len
-                    produce(CodonInsertion(j, codon))
-                end
-            end
-        end
     end
     Task(_it)
 end
