@@ -1,43 +1,43 @@
-module Mutations
+module Proposals
 
-export Mutation, Substitution, Insertion, CodonInsertion,
-       Deletion, CodonDeletion, CandMutation,
-       are_unambiguous, base_shift, affected_positions, apply_mutations,
-       AmbiguousMutationsError, random_codon
+export Proposal, Substitution, Insertion, CodonInsertion,
+       Deletion, CodonDeletion, CandProposal,
+       are_unambiguous, base_shift, affected_positions, apply_proposals,
+       AmbiguousProposalsError, random_codon
 
-abstract Mutation
-abstract SingleMutation <: Mutation
-abstract CodonMutation <: Mutation
+abstract Proposal
+abstract SingleProposal <: Proposal
+abstract CodonProposal <: Proposal
 
-type Substitution <: SingleMutation
+type Substitution <: SingleProposal
     pos::Int
     base::Char
 end
 
-type Insertion <: SingleMutation
+type Insertion <: SingleProposal
     pos::Int  # insert after this position
     base::Char
 end
 
-type CodonInsertion <: CodonMutation
+type CodonInsertion <: CodonProposal
     pos::Int  # insert after this position
     bases::Tuple{Char,Char,Char}
 end
 
-type Deletion <: SingleMutation
+type Deletion <: SingleProposal
     pos::Int
 end
 
-type CodonDeletion <: CodonMutation
+type CodonDeletion <: CodonProposal
     pos::Int  # position of the first base to delete
 end
 
-type CandMutation
-    mutation::Mutation
+type CandProposal
+    proposal::Proposal
     score::Float64
 end
 
-function affected_positions(m::SingleMutation)
+function affected_positions(m::SingleProposal)
     return [m.pos]
 end
 
@@ -50,13 +50,13 @@ function affected_positions(m::CodonDeletion)
 end
 
 """
-Whether mutations can be applied in any order.
+Whether proposals can be applied in any order.
 
 - ensure only one substitution or deletion at every position
 - ensure only one insertion at every position
 
 """
-function are_unambiguous(ms::Vector{Mutation})
+function are_unambiguous(ms::Vector{Proposal})
     ins_positions = []
     other_positions = []
     for i in 1:length(ms)
@@ -74,36 +74,36 @@ function are_unambiguous(ms::Vector{Mutation})
 end
 
 function update_template(template::AbstractString,
-                         mutation::Substitution)
-    return string(template[1:(mutation.pos - 1)],
-                  mutation.base,
-                  template[(mutation.pos + 1):end])
+                         proposal::Substitution)
+    return string(template[1:(proposal.pos - 1)],
+                  proposal.base,
+                  template[(proposal.pos + 1):end])
 end
 
 function update_template(template::AbstractString,
-                         mutation::Insertion)
-    return string(template[1:(mutation.pos)],
-                  mutation.base,
-                  template[(mutation.pos+1):end])
+                         proposal::Insertion)
+    return string(template[1:(proposal.pos)],
+                  proposal.base,
+                  template[(proposal.pos+1):end])
 end
 
 function update_template(template::AbstractString,
-                         mutation::CodonInsertion)
-    return string(template[1:(mutation.pos)],
-                  join(mutation.bases),
-                  template[(mutation.pos+1):end])
+                         proposal::CodonInsertion)
+    return string(template[1:(proposal.pos)],
+                  join(proposal.bases),
+                  template[(proposal.pos+1):end])
 end
 
 function update_template(template::AbstractString,
-                         mutation::Deletion)
-    return string(template[1:(mutation.pos - 1)],
-                  template[(mutation.pos + 1):end])
+                         proposal::Deletion)
+    return string(template[1:(proposal.pos - 1)],
+                  template[(proposal.pos + 1):end])
 end
 
 function update_template(template::AbstractString,
-                         mutation::CodonDeletion)
-    return string(template[1:(mutation.pos - 1)],
-                  template[(mutation.pos + 3):end])
+                         proposal::CodonDeletion)
+    return string(template[1:(proposal.pos - 1)],
+                  template[(proposal.pos + 3):end])
 end
 
 base_shift_dict = Dict(Insertion => 1,
@@ -113,22 +113,22 @@ base_shift_dict = Dict(Insertion => 1,
                        Substitution => 0)
 
 """
-How many bases to shift mutations after this one.
+How many bases to shift proposals after this one.
 """
-function base_shift(m::Mutation)
+function base_shift(m::Proposal)
     return base_shift_dict[typeof(m)]
 end
 
 
-type AmbiguousMutationsError <: Exception end
+type AmbiguousProposalsError <: Exception end
 
 
-function apply_mutations(template::AbstractString,
-                         mutations::Vector{Mutation})
-    if !are_unambiguous(mutations)
-        throw(AmbiguousMutationsError())
+function apply_proposals(template::AbstractString,
+                         proposals::Vector{Proposal})
+    if !are_unambiguous(proposals)
+        throw(AmbiguousProposalsError())
     end
-    remaining = deepcopy(mutations)
+    remaining = deepcopy(proposals)
     while length(remaining) > 0
         m = pop!(remaining)
         template = update_template(template, m)

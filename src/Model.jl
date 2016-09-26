@@ -4,7 +4,7 @@ using Bio.Seq
 using Iterators
 
 using Quiver2.BandedArrays
-using Quiver2.Mutations
+using Quiver2.Proposals
 using Quiver2.Util
 
 export quiver2, ErrorModel, LogErrorModel
@@ -14,7 +14,7 @@ export quiver2, ErrorModel, LogErrorModel
 #   - propose mismatches and single indels.
 # frame_correction_stage:
 #   - use reference.
-#   - propose all mutations
+#   - propose all proposals
 #   - increase reference single indel penalties.
 # refinement stage:
 #   - do not use reference
@@ -324,18 +324,18 @@ end
 end
 
 
-function get_sub_template(mutation::Mutation, seq::AbstractString,
+function get_sub_template(proposal::Proposal, seq::AbstractString,
                           next_posn::Int, n_after::Int)
-    # next valid position in sequence after this mutation
-    t = typeof(mutation)
-    pos = mutation.pos
+    # next valid position in sequence after this proposal
+    t = typeof(proposal)
+    pos = proposal.pos
     prefix = ""
     stop = min(next_posn + n_after - 1, length(seq))
     suffix = seq[next_posn:stop]
     if t in (Substitution, Insertion)
-        prefix = string(mutation.base)
+        prefix = string(proposal.base)
     elseif t == CodonInsertion
-        prefix = string(mutation.bases...)
+        prefix = string(proposal.bases...)
     end
     return string(prefix, suffix)
 end
@@ -352,7 +352,7 @@ function seq_score_deletion(A::BandedArray{Float64}, B::BandedArray{Float64},
 end
 
 
-const n_mutation_bases = Dict(Substitution => 1,
+const n_proposal_bases = Dict(Substitution => 1,
                               Insertion => 1,
                               Deletion => 0,
                               CodonInsertion => 3,
@@ -364,18 +364,18 @@ const boffsets = Dict(Substitution => 2,
                       CodonInsertion => 1,
                       CodonDeletion => 4)
 
-function score_nocodon(mutation::Mutation,
+function score_nocodon(proposal::Proposal,
                        A::BandedArray{Float64}, B::BandedArray{Float64},
                        template::AbstractString,
                        seq::AbstractString, log_p::Vector{Float64},
                        errors::LogErrorModel)
-    target_col = mutation.pos + 1
-    t = typeof(mutation)
+    target_col = proposal.pos + 1
+    t = typeof(proposal)
     if t in (Deletion, CodonDeletion)
         # nothing to recompute
         n_to_del = t == Deletion ? 1 : 3
-        acol = mutation.pos
-        bcol = mutation.pos + n_to_del
+        acol = proposal.pos
+        bcol = proposal.pos + n_to_del
         return seq_score_deletion(A, B, acol, bcol)
     end
     # need to compute new columns
@@ -385,9 +385,9 @@ function score_nocodon(mutation::Mutation,
     newcols = zeros(Float64, (nrows, n_new))
 
     # last valid A column
-    acol = mutation.pos + (t == Substitution ? 0 : 1)
+    acol = proposal.pos + (t == Substitution ? 0 : 1)
     # new bases
-    sub_template = t == CodonInsertion ? string(mutation.bases...) : string(mutation.base)
+    sub_template = t == CodonInsertion ? string(proposal.bases...) : string(proposal.base)
     for j in 1:n_new
         amin, amax = row_range(A, min(acol + j, ncols))
         for i in amin:amax
@@ -404,7 +404,7 @@ function score_nocodon(mutation::Mutation,
     imin, imax = row_range(A, min(acol + n_new, ncols))
     Acol = newcols[amin:amax, end]
 
-    bj = mutation.pos + 1
+    bj = proposal.pos + 1
     Bcol = sparsecol(B, bj)
     (amin, amax), (bmin, bmax) = equal_ranges((imin, imax),
                                               row_range(B, bj))
@@ -417,7 +417,7 @@ function score_nocodon(mutation::Mutation,
     return score
 end
 
-function seq_score_mutation(mutation::Mutation,
+function seq_score_proposal(proposal::Proposal,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
                             template::AbstractString,
                             seq::AbstractString, log_p::Vector{Float64},
@@ -425,14 +425,14 @@ function seq_score_mutation(mutation::Mutation,
     codon_moves = (errors.codon_insertion > -Inf ||
                    errors.codon_deletion > -Inf)
     if !codon_moves
-        return score_nocodon(mutation, A, B,
+        return score_nocodon(proposal, A, B,
                              template, seq, log_p,
                              errors)
     end
-    t = typeof(mutation)
+    t = typeof(proposal)
     # last valid column of A
     acol_offset = t in (Insertion, CodonInsertion) ? 0 : -1
-    acol = mutation.pos + acol_offset + 1
+    acol = proposal.pos + acol_offset + 1
 
     # first column of B to use
     first_bcol = acol + boffsets[t]
@@ -448,7 +448,7 @@ function seq_score_mutation(mutation::Mutation,
     end
 
     # number of bases changed/inserted
-    n_bases = n_mutation_bases[t]
+    n_bases = n_proposal_bases[t]
     # number of columns after recomputed columns to also recompute.
     n_after = codon_length
 
@@ -456,7 +456,7 @@ function seq_score_mutation(mutation::Mutation,
     # rest of A
     nrows, ncols = size(A)
     just_a = last_bcol >= ncols
-    next_posn = mutation.pos + (t == CodonDeletion ? 3 : 1)
+    next_posn = proposal.pos + (t == CodonDeletion ? 3 : 1)
     if just_a
         # go to end of template
         n_after = length(template) - next_posn + 1
@@ -466,7 +466,7 @@ function seq_score_mutation(mutation::Mutation,
         error("no new columns need to be recomputed.")
     end
 
-    sub_template = get_sub_template(mutation, template,
+    sub_template = get_sub_template(proposal, template,
                                     next_posn, n_after)
 
     # TODO: reuse an array for `newcols`
@@ -518,21 +518,21 @@ function seq_score_mutation(mutation::Mutation,
     return best_score
 end
 
-function choose_candidates(candidates::Vector{CandMutation}, min_dist::Int)
-    final_cands = CandMutation[]
+function choose_candidates(candidates::Vector{CandProposal}, min_dist::Int)
+    final_cands = CandProposal[]
     posns = Set()
     for c in sort(candidates, by=(c) -> c.score, rev=true)
-        if any(Bool[(abs(c.mutation.pos - p) < min_dist) for p in posns])
+        if any(Bool[(abs(c.proposal.pos - p) < min_dist) for p in posns])
             continue
         end
-        union!(posns, affected_positions(c.mutation))
+        union!(posns, affected_positions(c.proposal))
         push!(final_cands, c)
     end
     return final_cands
 end
 
 
-function score_mutation(m::Mutation,
+function score_proposal(m::Proposal,
                         state::State,
                         sequences::Vector{ASCIIString},
                         log_ps::Vector{Vector{Float64}},
@@ -543,11 +543,11 @@ function score_mutation(m::Mutation,
                         ref_errors::LogErrorModel)
     score = 0.0
     for si in 1:length(sequences)
-        score += seq_score_mutation(m, state.As[si], state.Bs[si], state.template,
+        score += seq_score_proposal(m, state.As[si], state.Bs[si], state.template,
                                     sequences[si], log_ps[si], errors)
     end
     if use_ref
-        score += seq_score_mutation(m, state.A_t, state.B_t, state.template,
+        score += seq_score_proposal(m, state.A_t, state.B_t, state.template,
                                     reference, ref_log_p, ref_errors)
     end
     return score
@@ -592,15 +592,15 @@ function getcands(state::State,
                   reference::ASCIIString,
                   ref_log_p::Vector{Float64},
                   ref_errors::LogErrorModel)
-    candidates = CandMutation[]
+    candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
     for m in candstask(state.stage, state.template)
-        score = score_mutation(m, state,
+        score = score_proposal(m, state,
                                sequences, log_ps, errors,
                                use_ref,
                                reference, ref_log_p, ref_errors)
         if score > state.score && !isapprox(score, state.score)
-            push!(candidates, CandMutation(m, score))
+            push!(candidates, CandProposal(m, score))
         end
     end
     return candidates
@@ -697,7 +697,7 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
 end
 
 
-"""convert per-mutation log differences to a per-base error rate"""
+"""convert per-proposal log differences to a per-base error rate"""
 function normalize_log_differences(position_scores, insertion_scores, state_score)
     # per-base insertion score is mean of neighboring insertions
     position_exp = exp10(position_scores)
@@ -728,7 +728,7 @@ function estimate_probs(state::State,
 
     use_ref = (length(reference) > 0)
     for m in candstask(scoring_stage, state.template)
-        score = score_mutation(m, state,
+        score = score_proposal(m, state,
                                sequences, log_ps, errors,
                                use_ref,
                                reference, ref_log_p, ref_errors)
@@ -846,7 +846,7 @@ function quiver2(template::AbstractString,
     if verbose > 1
         println(STDERR, "initial score: $(state.score)")
     end
-    n_mutations = Vector{Int}[]
+    n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(template)]
     consensus_noref = ""
     consensus_ref = ""
@@ -868,7 +868,7 @@ function quiver2(template::AbstractString,
             if verbose > 1
                 println(STDERR, "  no candidates found")
             end
-            push!(n_mutations, zeros(Int, Int(typemax(DPMove))))
+            push!(n_proposals, zeros(Int, Int(typemax(DPMove))))
             if state.stage == initial_stage
                 consensus_noref = state.template
                 if empty_ref
@@ -894,37 +894,37 @@ function quiver2(template::AbstractString,
             end
         else
             if verbose > 1
-                println(STDERR, "  found $(length(candidates)) candidate mutations.")
+                println(STDERR, "  found $(length(candidates)) candidate proposals.")
             end
             chosen_cands = choose_candidates(candidates, min_dist)
             if verbose > 1
-                println(STDERR, "  filtered to $(length(chosen_cands)) candidate mutations")
+                println(STDERR, "  filtered to $(length(chosen_cands)) candidate proposals")
             end
-            state.template = apply_mutations(old_template,
-                                             Mutation[c.mutation
+            state.template = apply_proposals(old_template,
+                                             Proposal[c.proposal
                                                       for c in chosen_cands])
             recompute!(state, seqs, lps, log_errors,
                        reference, ref_log_p_vec, ref_log_errors,
                        bandwidth, true, false)
-            # detect if a single mutation is better
-            # note: this may not always be correct, because score_mutation() is not exact
+            # detect if a single proposal is better
+            # note: this may not always be correct, because score_proposal() is not exact
             if length(chosen_cands) > 1 && (state.score < chosen_cands[1].score
                                             || isapprox(state.score, chosen_cands[1].score))
                 if verbose > 1
                     println(STDERR, "  rejecting multiple candidates in favor of best")
                 end
-                chosen_cands = CandMutation[chosen_cands[1]]
-                state.template = apply_mutations(old_template,
-                                                 Mutation[c.mutation
+                chosen_cands = CandProposal[chosen_cands[1]]
+                state.template = apply_proposals(old_template,
+                                                 Proposal[c.proposal
                                                           for c in chosen_cands])
             else
                 # no need to recompute unless batch changes
                 recompute_As = false
             end
-            mutation_counts = [length(filter(c -> (typeof(c.mutation) == t),
+            proposal_counts = [length(filter(c -> (typeof(c.proposal) == t),
                                              chosen_cands))
                                for t in [Substitution, Insertion, Deletion, CodonInsertion, CodonDeletion]]
-            push!(n_mutations, mutation_counts)
+            push!(n_proposals, proposal_counts)
         end
         push!(consensus_lengths, length(state.template))
         if batch < length(sequences)
@@ -973,7 +973,7 @@ function quiver2(template::AbstractString,
                 "ref_error_model" => ref_errors,
                 "consensus_noref" => consensus_noref,
                 "consensus_ref" => consensus_ref,
-                "n_mutations" => transpose(hcat(n_mutations...)),
+                "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
                 )
 

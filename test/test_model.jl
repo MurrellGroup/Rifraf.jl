@@ -3,7 +3,7 @@ using Bio.Seq
 using Quiver2.BandedArrays
 using Quiver2.Sample
 using Quiver2.Model
-using Quiver2.Mutations
+using Quiver2.Proposals
 using Quiver2.Util
 
 using Base.Test
@@ -16,25 +16,25 @@ const log_errors = Model.LogErrorModel(errors)
 function test_get_sub_template()
     seq = "ACGT"
     codon = ('A', 'A', 'A')
-    mutation = Mutations.CodonInsertion(0, codon)
+    proposal = Proposals.CodonInsertion(0, codon)
     next_posn = 1
     n_after = 3
     expected = "AAAACG"
-    result = Quiver2.Model.get_sub_template(mutation, seq, next_posn, n_after)
+    result = Quiver2.Model.get_sub_template(proposal, seq, next_posn, n_after)
     @test expected == result
 
-    mutation = Mutations.CodonInsertion(3, codon)
+    proposal = Proposals.CodonInsertion(3, codon)
     next_posn = 4
     n_after = 1
     expected = "AAAT"
-    result = Quiver2.Model.get_sub_template(mutation, seq, next_posn, n_after)
+    result = Quiver2.Model.get_sub_template(proposal, seq, next_posn, n_after)
     @test expected == result
 
-    mutation = Mutations.CodonInsertion(4, codon)
+    proposal = Proposals.CodonInsertion(4, codon)
     next_posn = 5
     n_after = 0
     expected = "AAA"
-    result = Quiver2.Model.get_sub_template(mutation, seq, next_posn, n_after)
+    result = Quiver2.Model.get_sub_template(proposal, seq, next_posn, n_after)
     @test expected == result
 end
 
@@ -177,7 +177,7 @@ function test_deletion_agreement2()
     test_cols(A, B, false)
 end
 
-function test_random_mutation(mutation, template_len)
+function test_random_proposal(proposal, template_len)
     template_seq = random_seq(template_len)
     template = convert(AbstractString, template_seq)
 
@@ -200,7 +200,7 @@ function test_random_mutation(mutation, template_len)
     seq = convert(AbstractString, bioseq)
     bandwidth = max(5 * abs(length(template) - length(seq)), 20)
 
-    new_template = Mutations.update_template(template, mutation)
+    new_template = Proposals.update_template(template, proposal)
     Anew = Model.forward(new_template, seq, log_p, error_model, bandwidth)
     Bnew = Model.backward(new_template, seq, log_p, error_model, bandwidth)
     test_cols(Anew, Bnew, codon_moves)
@@ -208,7 +208,7 @@ function test_random_mutation(mutation, template_len)
     A = Model.forward(template, seq, log_p, error_model, bandwidth)
     B = Model.backward(template, seq, log_p, error_model, bandwidth)
     test_cols(A, B, codon_moves)
-    score = Model.seq_score_mutation(mutation, A, B, template, seq, log_p,
+    score = Model.seq_score_proposal(proposal, A, B, template, seq, log_p,
                                      error_model)
     @test_approx_eq score Anew[end, end]
 end
@@ -217,8 +217,8 @@ function test_random_substitutions()
     for i = 1:1000
         template_len = rand(30:50)
         pos = rand(1:template_len)
-        mutation = Mutations.Substitution(pos, rbase())
-        test_random_mutation(mutation, template_len)
+        proposal = Proposals.Substitution(pos, rbase())
+        test_random_proposal(proposal, template_len)
     end
 end
 
@@ -226,8 +226,8 @@ function test_random_insertions()
     for i = 1:1000
         template_len = rand(30:50)
         pos = rand(0:template_len)
-        mutation = Mutations.Insertion(pos, rbase())
-        test_random_mutation(mutation, template_len)
+        proposal = Proposals.Insertion(pos, rbase())
+        test_random_proposal(proposal, template_len)
     end
 end
 
@@ -235,8 +235,8 @@ function test_random_codon_insertions()
     for i = 1:1000
         template_len = rand(30:50)
         pos = rand(0:template_len)
-        mutation = Mutations.CodonInsertion(pos, random_codon())
-        test_random_mutation(mutation, template_len)
+        proposal = Proposals.CodonInsertion(pos, random_codon())
+        test_random_proposal(proposal, template_len)
     end
 end
 
@@ -244,8 +244,8 @@ function test_random_deletions()
     for i = 1:1000
         template_len = rand(30:50)
         pos = rand(1:template_len)
-        mutation = Mutations.Deletion(pos)
-        test_random_mutation(mutation, template_len)
+        proposal = Proposals.Deletion(pos)
+        test_random_proposal(proposal, template_len)
     end
 end
 
@@ -254,8 +254,8 @@ function test_random_codon_deletions()
     for i = 1:1000
         template_len = rand(30:50)
         pos = rand(1:(template_len - 2))
-        mutation = Mutations.CodonDeletion(pos)
-        test_random_mutation(mutation, template_len)
+        proposal = Proposals.CodonDeletion(pos)
+        test_random_proposal(proposal, template_len)
     end
 end
 
