@@ -105,21 +105,7 @@ const baseints = Dict('A' => 1,
                       '-' => 5,
                       )
 
-function update_helper(A::BandedArray{Float64}, i::Int, j::Int,
-                       move::DPMove, move_score::Float64,
-                       final_score::Float64, final_move::DPMove)
-    offset = offsets[Int(move)]
-    i = i + offset[1]
-    j = j + offset[2]
-    if inband(A, i, j)
-        score = A[i, j] + move_score
-        if score > final_score
-            return score, move
-        end
-    end
-    return final_score, final_move
-end
-
+const empty_array = Array(Float64, (0, 0))
 
 function move_scores(t_base::Char,
                      s_base::Char,
@@ -133,7 +119,6 @@ function move_scores(t_base::Char,
     del_score = max(cur_log_p, next_log_p) + errors.deletion
     return match_score, ins_score, del_score
 end
-
 
 function codon_move_scores(seq_i::Int,
                            log_p::Vector{Float64},
@@ -149,23 +134,49 @@ function codon_move_scores(seq_i::Int,
     return codon_ins_score, codon_del_score
 end
 
+function update_helper(newcols::Array{Float64, 2},
+                       A::BandedArray{Float64},
+                       i::Int, j::Int, acol::Int,
+                       move::DPMove, move_score::Float64,
+                       final_score::Float64, final_move::DPMove)
+    offset = offsets[Int(move)]
+    prev_i = i + offset[1]
+    prev_j = j + offset[2]
 
-function update(A::BandedArray{Float64}, i::Int, j::Int,
+    rangecol = min(prev_j, size(A)[2])
+    if inband(A, prev_i, rangecol)
+        score = -Inf
+        if acol < 1 || prev_j <= acol
+            score = A[prev_i, prev_j] + move_score
+        else
+            score = newcols[prev_i, prev_j - acol] + move_score
+        end
+        if score > final_score
+            return score, move
+        end
+    end
+    return final_score, final_move
+end
+
+function update(A::BandedArray{Float64},
+                i::Int, j::Int,
                 s_base::Char, t_base::Char,
                 log_p::Vector{Float64},
-                errors::LogErrorModel)
+                errors::LogErrorModel;
+                newcols::Array{Float64, 2}=empty_array,
+                acol=-1)
     result = (-Inf, dp_none)
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, errors)
-    result = update_helper(A, i, j, dp_match, match_score, result...)
-    result = update_helper(A, i, j, dp_ins, ins_score, result...)
-    result = update_helper(A, i, j, dp_del, del_score, result...)
+    result = update_helper(newcols, A, i, j, acol, dp_match, match_score, result...)
+    result = update_helper(newcols, A, i, j, acol, dp_ins, ins_score, result...)
+    result = update_helper(newcols, A, i, j, acol, dp_del, del_score, result...)
     codon_ins_score, codon_del_score = codon_move_scores(i-1, log_p, errors)
     if errors.codon_insertion > -Inf && i > 3
-        result = update_helper(A, i, j, dp_codon_ins,
+        result = update_helper(newcols, A, i, j, acol, dp_codon_ins,
                                codon_ins_score, result...)
     end
     if errors.codon_deletion > -Inf && j > 3
-        result = update_helper(A, i, j, dp_codon_del,
+        result = update_helper(newcols, A, i, j, acol, dp_codon_del,
                                codon_del_score, result...)
     end
     if result[1] == -Inf
@@ -313,60 +324,6 @@ end
 end
 
 
-function update_helper_newcols(newcols::Array{Float64, 2},
-                               A::BandedArray{Float64},
-                               i::Int, j::Int, acol::Int,
-                               move::DPMove, move_score::Float64,
-                               final_score::Float64, final_move::DPMove)
-    # TODO: combine these with non-newcols versions
-    offset = offsets[Int(move)]
-    prev_i = i + offset[1]
-    prev_j = j + offset[2]
-
-    rangecol = min(prev_j, size(A)[2])
-    if inband(A, prev_i, rangecol)
-        score = -Inf
-        if prev_j <= acol
-            score = A[prev_i, prev_j] + move_score
-        else
-            score = newcols[prev_i, prev_j - acol] + move_score
-        end
-        if score > final_score
-            return score, move
-        end
-    end
-    return final_score, final_move
-end
-
-function update_newcols(newcols::Array{Float64, 2},
-                        A::BandedArray{Float64},
-                        i::Int, j::Int, acol::Int,
-                        s_base::Char, t_base::Char,
-                        log_p::Vector{Float64},
-                        errors::LogErrorModel)
-    result = (-Inf, dp_none)
-    match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, errors)
-    result = update_helper_newcols(newcols, A, i, j, acol, dp_match, match_score, result...)
-    result = update_helper_newcols(newcols, A, i, j, acol, dp_ins, ins_score, result...)
-    result = update_helper_newcols(newcols, A, i, j, acol, dp_del, del_score, result...)
-    codon_ins_score, codon_del_score = codon_move_scores(i-1, log_p, errors)
-    if errors.codon_insertion > -Inf && i > 3
-        result = update_helper_newcols(newcols, A, i, j, acol, dp_codon_ins,
-                                       codon_ins_score, result...)
-    end
-    if errors.codon_deletion > -Inf && j > 3
-        result = update_helper_newcols(newcols, A, i, j, acol, dp_codon_del,
-                                       codon_del_score, result...)
-    end
-    if result[1] == -Inf
-        error("new score is invalid")
-    end
-    if result[2] == dp_none
-        error("failed to find a move")
-    end
-    return result
-end
-
 function get_sub_template(mutation::Mutation, seq::AbstractString,
                           next_posn::Int, n_after::Int)
     # next valid position in sequence after this mutation
@@ -435,9 +392,10 @@ function score_nocodon(mutation::Mutation,
         amin, amax = row_range(A, min(acol + j, ncols))
         for i in amin:amax
             seq_base = i > 1 ? seq[i-1] : 'X'
-            x = update_newcols(newcols, A, i, acol + j, acol,
-                               seq_base, sub_template[j],
-                               log_p, errors)
+            x = update(A, i, acol + j,
+                       seq_base, sub_template[j],
+                       log_p, errors;
+                       newcols=newcols, acol=acol)
             newcols[i, j] = x[1]
         end
     end
@@ -521,9 +479,10 @@ function seq_score_mutation(mutation::Mutation,
         amin, amax = row_range(A, range_col)
         for i in amin:amax
             seq_base = i > 1 ? seq[i-1] : 'X'
-            x = update_newcols(newcols, A, i, acol + j, acol,
-                               seq_base, sub_template[j],
-                               log_p, errors)
+            x = update(A, i, acol + j,
+                       seq_base, sub_template[j],
+                       log_p, errors;
+                       newcols=newcols, acol=acol)
             newcols[i, j] = x[1]
         end
     end
