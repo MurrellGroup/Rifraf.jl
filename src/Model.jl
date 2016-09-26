@@ -76,6 +76,9 @@ end
 
 const default_ref_errors = ErrorModel(10.0, 0.1, 0.1, 1.0, 1.0)
 
+# just to avoid magical constants in code
+const codon_length = 3
+
 type State
     score::Float64
     template::AbstractString
@@ -366,6 +369,7 @@ end
 
 function get_sub_template(mutation::Mutation, seq::AbstractString,
                           next_posn::Int, n_after::Int)
+    # next valid position in sequence after this mutation
     t = typeof(mutation)
     pos = mutation.pos
     prefix = ""
@@ -397,68 +401,32 @@ const n_mutation_bases = Dict(Substitution => 1,
                               CodonInsertion => 3,
                               CodonDeletion => 0)
 
-function seq_score_mutation(mutation::Mutation,
-                            A::BandedArray{Float64}, B::BandedArray{Float64},
-                            template::AbstractString,
-                            seq::AbstractString, log_p::Vector{Float64},
-                            errors::LogErrorModel, codon_moves::Bool)
+function score_nocodon(mutation::Mutation,
+                       A::BandedArray{Float64}, B::BandedArray{Float64},
+                       template::AbstractString,
+                       seq::AbstractString, log_p::Vector{Float64},
+                       errors::LogErrorModel)
+    target_col = mutation.pos + 1
     t = typeof(mutation)
-
-    first_b_base = codon_moves ? 2 : 1
-    if t == CodonDeletion
-        first_b_base = codon_moves ? 4 : 3
-    end
-    last_valid_abase = t in (Insertion, CodonInsertion) ? 0 : -1
-
-    pos = mutation.pos
-    # last valid column of A
-    acol = pos + last_valid_abase + 1
-    # first column of B to use
-    bcol = pos + first_b_base
-
     if t in (Deletion, CodonDeletion)
-        n_del = (t == Deletion ? 1 : 3)
-        if codon_moves && acol == (size(A)[2] - n_del)
-            # suffix deletions do not need recomputation
-            return A[end, end-n_del]
-        else
-            # deletions without codon moves do not need recomputation
-            return seq_score_deletion(A, B, acol, bcol)
-        end
+        # nothing to recompute
+        n_to_del = t == Deletion ? 1 : 3
+        acol = mutation.pos
+        bcol = mutation.pos + n_to_del
+        return seq_score_deletion(A, B, acol, bcol)
     end
-
-    # FIXME: ncols may need to be reduced if in last few columns
-    # if so, adjust bcol to be -1 or some other indicator
-
-    # next valid position in sequence after this mutation
-    next_posn =  mutation.pos + (t == CodonDeletion ? 3 : 1)
-    # number of bases changed/inserted
-    n_bases = n_mutation_bases[t]
-    # number of columns that depend on mutation columns
-    # NEXT: something in here is wrong
-    n_after = (codon_moves ? 3 : 0)
-
-    if next_posn + n_after - 1 > length(template)
-        n_after = max(0, length(template) - next_posn + 1)
-    end
-
-    if n_bases == 0 && n_after == 0
-        error("no new columns need to be recomputed.")
-    end
-
-    # handle if n_after will go over the end of the sequence
-    # TODO: should not need to pass ints
-    sub_template = get_sub_template(mutation, template, next_posn, n_after)
-
+    # need to compute new columns
     # TODO: reuse an array for `newcols`
-    nrows, maxcol = size(A)
-    ncols = n_bases + n_after
-    newcols = zeros(Float64, (nrows, ncols))
+    n_new = (t == CodonInsertion? 3 : 1)
+    nrows, ncols = size(A)
+    newcols = zeros(Float64, (nrows, n_new))
 
-    # compute new columns
-    for j in 1:ncols
-        range_col = min(acol + j, maxcol)
-        amin, amax = row_range(A, range_col)
+    # last valid A column
+    acol = mutation.pos + (t == Substitution ? 0 : 1)
+    # new bases
+    sub_template = t == CodonInsertion ? string(mutation.bases...) : string(mutation.base)
+    for j in 1:n_new
+        amin, amax = row_range(A, min(acol + j, ncols))
         for i in amin:amax
             seq_base = i > 1 ? seq[i-1] : 'X'
             x = update_newcols(newcols, A, i, acol + j, acol,
@@ -469,15 +437,106 @@ function seq_score_mutation(mutation::Mutation,
     end
 
     # add up results
+    imin, imax = row_range(A, min(acol + n_new, ncols))
+    Acol = newcols[amin:amax, end]
+
+    bj = mutation.pos + 1
+    Bcol = sparsecol(B, bj)
+    (amin, amax), (bmin, bmax) = equal_ranges((imin, imax),
+                                              row_range(B, bj))
+    asub = sub(Acol, amin:amax)
+    bsub = sub(Bcol, bmin:bmax)
+    score = summax(asub, bsub)
+    if score == -Inf
+        error("failed to compute a valid score")
+    end
+    return score
+end
+
+function seq_score_mutation(mutation::Mutation,
+                            A::BandedArray{Float64}, B::BandedArray{Float64},
+                            template::AbstractString,
+                            seq::AbstractString, log_p::Vector{Float64},
+                            errors::LogErrorModel)
+    codon_moves = (errors.codon_insertion > -Inf ||
+                   errors.codon_deletion > -Inf)
+    if !codon_moves
+        return score_nocodon(mutation, A, B,
+                             template, seq, log_p,
+                             errors)
+    end
+    t = typeof(mutation)
+    # last valid column of A
+    acol_offset = t in (Insertion, CodonInsertion) ? 0 : -1
+    acol = mutation.pos + acol_offset + 1
+
+    # first column of B to use
+    x = (t == Substitution ? 1 : 0)
+    first_bcol = mutation.pos + 1 + x + (t == CodonDeletion ? codon_length : 0)
+    # last column of B to use
+    last_bcol = first_bcol + codon_length - 1
+
+    if t in (Deletion, CodonDeletion)
+        n_del = (t == Deletion ? 1 : codon_length)
+        if acol == (size(A)[2] - n_del)
+            # suffix deletions do not need recomputation
+            return A[end, end - n_del]
+        end
+    end
+
+    # number of bases changed/inserted
+    n_bases = n_mutation_bases[t]
+    # number of columns after recomputed columns to also recompute.
+    n_after = codon_length
+
+    # if we'd go to or past the last column of B, just recompute the
+    # rest of A
+    nrows, ncols = size(A)
+    just_a = last_bcol >= ncols
+    next_posn = mutation.pos + (t == CodonDeletion ? 3 : 1)
+    if just_a
+        # go to end of template
+        n_after = length(template) - next_posn + 1
+    end
+
+    if n_bases == 0 && n_after == 0
+        error("no new columns need to be recomputed.")
+    end
+
+    sub_template = get_sub_template(mutation, template,
+                                    next_posn, n_after)
+
+    # TODO: reuse an array for `newcols`
+    n_new = n_bases + n_after
+    newcols = zeros(Float64, (nrows, n_new))
+
+    # compute new columns
+    for j in 1:n_new
+        range_col = min(acol + j, ncols)
+        amin, amax = row_range(A, range_col)
+        for i in amin:amax
+            seq_base = i > 1 ? seq[i-1] : 'X'
+            x = update_newcols(newcols, A, i, acol + j, acol,
+                               seq_base, sub_template[j],
+                               log_p, errors)
+            newcols[i, j] = x[1]
+        end
+    end
+
+    if just_a
+        return newcols[end, end]
+    end
+
+    # add up results
     best_score = -Inf
     n_to_use = min(ncols, codon_moves ? 3 : 1)
-    for j in 1:n_to_use
-        new_j = ncols - n_to_use + j
-        imin, imax = row_range(A, min(acol + new_j, maxcol))
+    for j in 1:codon_length
+        new_j = n_new - codon_length + j
+        imin, imax = row_range(A, min(acol + j, ncols))
         Acol = newcols[imin:imax, new_j]
-        bj = bcol + j - 1
+        bj = first_bcol + j - 1
         if bj > size(B)[2]
-            score = Acol[end]
+            error("wrong column")
         else
             Bcol = sparsecol(B, bj)
             (amin, amax), (bmin, bmax) = equal_ranges((imin, imax),
@@ -522,11 +581,11 @@ function score_mutation(m::Mutation,
     score = 0.0
     for si in 1:length(sequences)
         score += seq_score_mutation(m, state.As[si], state.Bs[si], state.template,
-                                    sequences[si], log_ps[si], errors, false)
+                                    sequences[si], log_ps[si], errors)
     end
     if use_ref
         score += seq_score_mutation(m, state.A_t, state.B_t, state.template,
-                                    reference, ref_log_p, ref_errors, true)
+                                    reference, ref_log_p, ref_errors)
     end
     return score
 end

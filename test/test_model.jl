@@ -199,6 +199,7 @@ function test_random_mutation(mutation, template_len)
     log_p = Float64[Float64(q) / (-10.0) for q in phreds]
     seq = convert(AbstractString, bioseq)
     bandwidth = max(3 * abs(length(template) - length(seq)), 5)
+
     new_template = Mutations.update_template(template, mutation)
     Anew = Model.forward(new_template, seq, log_p, error_model, bandwidth)
     Bnew = Model.backward(new_template, seq, log_p, error_model, bandwidth)
@@ -208,17 +209,8 @@ function test_random_mutation(mutation, template_len)
     B = Model.backward(template, seq, log_p, error_model, bandwidth)
     test_cols(A, B, codon_moves)
     score = Model.seq_score_mutation(mutation, A, B, template, seq, log_p,
-                                     error_model, codon_moves)
-    aj = mutation.pos + 1
-    bj = mutation.pos + 1
-    Acol = sparsecol(Anew, aj)
-    Bcol = sparsecol(Bnew, bj)
-    (amin, amax), (bmin, bmax) = Quiver2.Model.equal_ranges(row_range(Anew, aj),
-                                                            row_range(Bnew, bj))
-    asub = sub(Acol, amin:amax)
-    bsub = sub(Bcol, bmin:bmax)
+                                     error_model)
     @test_approx_eq score Anew[end, end]
-    # TODO: test that inband values are equal in A and Acols.
 end
 
 function test_random_substitutions()
