@@ -687,7 +687,7 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
              state.stage == scoring_stage) &&
             length(reference) > 0)
             state.A_t = forward(state.template, reference, ref_log_p,
-                                errors, bandwidth)
+                                ref_errors, bandwidth)
         end
     end
     if recompute_Bs
