@@ -893,7 +893,6 @@ function quiver2(template::AbstractString,
                     consensus_ref = state.template
                     state.stage = refinement_stage
                 else
-                    # TODO: decrease indel probability
                     if verbose > 1
                         println(STDERR, "  alignment had single indels but scores already minimized.")
                     end
@@ -952,12 +951,15 @@ function quiver2(template::AbstractString,
         if verbose > 1
             println(STDERR, "  score: $(state.score)")
         end
+        if (state.score < old_score &&
+            stage_iterations[Int(state.stage)] > 0 &&
+            (batch == -1 || batch == length(sequences)))
+             println(STDERR, "  WARNING: not using batches, but score decreased")
+        end
         if ((state.score - old_score) / old_score > batch_threshold &&
-            batch < length(sequences))
+            batch < length(sequences) &&
+            stage_iterations[Int(state.stage)] > 0)
             batch = min(batch + base_batch, length(sequences))
-            if verbose > 1
-                println(STDERR, "  increased batch size to $batch")
-            end
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
             lps = log_ps[indices]
@@ -965,7 +967,7 @@ function quiver2(template::AbstractString,
                        reference, ref_log_p_vec, ref_log_errors,
                        bandwidth, true, true)
             if verbose > 1
-                println(STDERR, "  new score: $(state.score)")
+                println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
             end
 
         end
