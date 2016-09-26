@@ -198,7 +198,7 @@ function test_random_mutation(mutation, template_len)
                                                   log_reported_error_std)
     log_p = Float64[Float64(q) / (-10.0) for q in phreds]
     seq = convert(AbstractString, bioseq)
-    bandwidth = max(5 * abs(length(template) - length(seq)), 10)
+    bandwidth = max(5 * abs(length(template) - length(seq)), 20)
 
     new_template = Mutations.update_template(template, mutation)
     Anew = Model.forward(new_template, seq, log_p, error_model, bandwidth)
