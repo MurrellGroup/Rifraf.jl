@@ -401,6 +401,12 @@ const n_mutation_bases = Dict(Substitution => 1,
                               CodonInsertion => 3,
                               CodonDeletion => 0)
 
+const boffsets = Dict(Substitution => 2,
+                      Insertion => 1,
+                      Deletion => 2,
+                      CodonInsertion => 1,
+                      CodonDeletion => 4)
+
 function score_nocodon(mutation::Mutation,
                        A::BandedArray{Float64}, B::BandedArray{Float64},
                        template::AbstractString,
@@ -471,8 +477,7 @@ function seq_score_mutation(mutation::Mutation,
     acol = mutation.pos + acol_offset + 1
 
     # first column of B to use
-    x = (t == Substitution ? 1 : 0)
-    first_bcol = mutation.pos + 1 + x + (t == CodonDeletion ? codon_length : 0)
+    first_bcol = acol + boffsets[t]
     # last column of B to use
     last_bcol = first_bcol + codon_length - 1
 
