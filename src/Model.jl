@@ -168,11 +168,11 @@ function update(A::BandedArray{Float64},
     result = update_helper(newcols, A, i, j, acol, dp_ins, ins_score, result...)
     result = update_helper(newcols, A, i, j, acol, dp_del, del_score, result...)
     codon_ins_score, codon_del_score = codon_move_scores(i-1, log_p, scores)
-    if scores.codon_insertion > -Inf && i > 3
+    if scores.codon_insertion > -Inf && i > codon_length
         result = update_helper(newcols, A, i, j, acol, dp_codon_ins,
                                codon_ins_score, result...)
     end
-    if scores.codon_deletion > -Inf && j > 3
+    if scores.codon_deletion > -Inf && j > codon_length
         result = update_helper(newcols, A, i, j, acol, dp_codon_del,
                                codon_del_score, result...)
     end
@@ -610,13 +610,13 @@ function only_codon_gaps(s::AbstractString)
         if s[i] == '-'
             cur_gap_len += 1
         else
-            if cur_gap_len % 3 != 0
+            if cur_gap_len % codon_length != 0
                 return false
             end
             cur_gap_len = 0
         end
     end
-    return cur_gap_len % 3 == 0
+    return cur_gap_len % codon_length == 0
 end
 
 
@@ -634,7 +634,7 @@ function no_single_indels(template::AbstractString,
                           ref_log_p::Vector{Float64},
                           ref_scores::Scores,
                           bandwidth::Int)
-    has_right_length = length(template) % 3 == 0
+    has_right_length = length(template) % codon_length == 0
     t_aln, r_aln = align(template, reference, ref_log_p, ref_scores, bandwidth)
     result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
     if result && !has_right_length
