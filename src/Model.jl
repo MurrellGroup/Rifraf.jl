@@ -632,13 +632,13 @@ function moves_to_col_scores(moves::Vector{DPMove},
         del_p = max(cur_log_p, next_log_p)
 
         if move == dp_ins
-            insertions[baseints[s[i]], cj] += cur_log_p
+            insertions[baseints[s[i]], cj] += log_p[i]
         elseif move == dp_del
             deletions[cj] += del_p
         elseif move == dp_codon_ins
-            insertions[baseints[s[i]], cj] += cur_log_p
-            insertions[baseints[s[i-1]], cj] += cur_log_p
-            insertions[baseints[s[i-2]], cj] += cur_log_p
+            insertions[baseints[s[i]], cj] += log_p[i-2]
+            insertions[baseints[s[i-1]], cj] += log_p[i-1]
+            insertions[baseints[s[i-2]], cj] += log_p[i]
         elseif move == dp_codon_del
             deletions[cj:cj-2] += del_p
         end
