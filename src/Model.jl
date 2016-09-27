@@ -771,7 +771,7 @@ function model_surgery(template::AbstractString,
                        reference::ASCIIString,
                        ref_log_p::Vector{Float64},
                        ref_scores::Scores,
-                       bandwidth::Int)
+                       bandwidth::Int, top_n::Int)
     old_template = template
     best_template = template
     best_score = score
@@ -966,6 +966,7 @@ function quiver2(template::AbstractString,
                  ref_log_p::Float64=0.0,
                  ref_scores::Scores=default_ref_scores,
                  surgery::Bool=true,
+                 top_n::Int=6,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
@@ -1064,7 +1065,7 @@ function quiver2(template::AbstractString,
                     new_template, new_score = model_surgery(state.template, state.score,
                                                             seqs, lps, scores,
                                                             reference, ref_log_p_vec,
-                                                            ref_scores, bandwidth)
+                                                            ref_scores, bandwidth, top_n)
                     if new_score > state.score
                         if verbose > 1
                             println(STDERR, "  model surgery successful. after: $new_score)")
@@ -1086,11 +1087,11 @@ function quiver2(template::AbstractString,
             end
         else
             if verbose > 1
-                println(STDERR, "  found $(length(candidates)) candidate proposals.")
+                println(STDERR, "  found $(length(candidates)) candidate")
             end
             chosen_cands = choose_candidates(candidates, min_dist)
             if verbose > 1
-                println(STDERR, "  filtered to $(length(chosen_cands)) candidate proposals")
+                println(STDERR, "  filtered to $(length(chosen_cands)) candidates")
             end
             state.template = apply_proposals(old_template,
                                              Proposal[c.proposal

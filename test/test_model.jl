@@ -429,7 +429,7 @@ function test_align_2()
 end
 
 function test_model_surgery()
-    consensus = "AAACCCTTT"
+    expected = "AAACCCTTT"
     template = "AACCTT"
     seqs = ["AAACCCTT",
             "AAACCTTT",
@@ -444,13 +444,23 @@ function test_model_surgery()
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
     bandwidth = 10
-    top_n
+    top_n = 3
 
     ins, del = Model.surgery_proposals(template, seqs, log_ps,
                                        seq_scores, reference,
                                        ref_log_p, ref_scores,
                                        bandwidth, top_n)
     @test length(del) == 0
+
+    score = Quiver2.Model.score_template(template, seqs, log_ps,
+                                         scores, reference, ref_log_p,
+                                         ref_scores, bandwidth)
+
+    new_template, new_score = Quiver2.Model.model_surgery(template, score,
+                                                          seqs, log_ps, scores,
+                                                          reference, ref_log_p,
+                                                          ref_scores, bandwidth, top_n)
+    @test new_template == expected
 end
 
 srand(1234)
