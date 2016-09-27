@@ -11,11 +11,11 @@ export quiver2, ErrorModel, Scores, normalize, modified_emissions
 
 # initial_stage:
 #   - do not use reference.
-#   - propose mismatches and single indels.
-# frame_correction_stage:
-#   - use reference.
 #   - propose all proposals
-#   - increase reference single indel penalties.
+# frame_correction_stage:
+#   - use reference. (allow codon moves in reference alignment)
+#   - propose all proposals
+#   - try model surgery if converges
 # refinement stage:
 #   - do not use reference
 #   - propose subsitutions only
@@ -95,6 +95,7 @@ const offsets = ([-1, -1],  # sub
                  [-3, 0],   # codon insertion
                  [0, -3])   # codon deletion
 
+const bases = "ACGT-"
 const baseints = Dict('A' => 1,
                       'C' => 2,
                       'G' => 3,
@@ -186,46 +187,7 @@ function update(A::BandedArray{Float64},
 end
 
 
-function backtrace(t::AbstractString, s::AbstractString,
-                   moves::BandedArray{Int},
-                   A::BandedArray{Float64})
-    aligned_t = Char[]
-    aligned_s = Char[]
-    scores = Float64[]
-    i, j = moves.shape
-    while i > 1 || j > 1
-        push!(scores, A[i, j])
-        m = moves[i, j]
-        move = DPMove(m)
-        si = i - 1
-        tj = j - 1
-        if move == dp_match
-            push!(aligned_t, t[tj])
-            push!(aligned_s, s[si])
-        elseif move == dp_ins
-            push!(aligned_t, '-')
-            push!(aligned_s, s[si])
-        elseif move == dp_del
-            push!(aligned_t, t[tj])
-            push!(aligned_s, '-')
-        elseif move == dp_codon_ins
-            append!(aligned_t, ['-', '-', '-'])
-            append!(aligned_s, [s[si], s[si-1], s[si-2]])
-        elseif move == dp_codon_del
-            append!(aligned_t, [t[tj], t[tj-1], t[tj-2]])
-            append!(aligned_s, ['-', '-', '-'])
-        end
-        offset = offsets[m]
-        i += offset[1]
-        j += offset[2]
-    end
-    return join(reverse(aligned_t)), join(reverse(aligned_s)), reverse(scores)
-end
-
-
-"""Does some work as forward_codon, but also keeps track of moves.
-
-Does backtracing to find best alignment.
+"""Does backtracing to find best alignment.
 
 """
 function forward_moves(t::AbstractString, s::AbstractString,
@@ -604,40 +566,264 @@ function getcands(state::State,
 end
 
 
-function only_codon_gaps(s::AbstractString)
-    cur_gap_len = 0
-    for i in 1:length(s)
-        if s[i] == '-'
-            cur_gap_len += 1
-        else
-            if cur_gap_len % codon_length != 0
-                return false
-            end
-            cur_gap_len = 0
-        end
+function backtrace(moves::BandedArray{Int})
+    taken_moves = DPMove[]
+    i, j = moves.shape
+    while i > 1 || j > 1
+        m = moves[i, j]
+        push!(taken_moves, DPMove(m))
+        ii, jj = offsets[m]
+        i += ii
+        j += jj
     end
-    return cur_gap_len % codon_length == 0
+    return reverse(taken_moves)
 end
 
+function moves_to_alignment_strings(moves::Vector{DPMove},
+                                    t::AbstractString, s::AbstractString)
+
+    aligned_t = Char[]
+    aligned_s = Char[]
+    i, j = (0, 0)
+    for move in moves
+        (ii, jj) = offsets[Int(move)]
+        i -= ii
+        j -= jj
+        if move == dp_match
+            push!(aligned_t, t[j])
+            push!(aligned_s, s[i])
+        elseif move == dp_ins
+            push!(aligned_t, '-')
+            push!(aligned_s, s[i])
+        elseif move == dp_del
+            push!(aligned_t, t[j])
+            push!(aligned_s, '-')
+        elseif move == dp_codon_ins
+            append!(aligned_t, ['-', '-', '-'])
+            append!(aligned_s, [s[i], s[i-1], s[i-2]])
+        elseif move == dp_codon_del
+            append!(aligned_t, [t[j], t[j-1], t[j-2]])
+        end
+    end
+    return string(aligned_t...), string(aligned_s...)
+end
+
+function moves_to_col_scores(moves::Vector{DPMove},
+                             t::AbstractString, s::AbstractString,
+                             log_p::Vector{Float64})
+    ncols = length(t) + 1
+    deletions = zeros(Float64, ncols)
+    insertions = zeros(Float64, (4, ncols))
+    i = 0
+    j = 0
+    for move in moves
+        ii, jj = offsets[Int(move)]
+        i -= ii
+        j -= jj
+        cj = j + 1
+
+        # TODO: code duplication
+        cur_log_p = log_p[max(i, 1)]
+        next_log_p = log_p[min(i + 1, length(log_p))]
+
+        start = max(1, i-2)
+        stop = min(i, length(log_p))
+        max_p = start <= stop ? maximum(log_p[start:stop]) : -Inf
+        del_p = max(cur_log_p, next_log_p)
+
+        if move == dp_ins
+            insertions[baseints[s[i]], cj] += cur_log_p
+        elseif move == dp_del
+            deletions[cj] += del_p
+        elseif move == dp_codon_ins
+            insertions[baseints[s[i]], cj] += cur_log_p
+            insertions[baseints[s[i-1]], cj] += cur_log_p
+            insertions[baseints[s[i-2]], cj] += cur_log_p
+        elseif move == dp_codon_del
+            deletions[cj:cj-2] += del_p
+        end
+    end
+    return insertions, deletions
+end
+
+
+function align_moves(t::AbstractString, s::AbstractString,
+                     log_p::Vector{Float64},
+                     scores::Scores,
+                     bandwidth::Int)
+    A, Amoves = forward_moves(t, s, log_p, scores, bandwidth)
+    return backtrace(Amoves)
+end
 
 function align(t::AbstractString, s::AbstractString,
                log_p::Vector{Float64},
                scores::Scores,
                bandwidth::Int)
-    A, moves = forward_moves(t, s, log_p, scores, bandwidth)
-    return backtrace(t, s, moves, A)
+    moves = align_moves(t, s, log_p, scores, bandwidth)
+    return moves_to_alignment_strings(moves, t, s)
+end
+
+function col_scores(t::AbstractString, s::AbstractString,
+                    log_p::Vector{Float64},
+                    scores::Scores,
+                    bandwidth::Int)
+    moves = align_moves(t, s, log_p, scores, bandwidth)
+    return moves_to_col_scores(moves, t, s, log_p)
+end
+
+function surgery_proposals(template::AbstractString,
+                           sequences::Vector{ASCIIString},
+                           log_ps::Vector{Vector{Float64}},
+                           scores::Scores,
+                           reference::ASCIIString,
+                           ref_log_p::Vector{Float64},
+                           ref_scores::Scores,
+                           bandwidth::Int, top_n::Int)
+    ncols = length(template) + 1
+    top_n = min(top_n, ncols)
+    insertions = zeros(Float64, (4, ncols))
+    deletions = zeros(Float64, ncols)
+    for (seq, lp) in zip(sequences, log_ps)
+        inscols, delcols = col_scores(template, seq, lp, scores,
+                                      bandwidth)
+        insertions += inscols
+        deletions += delcols
+    end
+    inscols, delcols = col_scores(template,
+                                  reference, ref_log_p,
+                                  ref_scores, bandwidth)
+    insertions += inscols
+    deletions += delcols
+
+    # push identical indels to end of runs
+    for j in 1:length(template)
+        base = template[j]
+        i = baseints[base]
+        x = insertions[i, j]
+        insertions[i, j] = 0.0
+        insertions[i, j + 1] += x
+
+        if j < length(template)
+            if base == template[j+1]
+                y = deletions[j + 1]
+                deletions[j + 2] += y
+                deletions[j + 1] = 0.0
+            end
+        end
+    end
+
+    top_ins_cols = sortperm(collect(minimum(insertions, 1)))[1:top_n]
+    top_ins_cols = filter(j -> minimum(insertions[:, j]) < 0.0, top_ins_cols)
+    top_bases = [bases[sortperm(insertions[:, j])[1]] for j in top_ins_cols]
+
+    top_del_cols = sortperm(deletions)[1:top_n]
+    top_del_cols = filter(j -> deletions[j] < 0.0, top_del_cols)
+
+    ins_proposals = Proposal[Insertion(j-1, b)
+                             for (j, b) in zip(top_ins_cols, top_bases)]
+    del_proposals = Proposal[Deletion(j-1) for j in top_del_cols]
+    return ins_proposals, del_proposals
+end
+
+function score_template(template::AbstractString,
+                        sequences::Vector{ASCIIString},
+                        log_ps::Vector{Vector{Float64}},
+                        scores::Scores,
+                        reference::ASCIIString,
+                        ref_log_p::Vector{Float64},
+                        ref_scores::Scores,
+                        bandwidth::Int)
+    score = sum([forward(template, s, p, scores, bandwidth)[end, end]
+                 for (s, p) in zip(sequences, log_ps)])
+    score += forward(template, reference, ref_log_p,
+                     ref_scores, bandwidth)[end, end]
+    return score
 end
 
 
-function no_single_indels(template::AbstractString,
-                          reference::AbstractString,
-                          ref_log_p::Vector{Float64},
-                          ref_scores::Scores,
-                          bandwidth::Int)
+function test_template(new_template::AbstractString,
+                       best_template::AbstractString,
+                       best_score::Float64,
+                       sequences::Vector{ASCIIString},
+                       log_ps::Vector{Vector{Float64}},
+                       scores::Scores,
+                       reference::ASCIIString,
+                       ref_log_p::Vector{Float64},
+                       ref_scores::Scores,
+                       bandwidth::Int)
+    new_score = score_template(new_template, sequences, log_ps,
+                               scores, reference, ref_log_p,
+                               ref_scores, bandwidth)
+    if new_score > best_score
+        return new_template, new_score
+    end
+    return best_template, best_score
+end
+
+
+"""explore top moves to other frames not explored by single or codon
+proposals"""
+function model_surgery(template::AbstractString,
+                       score::Float64,
+                       sequences::Vector{ASCIIString},
+                       log_ps::Vector{Vector{Float64}},
+                       scores::Scores,
+                       reference::ASCIIString,
+                       ref_log_p::Vector{Float64},
+                       ref_scores::Scores,
+                       bandwidth::Int)
+    old_template = template
+    best_template = template
+    best_score = score
+    successful = true
+    while successful
+        prev_score = best_score
+        insertions, deletions = surgery_proposals(old_template,
+                                                  sequences, log_ps,
+                                                  scores, reference, ref_log_p,
+                                                  ref_scores, bandwidth, 6)
+        # offsetting insertions and deletions
+        for k in 1:minimum([length(insertions), length(deletions), 2])
+            for proposals in product(subsets(insertions, k), subsets(deletions, k))
+                new_template = apply_proposals(old_template, collect(chain(proposals...)))
+                best_template, best_score = test_template(new_template,
+                                                          best_template,
+                                                          best_score,
+                                                          sequences, log_ps,
+                                                          scores, reference, ref_log_p,
+                                                          ref_scores, bandwidth)
+            end
+        end
+        # double and triple insertions and deletions
+        for collection in (insertions, deletions)
+            for k in 1:min(length(collection), 3)
+                for proposals in subsets(collection, k)
+                    new_template = apply_proposals(old_template, collect(proposals))
+                    best_template, best_score = test_template(new_template,
+                                                              best_template,
+                                                              best_score,
+                                                              sequences, log_ps,
+                                                              scores, reference, ref_log_p,
+                                                              ref_scores, bandwidth)
+                end
+            end
+        end
+        # TODO: codon insertions and deletions
+        successful = (best_score > prev_score)
+    end
+    return best_template, best_score
+end
+
+function has_single_indels(template::AbstractString,
+                           reference::AbstractString,
+                           ref_log_p::Vector{Float64},
+                           ref_scores::Scores,
+                           bandwidth::Int)
     has_right_length = length(template) % codon_length == 0
-    t_aln, r_aln = align(template, reference, ref_log_p, ref_scores, bandwidth)
-    result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
-    if result && !has_right_length
+    moves = align_moves(template, reference, ref_log_p,
+                        ref_scores, bandwidth)
+    result = dp_ins in moves || dp_del in moves
+    if !result && !has_right_length
         error("template length is not a multiple of three")
     end
     return result
@@ -779,7 +965,7 @@ function quiver2(template::AbstractString,
                  reference::AbstractString="",
                  ref_log_p::Float64=0.0,
                  ref_scores::Scores=default_ref_scores,
-                 cooling_rate::Float64=2.0,
+                 surgery::Bool=true,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
@@ -805,9 +991,6 @@ function quiver2(template::AbstractString,
 
     ref_log_p_vec = fill(ref_log_p, length(reference))
 
-    if cooling_rate <= 1
-        error("cooling rate must be > 1")
-    end
     if max_iters < 1
         error("invalid max iters: $max_iters")
     end
@@ -845,6 +1028,7 @@ function quiver2(template::AbstractString,
     consensus_lengths = Int[length(template)]
     consensus_noref = ""
     consensus_ref = ""
+    consensus_surgery = ""
 
     stage_iterations = zeros(Int, Int(typemax(Stage)))
     for i in 1:max_iters
@@ -872,15 +1056,28 @@ function quiver2(template::AbstractString,
                 end
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
-                if no_single_indels(state.template, reference, ref_log_p_vec, ref_scores, bandwidth)
-                    consensus_ref = state.template
-                    state.stage = refinement_stage
-                else
+                consensus_ref = state.template
+                if surgery
                     if verbose > 1
-                        println(STDERR, "  alignment had single indels but scores already minimized.")
+                        println(STDERR, "  trying model surgery. before: $(state.score)")
                     end
-                    state.stage = refinement_stage
+                    new_template, new_score = model_surgery(state.template, state.score,
+                                                            seqs, lps, scores,
+                                                            reference, ref_log_p_vec,
+                                                            ref_scores, bandwidth)
+                    if new_score > state.score
+                        if verbose > 1
+                            println(STDERR, "  model surgery successful. after: $new_score)")
+                        end
+                        state.template = new_template
+                    else
+                        if verbose > 1
+                            println(STDERR, "  model surgery not successful")
+                        end
+                    end
+                    consensus_surgery = state.template
                 end
+                state.stage = refinement_stage
             elseif state.stage == refinement_stage
                 state.converged = true
                 break
@@ -968,6 +1165,7 @@ function quiver2(template::AbstractString,
                 "ref_scores" => ref_scores,
                 "consensus_noref" => consensus_noref,
                 "consensus_ref" => consensus_ref,
+                "consensus_surgery" => consensus_surgery,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
                 )

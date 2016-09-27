@@ -265,21 +265,24 @@ function test_no_single_indels()
     reference = "AAAGGGTTT"
     ref_log_p = fill(log10(0.01), length(reference))
     bandwidth = 6
+    local_errors = Model.normalize(Model.ErrorModel(2.0, 0.5, 0.5, 1.0, 1.0))
+    local_scores = Model.Scores(local_errors)
+
 
     template = "AAACCCGGGTTT"
-    @test Quiver2.Model.no_single_indels(template, reference,
-                                         ref_log_p, scores,
-                                         bandwidth)
+    @test !Quiver2.Model.has_single_indels(template, reference,
+                                           ref_log_p, local_scores,
+                                           bandwidth)
 
     template = "AAACCCGGGTTTT"
-    @test !Quiver2.Model.no_single_indels(template, reference,
-                                          ref_log_p, scores,
+    @test Quiver2.Model.has_single_indels(template, reference,
+                                          ref_log_p, local_scores,
                                           bandwidth)
 
     template = "AAA"
-    @test Quiver2.Model.no_single_indels(template, reference,
-                                         ref_log_p, scores,
-                                         bandwidth)
+    @test !Quiver2.Model.has_single_indels(template, reference,
+                                           ref_log_p, local_scores,
+                                           bandwidth)
 end
 
 function test_quiver2()
@@ -400,13 +403,54 @@ function test_indel_probs()
 end
 
 function test_align()
-    template = "ATA"
-    seq = "AA"
+    template = "ATAA"
+    seq = "AAA"
     bandwidth = 10
-    log_p = [-2.0, -3.0]
-    t, s = Model.align(template, seq, log_p, scores, bandwidth)
-    @test t == "ATA"
-    @test s == "A-A"
+    log_p = [-2.0, -3.0, -3.0]
+    moves = Model.align_moves(template, seq, log_p, scores, bandwidth)
+    t, s = Model.moves_to_alignment_strings(moves, template, seq)
+    ins, del = Model.moves_to_col_scores(moves, template, seq, log_p)
+    @test t == "ATAA"
+    @test s == "A-AA"
+    @test minimum(ins) == 0.0
+    @test del == [0.0, 0.0, -2.0, 0.0, 0.0]
+end
+
+function test_align_2()
+    template = "AACCTT"
+    seq = "AAACCCTT"
+    bandwidth = 10
+    log_p = fill(log10(0.1), length(seq))
+    moves = Model.align_moves(template, seq, log_p, scores, bandwidth)
+    t, s = Model.moves_to_alignment_strings(moves, template, seq)
+    ins, del = Model.moves_to_col_scores(moves, template, seq, log_p)
+    @test t[end-1:end] == "TT"
+    @test minimum(del) == 0.0
+end
+
+function test_model_surgery()
+    consensus = "AAACCCTTT"
+    template = "AACCTT"
+    seqs = ["AAACCCTT",
+            "AAACCTTT",
+            "AACCCTTT",
+            "AAACCCTTT",
+            ]
+    log_ps = Vector{Float64}[fill(log10(0.1), length(s)) for s in seqs]
+    seq_errors = Model.ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
+    seq_scores = Model.Scores(seq_errors)
+    reference = "AAACCCGGGTTT"
+    ref_log_p = fill(log10(0.3), length(reference))
+    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
+    ref_scores = Model.Scores(ref_errors)
+    bandwidth = 10
+    top_n
+
+    ins, del = Model.surgery_proposals(template, seqs, log_ps,
+                                       seq_scores, reference,
+                                       ref_log_p, ref_scores,
+                                       bandwidth, top_n)
+    @test length(del) == 0
 end
 
 srand(1234)
@@ -432,3 +476,5 @@ test_base_probs()
 test_ins_probs()
 test_indel_probs()
 test_align()
+test_align_2()
+test_model_surgery()
