@@ -7,7 +7,7 @@ using Quiver2.BandedArrays
 using Quiver2.Proposals
 using Quiver2.Util
 
-export quiver2, ErrorModel, LogErrorModel
+export quiver2, ErrorModel, Scores, normalize, modified_emissions
 
 # initial_stage:
 #   - do not use reference.
@@ -32,49 +32,46 @@ immutable ErrorModel
     deletion::Float64
     codon_insertion::Float64
     codon_deletion::Float64
-
-    function ErrorModel(mismatch, insertion, deletion,
-                        codon_insertion, codon_deletion)
-        args = Float64[mismatch,
-                       insertion,
-                       deletion,
-                       codon_insertion,
-                       codon_deletion]
-        m, i, d, ci, cd = normalize(args)
-        return new(m, i, d, ci, cd)
-    end
 end
 
-immutable LogErrorModel
+function normalize(errors::ErrorModel)
+    args = Float64[errors.mismatch,
+                   errors.insertion,
+                   errors.deletion,
+                   errors.codon_insertion,
+                   errors.codon_deletion]
+    m, i, d, ci, cd = Util.normalize(args)
+    return ErrorModel(m, i, d, ci, cd)
+end
+
+immutable Scores
     mismatch::Float64
     insertion::Float64
     deletion::Float64
     codon_insertion::Float64
     codon_deletion::Float64
-
-    function LogErrorModel(mismatch, insertion, deletion,
-                           codon_insertion, codon_deletion)
-        args = Float64[mismatch,
-                       insertion,
-                       deletion,
-                       codon_insertion,
-                       codon_deletion]
-        m, i, d, ci, cd = log10(normalize(args))
-        return new(m, i, d, ci, cd)
-    end
-
-    function LogErrorModel(model::ErrorModel)
-        args = Float64[model.mismatch,
-                       model.insertion,
-                       model.deletion,
-                       model.codon_insertion,
-                       model.codon_deletion]
-        m, i, d, ci, cd = log10(args)
-        return new(m, i, d, ci, cd)
-    end
 end
 
-const default_ref_errors = ErrorModel(10.0, 0.1, 0.1, 1.0, 1.0)
+function Scores(errors::ErrorModel)
+    args = Float64[errors.mismatch,
+                   errors.insertion,
+                   errors.deletion,
+                   errors.codon_insertion,
+                   errors.codon_deletion]
+    m, i, d, ci, cd = log10(Util.normalize(args))
+    return Scores(m, i, d, ci, cd)
+end
+
+function modified_emissions(scores::Scores)
+    return Scores(scores.mismatch + log10(1.0 / 3.0),
+                  scores.insertion + log10(0.25),
+                  scores.deletion,
+                  scores.codon_insertion + log10(0.25^3),
+                  scores.codon_deletion)
+end
+
+const default_ref_errors = normalize(ErrorModel(10.0, 0.1, 0.1, 1.0, 1.0))
+const default_ref_scores = modified_emissions(Scores(default_ref_errors))
 
 # just to avoid magical constants in code
 const codon_length = 3
@@ -111,26 +108,26 @@ function move_scores(t_base::Char,
                      s_base::Char,
                      seq_i::Int,
                      log_p::Vector{Float64},
-                     errors::LogErrorModel)
+                     scores::Scores)
     cur_log_p = log_p[max(seq_i, 1)]
     next_log_p = log_p[min(seq_i + 1, length(log_p))]
-    match_score = s_base == t_base ? inv_log10(cur_log_p) : cur_log_p + errors.mismatch
-    ins_score = cur_log_p + errors.insertion
-    del_score = max(cur_log_p, next_log_p) + errors.deletion
+    match_score = s_base == t_base ? inv_log10(cur_log_p) : cur_log_p + scores.mismatch
+    ins_score = cur_log_p + scores.insertion
+    del_score = max(cur_log_p, next_log_p) + scores.deletion
     return match_score, ins_score, del_score
 end
 
 function codon_move_scores(seq_i::Int,
                            log_p::Vector{Float64},
-                           errors::LogErrorModel)
+                           scores::Scores)
     # we're moving INTO seq_i. so need previous three
     start = max(1, seq_i-2)
     stop = min(seq_i, length(log_p))
     max_p = start <= stop ? maximum(log_p[start:stop]) : -Inf
-    codon_ins_score =  max_p + errors.codon_insertion
+    codon_ins_score =  max_p + scores.codon_insertion
     cur_log_p = log_p[max(seq_i, 1)]
     next_log_p = log_p[min(seq_i + 1, length(log_p))]
-    codon_del_score = max(cur_log_p, next_log_p) + errors.codon_deletion
+    codon_del_score = max(cur_log_p, next_log_p) + scores.codon_deletion
     return codon_ins_score, codon_del_score
 end
 
@@ -162,20 +159,20 @@ function update(A::BandedArray{Float64},
                 i::Int, j::Int,
                 s_base::Char, t_base::Char,
                 log_p::Vector{Float64},
-                errors::LogErrorModel;
+                scores::Scores;
                 newcols::Array{Float64, 2}=empty_array,
                 acol=-1)
     result = (-Inf, dp_none)
-    match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, errors)
+    match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, scores)
     result = update_helper(newcols, A, i, j, acol, dp_match, match_score, result...)
     result = update_helper(newcols, A, i, j, acol, dp_ins, ins_score, result...)
     result = update_helper(newcols, A, i, j, acol, dp_del, del_score, result...)
-    codon_ins_score, codon_del_score = codon_move_scores(i-1, log_p, errors)
-    if errors.codon_insertion > -Inf && i > 3
+    codon_ins_score, codon_del_score = codon_move_scores(i-1, log_p, scores)
+    if scores.codon_insertion > -Inf && i > 3
         result = update_helper(newcols, A, i, j, acol, dp_codon_ins,
                                codon_ins_score, result...)
     end
-    if errors.codon_deletion > -Inf && j > 3
+    if scores.codon_deletion > -Inf && j > 3
         result = update_helper(newcols, A, i, j, acol, dp_codon_del,
                                codon_del_score, result...)
     end
@@ -233,7 +230,7 @@ Does backtracing to find best alignment.
 """
 function forward_moves(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
-                       errors::LogErrorModel,
+                       scores::Scores,
                        bandwidth::Int)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
@@ -251,7 +248,7 @@ function forward_moves(t::AbstractString, s::AbstractString,
             sbase = i > 1 ? s[i-1] : 'X'
             tbase = j > 1 ? t[j-1] : 'X'
             x = update(result, i, j, sbase, tbase,
-                       log_p, errors)
+                       log_p, scores)
             result[i, j] = x[1]
             moves[i, j] = x[2]
         end
@@ -265,7 +262,7 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
 function forward(t::AbstractString, s::AbstractString,
-                 log_p::Vector{Float64}, errors::LogErrorModel,
+                 log_p::Vector{Float64}, scores::Scores,
                  bandwidth::Int)
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
     nrows, ncols = size(result)
@@ -278,7 +275,7 @@ function forward(t::AbstractString, s::AbstractString,
             sbase = i > 1 ? s[i-1] : 'X'
             tbase = j > 1 ? t[j-1] : 'X'
             x = update(result, i, j, sbase, tbase,
-                       log_p, errors)
+                       log_p, scores)
             result[i, j] = x[1]
         end
     end
@@ -292,10 +289,10 @@ B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 """
 function backward(t::AbstractString, s::AbstractString,
                   log_p::Vector{Float64},
-                  errors::LogErrorModel,
+                  scores::Scores,
                   bandwidth::Int)
     result = forward(reverse(t), reverse(s), reverse(log_p),
-                     errors, bandwidth)
+                     scores, bandwidth)
     return flip(result)
 end
 
@@ -368,7 +365,7 @@ function score_nocodon(proposal::Proposal,
                        A::BandedArray{Float64}, B::BandedArray{Float64},
                        template::AbstractString,
                        seq::AbstractString, log_p::Vector{Float64},
-                       errors::LogErrorModel)
+                       scores::Scores)
     target_col = proposal.pos + 1
     t = typeof(proposal)
     if t in (Deletion, CodonDeletion)
@@ -394,7 +391,7 @@ function score_nocodon(proposal::Proposal,
             seq_base = i > 1 ? seq[i-1] : 'X'
             x = update(A, i, acol + j,
                        seq_base, sub_template[j],
-                       log_p, errors;
+                       log_p, scores;
                        newcols=newcols, acol=acol)
             newcols[i, j] = x[1]
         end
@@ -421,13 +418,13 @@ function seq_score_proposal(proposal::Proposal,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
                             template::AbstractString,
                             seq::AbstractString, log_p::Vector{Float64},
-                            errors::LogErrorModel)
-    codon_moves = (errors.codon_insertion > -Inf ||
-                   errors.codon_deletion > -Inf)
+                            scores::Scores)
+    codon_moves = (scores.codon_insertion > -Inf ||
+                   scores.codon_deletion > -Inf)
     if !codon_moves
         return score_nocodon(proposal, A, B,
                              template, seq, log_p,
-                             errors)
+                             scores)
     end
     t = typeof(proposal)
     # last valid column of A
@@ -481,7 +478,7 @@ function seq_score_proposal(proposal::Proposal,
             seq_base = i > 1 ? seq[i-1] : 'X'
             x = update(A, i, acol + j,
                        seq_base, sub_template[j],
-                       log_p, errors;
+                       log_p, scores;
                        newcols=newcols, acol=acol)
             newcols[i, j] = x[1]
         end
@@ -536,19 +533,19 @@ function score_proposal(m::Proposal,
                         state::State,
                         sequences::Vector{ASCIIString},
                         log_ps::Vector{Vector{Float64}},
-                        errors::LogErrorModel,
+                        scores::Scores,
                         use_ref::Bool,
                         reference::ASCIIString,
                         ref_log_p::Vector{Float64},
-                        ref_errors::LogErrorModel)
+                        ref_scores::Scores)
     score = 0.0
     for si in 1:length(sequences)
         score += seq_score_proposal(m, state.As[si], state.Bs[si], state.template,
-                                    sequences[si], log_ps[si], errors)
+                                    sequences[si], log_ps[si], scores)
     end
     if use_ref
         score += seq_score_proposal(m, state.A_t, state.B_t, state.template,
-                                    reference, ref_log_p, ref_errors)
+                                    reference, ref_log_p, ref_scores)
     end
     return score
 end
@@ -588,17 +585,17 @@ end
 function getcands(state::State,
                   sequences::Vector{ASCIIString},
                   log_ps::Vector{Vector{Float64}},
-                  errors::LogErrorModel,
+                  scores::Scores,
                   reference::ASCIIString,
                   ref_log_p::Vector{Float64},
-                  ref_errors::LogErrorModel)
+                  ref_scores::Scores)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
     for m in candstask(state.stage, state.template)
         score = score_proposal(m, state,
-                               sequences, log_ps, errors,
+                               sequences, log_ps, scores,
                                use_ref,
-                               reference, ref_log_p, ref_errors)
+                               reference, ref_log_p, ref_scores)
         if score > state.score && !isapprox(score, state.score)
             push!(candidates, CandProposal(m, score))
         end
@@ -625,9 +622,9 @@ end
 
 function align(t::AbstractString, s::AbstractString,
                log_p::Vector{Float64},
-               errors::LogErrorModel,
+               scores::Scores,
                bandwidth::Int)
-    A, moves = forward_moves(t, s, log_p, errors, bandwidth)
+    A, moves = forward_moves(t, s, log_p, scores, bandwidth)
     return backtrace(t, s, moves, A)
 end
 
@@ -635,10 +632,10 @@ end
 function no_single_indels(template::AbstractString,
                           reference::AbstractString,
                           ref_log_p::Vector{Float64},
-                          ref_errors::LogErrorModel,
+                          ref_scores::Scores,
                           bandwidth::Int)
     has_right_length = length(template) % 3 == 0
-    t_aln, r_aln = align(template, reference, ref_log_p, ref_errors, bandwidth)
+    t_aln, r_aln = align(template, reference, ref_log_p, ref_scores, bandwidth)
     result = only_codon_gaps(t_aln) && only_codon_gaps(r_aln)
     if result && !has_right_length
         error("template length is not a multiple of three")
@@ -647,10 +644,10 @@ function no_single_indels(template::AbstractString,
 end
 
 
-function initial_state(template, seqs, lps, errors, bandwidth)
-    As = [forward(template, s, p, errors, bandwidth)
+function initial_state(template, seqs, lps, scores, bandwidth)
+    As = [forward(template, s, p, scores, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    Bs = [backward(template, s, p, errors, bandwidth)
+    Bs = [backward(template, s, p, scores, bandwidth)
           for (s, p) in zip(seqs, lps)]
     score = sum([A[end, end] for A in As])
 
@@ -663,29 +660,29 @@ end
 
 function recompute!(state::State, seqs::Vector{ASCIIString},
                     lps::Vector{Vector{Float64}},
-                    errors::LogErrorModel,
+                    scores::Scores,
                     reference::AbstractString,
                     ref_log_p::Vector{Float64},
-                    ref_errors::LogErrorModel,
+                    ref_scores::Scores,
                     bandwidth::Int, recompute_As::Bool, recompute_Bs::Bool)
     if recompute_As
-        state.As = [forward(state.template, s, p, errors, bandwidth)
+        state.As = [forward(state.template, s, p, scores, bandwidth)
                     for (s, p) in zip(seqs, lps)]
         if ((state.stage == frame_correction_stage ||
              state.stage == scoring_stage) &&
             length(reference) > 0)
             state.A_t = forward(state.template, reference, ref_log_p,
-                                ref_errors, bandwidth)
+                                ref_scores, bandwidth)
         end
     end
     if recompute_Bs
-        state.Bs = [backward(state.template, s, p, errors, bandwidth)
+        state.Bs = [backward(state.template, s, p, scores, bandwidth)
                     for (s, p) in zip(seqs, lps)]
         if ((state.stage == frame_correction_stage ||
              state.stage == scoring_stage) &&
             length(reference) > 0)
             state.B_t = backward(state.template, reference, ref_log_p,
-                                 ref_errors, bandwidth)
+                                 ref_scores, bandwidth)
         end
     end
     state.score = sum([A[end, end] for A in state.As])
@@ -711,10 +708,10 @@ end
 function estimate_probs(state::State,
                         sequences::Vector{ASCIIString},
                         log_ps::Vector{Vector{Float64}},
-                        errors::LogErrorModel,
+                        scores::Scores,
                         reference::AbstractString,
                         ref_log_p::Vector{Float64},
-                        ref_errors::LogErrorModel)
+                        ref_scores::Scores)
     # `position_scores[i]` gives the following log probabilities
     # for `template[i]`: [A, C, G, T, -]
     position_scores = zeros(length(state.template), 5) + state.score
@@ -729,9 +726,9 @@ function estimate_probs(state::State,
     use_ref = (length(reference) > 0)
     for m in candstask(scoring_stage, state.template)
         score = score_proposal(m, state,
-                               sequences, log_ps, errors,
+                               sequences, log_ps, scores,
                                use_ref,
-                               reference, ref_log_p, ref_errors)
+                               reference, ref_log_p, ref_scores)
         if typeof(m) == Substitution
             position_scores[m.pos, baseints[m.base]] = score
         elseif typeof(m) == Deletion
@@ -778,22 +775,20 @@ end
 function quiver2(template::AbstractString,
                  sequences::Vector{ASCIIString},
                  phreds::Vector{Vector{Int8}},
-                 errors::ErrorModel;
+                 scores::Scores;
                  reference::AbstractString="",
                  ref_log_p::Float64=0.0,
-                 ref_errors::ErrorModel=default_ref_errors,
+                 ref_scores::Scores=default_ref_scores,
                  cooling_rate::Float64=2.0,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
-    if errors.codon_insertion > 0.0 || errors.codon_deletion > 0.0
+    if scores.codon_insertion > -Inf || scores.codon_deletion > -Inf
         error("error model cannot allow codon indels")
     end
-    if errors.insertion == 0.0 || errors.deletion == 0.0
-        error("indel probabilities cannot be 0.0")
+    if scores.insertion == -Inf || scores.deletion == -Inf
+        error("indel scores must be allowed")
     end
-    log_errors = LogErrorModel(errors)
-    ref_log_errors = LogErrorModel(ref_errors)
 
     if bandwidth < 0
         error("bandwidth cannot be negative: $bandwidth")
@@ -803,8 +798,8 @@ function quiver2(template::AbstractString,
         if (ref_log_p == -Inf || ref_log_p >= 0.0)
             error("ref_log_p=$ref_log_p but should be less than 0.0")
         end
-        if ref_log_errors.insertion == -Inf || ref_log_errors.deletion == -Inf
-            error("ref indel probabilities cannot be 0.0")
+        if ref_scores.insertion == -Inf || ref_scores.deletion == -Inf
+            error("ref indel scores cannot be -Inf")
         end
     end
 
@@ -840,7 +835,7 @@ function quiver2(template::AbstractString,
     if verbose > 1
         println(STDERR, "computing initial alignments")
     end
-    state = initial_state(template, seqs, lps, log_errors, bandwidth)
+    state = initial_state(template, seqs, lps, scores, bandwidth)
     empty_ref = length(reference) == 0
 
     if verbose > 1
@@ -860,8 +855,8 @@ function quiver2(template::AbstractString,
             println(STDERR, "iteration $i : $(state.stage)")
         end
 
-        candidates = getcands(state, seqs, lps, log_errors,
-                              reference, ref_log_p_vec, ref_log_errors)
+        candidates = getcands(state, seqs, lps, scores,
+                              reference, ref_log_p_vec, ref_scores)
 
         recompute_As = true
         if length(candidates) == 0
@@ -877,7 +872,7 @@ function quiver2(template::AbstractString,
                 end
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
-                if no_single_indels(state.template, reference, ref_log_p_vec, ref_log_errors, bandwidth)
+                if no_single_indels(state.template, reference, ref_log_p_vec, ref_scores, bandwidth)
                     consensus_ref = state.template
                     state.stage = refinement_stage
                 else
@@ -903,8 +898,8 @@ function quiver2(template::AbstractString,
             state.template = apply_proposals(old_template,
                                              Proposal[c.proposal
                                                       for c in chosen_cands])
-            recompute!(state, seqs, lps, log_errors,
-                       reference, ref_log_p_vec, ref_log_errors,
+            recompute!(state, seqs, lps, scores,
+                       reference, ref_log_p_vec, ref_scores,
                        bandwidth, true, false)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
@@ -933,8 +928,8 @@ function quiver2(template::AbstractString,
             lps = log_ps[indices]
             recompute_As = true
         end
-        recompute!(state, seqs, lps, log_errors,
-                   reference, ref_log_p_vec, ref_log_errors,
+        recompute!(state, seqs, lps, scores,
+                   reference, ref_log_p_vec, ref_scores,
                    bandwidth, recompute_As, true)
         if verbose > 1
             println(STDERR, "  score: $(state.score)")
@@ -951,8 +946,8 @@ function quiver2(template::AbstractString,
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
             lps = log_ps[indices]
-            recompute!(state, seqs, lps, log_errors,
-                       reference, ref_log_p_vec, ref_log_errors,
+            recompute!(state, seqs, lps, scores,
+                       reference, ref_log_p_vec, ref_scores,
                        bandwidth, true, true)
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
@@ -970,7 +965,7 @@ function quiver2(template::AbstractString,
     info = Dict("converged" => state.converged,
                 "stage_iterations" => stage_iterations,
                 "exceeded_max_iterations" => exceeded,
-                "ref_error_model" => ref_errors,
+                "ref_scores" => ref_scores,
                 "consensus_noref" => consensus_noref,
                 "consensus_ref" => consensus_ref,
                 "n_proposals" => transpose(hcat(n_proposals...)),
@@ -978,11 +973,11 @@ function quiver2(template::AbstractString,
                 )
 
     # FIXME: recomputing for all sequences may be costly
-    recompute!(state, sequences, log_ps, log_errors,
-               reference, ref_log_p_vec, ref_log_errors,
+    recompute!(state, sequences, log_ps, scores,
+               reference, ref_log_p_vec, ref_scores,
                bandwidth, true, true)
-    base_probs, ins_probs = estimate_probs(state, sequences, log_ps, log_errors,
-                                           reference, ref_log_p_vec, ref_log_errors)
+    base_probs, ins_probs = estimate_probs(state, sequences, log_ps, scores,
+                                           reference, ref_log_p_vec, ref_scores)
     return state.template, base_probs, ins_probs, info
 end
 
@@ -993,14 +988,14 @@ Alternate quiver2() using BioJulia types.
 function quiver2(template::DNASequence,
                  sequences::Vector{DNASequence},
                  phreds::Vector{Vector{Int8}},
-                 errors::ErrorModel;
+                 scores::Scores;
                  reference::DNASequence=DNASequence(""),
                  kwargs...)
     new_reference = convert(ASCIIString, reference)
     new_template = convert(ASCIIString, template)
     new_sequences = ASCIIString[convert(ASCIIString, s) for s in sequences]
     (result, base_probs,
-     insertion_probs, info) = quiver2(new_template, new_sequences, phreds, errors;
+     insertion_probs, info) = quiver2(new_template, new_sequences, phreds, scores;
                                       reference=new_reference,
                                       kwargs...)
     info["consensus_noref"] = DNASequence(info["consensus_noref"])

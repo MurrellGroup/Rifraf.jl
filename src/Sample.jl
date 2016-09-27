@@ -8,7 +8,9 @@ using Quiver2.QIO
 using Quiver2.Util
 using Quiver2.Model
 
-export rbase, mutate_base, random_codon, random_seq, sample_from_reference, sample_from_template, sample, BetaAlt
+export rbase, mutate_base, random_codon
+export random_seq, sample_from_reference
+export sample_from_template, sample, BetaAlt
 
 function rbase()
     bases = [DNA_A, DNA_C, DNA_G, DNA_T]
@@ -108,6 +110,7 @@ end
 function hmm_sample(sequence::DNASequence,
                     error_p::Vector{Float64},
                     errors::ErrorModel)
+    errors = Model.normalize(errors)
     codon = errors.codon_insertion > 0.0 || errors.codon_deletion > 0.0
     if codon && (errors.insertion > 0.0 || errors.deletion > 0.0)
         error("codon and non-codon indels are not both allowed")
@@ -182,6 +185,7 @@ end
 function sample_from_reference(reference::DNASequence,
                                error_rate::Float64,
                                errors::ErrorModel)
+    errors = Model.normalize(errors)
     if errors.insertion > 0.0 || errors.deletion > 0.0
         error("non-codon indels are not allowed in template")
     end
@@ -205,6 +209,7 @@ function sample_from_template(template::DNASequence,
                               errors::ErrorModel,
                               log_actual_error_std::Float64,
                               log_reported_error_std::Float64)
+    errors = Model.normalize(errors)
     if errors.codon_insertion > 0.0 || errors.codon_deletion > 0.0
         error("codon indels are not allowed in sequences")
     end
