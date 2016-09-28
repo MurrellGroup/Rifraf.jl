@@ -209,8 +209,9 @@ function test_random_proposal(proposal, template_len)
     A = Model.forward(template, seq, log_p, local_scores, bandwidth)
     B = Model.backward(template, seq, log_p, local_scores, bandwidth)
     test_cols(A, B, codon_moves)
+    newcols = zeros(Float64, size(A)[1], 6)
     score = Model.seq_score_proposal(proposal, A, B, template, seq, log_p,
-                                     local_scores)
+                                     local_scores, newcols)
     @test_approx_eq score Anew[end, end]
 end
 

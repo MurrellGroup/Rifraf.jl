@@ -336,7 +336,8 @@ function score_nocodon(proposal::Proposal,
                        A::BandedArray{Float64}, B::BandedArray{Float64},
                        template::AbstractString,
                        seq::AbstractString, log_p::Vector{Float64},
-                       scores::Scores)
+                       scores::Scores,
+                       newcols::Array{Float64, 2})
     target_col = proposal.pos + 1
     t = typeof(proposal)
     if t in (Deletion, CodonDeletion)
@@ -350,7 +351,6 @@ function score_nocodon(proposal::Proposal,
     # TODO: reuse an array for `newcols`
     n_new = (t == CodonInsertion? 3 : 1)
     nrows, ncols = size(A)
-    newcols = zeros(Float64, (nrows, n_new))
 
     # last valid A column
     acol = proposal.pos + (t == Substitution ? 0 : 1)
@@ -370,7 +370,7 @@ function score_nocodon(proposal::Proposal,
 
     # add up results
     imin, imax = row_range(A, min(acol + n_new, ncols))
-    Acol = newcols[amin:amax, end]
+    Acol = newcols[amin:amax, n_new]
 
     bj = proposal.pos + 1
     Bcol = sparsecol(B, bj)
@@ -389,13 +389,14 @@ function seq_score_proposal(proposal::Proposal,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
                             template::AbstractString,
                             seq::AbstractString, log_p::Vector{Float64},
-                            scores::Scores)
+                            scores::Scores,
+                            newcols::Array{Float64, 2})
     codon_moves = (scores.codon_insertion > -Inf ||
                    scores.codon_deletion > -Inf)
     if !codon_moves
         return score_nocodon(proposal, A, B,
                              template, seq, log_p,
-                             scores)
+                             scores, newcols)
     end
     t = typeof(proposal)
     # last valid column of A
@@ -439,7 +440,6 @@ function seq_score_proposal(proposal::Proposal,
 
     # TODO: reuse an array for `newcols`
     n_new = n_bases + n_after
-    newcols = zeros(Float64, (nrows, n_new))
 
     # compute new columns
     for j in 1:n_new
@@ -456,7 +456,7 @@ function seq_score_proposal(proposal::Proposal,
     end
 
     if just_a
-        return newcols[end, end]
+        return newcols[nrows, n_new]
     end
 
     # add up results
@@ -508,15 +508,16 @@ function score_proposal(m::Proposal,
                         use_ref::Bool,
                         reference::ASCIIString,
                         ref_log_p::Vector{Float64},
-                        ref_scores::Scores)
+                        ref_scores::Scores,
+                        newcols::Array{Float64, 2})
     score = 0.0
     for si in 1:length(sequences)
         score += seq_score_proposal(m, state.As[si], state.Bs[si], state.template,
-                                    sequences[si], log_ps[si], scores)
+                                    sequences[si], log_ps[si], scores, newcols)
     end
     if use_ref
         score += seq_score_proposal(m, state.A_t, state.B_t, state.template,
-                                    reference, ref_log_p, ref_scores)
+                                    reference, ref_log_p, ref_scores, newcols)
     end
     return score
 end
@@ -579,13 +580,19 @@ function getcands(state::State,
                   ref_scores::Scores)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
+
+    maxlen = maximum([length(s) for s in sequences])
+    nrows = max(maxlen, length(reference)) + 1
+    newcols = zeros(Float64, (nrows, 6))
+
     for m in candstask(state.stage, state.template,
                        sequences, log_ps, state.Amoves,
                        scores, state.bandwidth)
         score = score_proposal(m, state,
                                sequences, log_ps, scores,
                                use_ref,
-                               reference, ref_log_p, ref_scores)
+                               reference, ref_log_p, ref_scores,
+                               newcols)
         if score > state.score && !isapprox(score, state.score)
             push!(candidates, CandProposal(m, score))
         end
@@ -865,13 +872,18 @@ function estimate_probs(state::State,
     # - do not penalize mismatches
     # - use max indel penalty
 
+    maxlen = maximum([length(s) for s in sequences])
+    nrows = max(maxlen, length(reference)) + 1
+    newcols = zeros(Float64, (nrows, 6))
+
     use_ref = (length(reference) > 0)
     for m in candstask(scoring_stage, state.template,
                        sequences, log_ps, state.Amoves, scores, state.bandwidth)
         score = score_proposal(m, state,
                                sequences, log_ps, scores,
                                use_ref,
-                               reference, ref_log_p, ref_scores)
+                               reference, ref_log_p, ref_scores,
+                               newcols)
         if typeof(m) == Substitution
             position_scores[m.pos, baseints[m.base]] = score
         elseif typeof(m) == Deletion
