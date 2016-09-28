@@ -522,7 +522,11 @@ end
 
 
 function candstask(stage::Stage,
-                   template::AbstractString)
+                   template::AbstractString,
+                   sequences::Vector{ASCIIString},
+                   log_ps::Vector{Vector{Float64}},
+                   scores::Scores,
+                   bandwidth::Int)
     len = length(template)
     function _it()
         # substitutions
@@ -547,6 +551,17 @@ function candstask(stage::Stage,
                 produce(Deletion(j))
             end
         end
+        if stage == frame_correction_stage
+            # codon deletions
+            for j in 1:(len-2)
+                produce(CodonDeletion(j))
+            end
+            # codon insertions
+            for proposal in best_codons(template, sequences, log_ps,
+                                       scores, bandwidth)
+                produce(proposal)
+            end
+        end
     end
     Task(_it)
 end
@@ -558,10 +573,12 @@ function getcands(state::State,
                   scores::Scores,
                   reference::ASCIIString,
                   ref_log_p::Vector{Float64},
-                  ref_scores::Scores)
+                  ref_scores::Scores,
+                  bandwidth::Int)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
-    for m in candstask(state.stage, state.template)
+    for m in candstask(state.stage, state.template,
+                       sequences, log_ps, scores, bandwidth)
         score = score_proposal(m, state,
                                sequences, log_ps, scores,
                                use_ref,
@@ -589,7 +606,6 @@ end
 
 function moves_to_alignment_strings(moves::Vector{DPMove},
                                     t::AbstractString, s::AbstractString)
-
     aligned_t = Char[]
     aligned_s = Char[]
     i, j = (0, 0)
@@ -655,6 +671,30 @@ function moves_to_col_scores(moves::Vector{DPMove},
 end
 
 
+function moves_to_indices(moves::Vector{DPMove},
+                          t::AbstractString, s::AbstractString)
+    tlen = length(t)
+    slen = length(s)
+    result = zeros(Int, tlen + 1)
+    i, j = (1, 1)
+    last_j = 0
+    for move in moves
+        if j > last_j
+            result[j] = i
+            last_j = j
+        end
+        (ii, jj) = offsets[Int(move)]
+        i -= ii
+        j -= jj
+    end
+    if j > last_j
+        result[j] = i
+        last_j = j
+    end
+    return result
+end
+
+
 function align_moves(t::AbstractString, s::AbstractString,
                      log_p::Vector{Float64},
                      scores::Scores,
@@ -678,6 +718,46 @@ function col_scores(t::AbstractString, s::AbstractString,
     moves = align_moves(t, s, log_p, scores, bandwidth)
     return moves_to_col_scores(moves, t, s, log_p)
 end
+
+function best_codons(template::AbstractString,
+                     sequences::Vector{ASCIIString},
+                     log_ps::Vector{Vector{Float64}},
+                     scores::Scores,
+                     bandwidth::Int)
+    # FIXME: reuse existing A matrices from recomputation
+    moves = [align_moves(template, s, p, scores, bandwidth)
+             for (s, p) in zip(sequences, log_ps)]
+    indices = [moves_to_indices(m, template, s)
+               for (m, s) in zip(moves, sequences)]
+    results = []
+    for j in 1:(length(template) + 1)
+        cands = [Dict{Char, Float64}('A' => 0.0,
+                                     'C' => 0.0,
+                                     'G' => 0.0,
+                                     'T' => 0.0)
+                 for i in 1:3]
+        for (seq, log_p, index) in zip(sequences, log_ps, indices)
+            i = index[j]
+            seq_i = i - 1
+            if seq_i < length(seq) - 2
+                for ii in 1:3
+                    cands[ii][seq[seq_i + ii]] += log_p[seq_i + ii]
+                end
+            end
+        end
+        if maximum([minimum(values(c)) for c in cands]) == 0.0
+            break
+        end
+        codon = [base_consensus(c) for c in cands]
+        push!(results, CodonInsertion(j - 1, tuple(codon...)))
+    end
+    return results
+end
+
+function base_consensus(d::Dict{Char, Float64})
+    return minimum([(v, k) for (k, v) in d])[2]
+end
+
 
 function surgery_proposals(template::AbstractString,
                            sequences::Vector{ASCIIString},
@@ -905,7 +985,8 @@ function estimate_probs(state::State,
                         scores::Scores,
                         reference::AbstractString,
                         ref_log_p::Vector{Float64},
-                        ref_scores::Scores)
+                        ref_scores::Scores,
+                        bandwidth::Int)
     # `position_scores[i]` gives the following log probabilities
     # for `template[i]`: [A, C, G, T, -]
     position_scores = zeros(length(state.template), 5) + state.score
@@ -918,7 +999,8 @@ function estimate_probs(state::State,
     # - use max indel penalty
 
     use_ref = (length(reference) > 0)
-    for m in candstask(scoring_stage, state.template)
+    for m in candstask(scoring_stage, state.template,
+                       sequences, log_ps, scores, bandwidth)
         score = score_proposal(m, state,
                                sequences, log_ps, scores,
                                use_ref,
@@ -1069,7 +1151,8 @@ function quiver2(template::AbstractString,
         end
 
         candidates = getcands(state, seqs, lps, scores,
-                              reference, ref_log_p_vec, ref_scores)
+                              reference, ref_log_p_vec, ref_scores,
+                              bandwidth)
 
         recompute_As = true
         if length(candidates) == 0
@@ -1104,7 +1187,7 @@ function quiver2(template::AbstractString,
                                         ref_scores.codon_insertion,
                                         ref_scores.codon_deletion)
                     if verbose > 1
-                        println(STDERR, "  alignment to reference had single indels. decreasing score.")
+                        println(STDERR, "  alignment to reference had single indels. increasing penalty.")
                     end
                 end
                 # consensus_ref = state.template
@@ -1185,7 +1268,8 @@ function quiver2(template::AbstractString,
         if (state.score < old_score &&
             stage_iterations[Int(state.stage)] > 0 &&
             (batch == -1 || batch == length(sequences)))
-             println(STDERR, "  WARNING: not using batches, but score decreased")
+             println(STDERR, "  WARNING: not using batches, but score decreased.")
+             println(STDERR, "  (ignore this warning if indel penalties increased)")
         end
         if ((state.score - old_score) / old_score > batch_threshold &&
             batch < length(sequences) &&
@@ -1226,7 +1310,8 @@ function quiver2(template::AbstractString,
                reference, ref_log_p_vec, ref_scores,
                bandwidth, true, true)
     base_probs, ins_probs = estimate_probs(state, sequences, log_ps, scores,
-                                           reference, ref_log_p_vec, ref_scores)
+                                           reference, ref_log_p_vec, ref_scores,
+                                           bandwidth)
     return state.template, base_probs, ins_probs, info
 end
 

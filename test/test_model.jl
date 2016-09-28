@@ -463,6 +463,24 @@ function test_model_surgery()
     @test new_template == expected
 end
 
+function test_best_codons()
+    template = "AAAGGG"
+    sequences = ["AAATCCGGG"
+                 "AAACTCGGG"
+                 "AAACCTGGG"]
+    log_ps = Vector{Float64}[fill(log10(0.1), length(s))
+                             for s in sequences]
+    bandwidth = 10
+    codons = Quiver2.Model.best_codons(template, sequences, log_ps,
+                                       scores, bandwidth)
+    expected = "AAACCCGGG"
+    println(codons)
+    for j in 1:length(codons)
+        @test string(codons[j].bases...) == expected[j:j+2]
+    end
+end
+
+
 srand(1234)
 
 test_get_sub_template()
@@ -488,3 +506,4 @@ test_indel_probs()
 test_align()
 test_align_2()
 test_model_surgery()
+test_best_codons()
