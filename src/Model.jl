@@ -90,6 +90,7 @@ type State
     A_t::BandedArray{Float64}
     B_t::BandedArray{Float64}
     As::Vector{BandedArray{Float64}}
+    Amoves::Vector{BandedArray{Int}}
     Bs::Vector{BandedArray{Float64}}
     stage::Stage
     converged::Bool
@@ -525,6 +526,7 @@ function candstask(stage::Stage,
                    template::AbstractString,
                    sequences::Vector{ASCIIString},
                    log_ps::Vector{Vector{Float64}},
+                   Amoves::Vector{BandedArray{Int}},
                    scores::Scores,
                    bandwidth::Int)
     len = length(template)
@@ -558,7 +560,8 @@ function candstask(stage::Stage,
             end
             # codon insertions
             for proposal in best_codons(template, sequences, log_ps,
-                                       scores, bandwidth)
+                                        scores, bandwidth,
+                                        Amoves=Amoves)
                 produce(proposal)
             end
         end
@@ -578,7 +581,8 @@ function getcands(state::State,
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
     for m in candstask(state.stage, state.template,
-                       sequences, log_ps, scores, bandwidth)
+                       sequences, log_ps, state.Amoves,
+                       scores, bandwidth)
         score = score_proposal(m, state,
                                sequences, log_ps, scores,
                                use_ref,
@@ -723,12 +727,17 @@ function best_codons(template::AbstractString,
                      sequences::Vector{ASCIIString},
                      log_ps::Vector{Vector{Float64}},
                      scores::Scores,
-                     bandwidth::Int)
-    # FIXME: reuse existing A matrices from recomputation
-    moves = [align_moves(template, s, p, scores, bandwidth)
-             for (s, p) in zip(sequences, log_ps)]
+                     bandwidth::Int;
+                     Amoves::Vector{BandedArray{Int}}=Vector{BandedArray}[])
+    if length(Amoves) == length(sequences)
+        moves = [backtrace(Am) for Am in Amoves]
+    else
+        moves = [align_moves(template, s, p, scores, bandwidth)
+                 for (s, p) in zip(sequences, log_ps)]
+    end
     indices = [moves_to_indices(m, template, s)
                for (m, s) in zip(moves, sequences)]
+
     results = []
     for j in 1:(length(template) + 1)
         cands = [Dict{Char, Float64}('A' => 0.0,
@@ -928,7 +937,10 @@ function initial_state(template, seqs, lps, scores, bandwidth)
     A_t = BandedArray(Float64, (1, 1), 1)
     B_t = BandedArray(Float64, (1, 1), 1)
 
-    return State(score, template, A_t, B_t, As, Bs, initial_stage, false)
+    Amoves = BandedArray{Int}[]
+
+    return State(score, template, A_t, B_t, As, Amoves,
+                 Bs, initial_stage, false)
 end
 
 
@@ -940,8 +952,18 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
                     ref_scores::Scores,
                     bandwidth::Int, recompute_As::Bool, recompute_Bs::Bool)
     if recompute_As
-        state.As = [forward(state.template, s, p, scores, bandwidth)
-                    for (s, p) in zip(seqs, lps)]
+        if state.stage == frame_correction_stage
+            state.As = BandedArray{Float64}[]
+            state.Amoves = BandedArray{Int}[]
+            for (s, p) in zip(seqs, lps)
+                As, Amoves = forward_moves(state.template, s, p, scores, bandwidth)
+                push!(state.As, As)
+                push!(state.Amoves, Amoves)
+            end
+        else
+            state.As = [forward(state.template, s, p, scores, bandwidth)
+                        for (s, p) in zip(seqs, lps)]
+        end
         if ((state.stage == frame_correction_stage ||
              state.stage == scoring_stage) &&
             length(reference) > 0)
@@ -1000,7 +1022,7 @@ function estimate_probs(state::State,
 
     use_ref = (length(reference) > 0)
     for m in candstask(scoring_stage, state.template,
-                       sequences, log_ps, scores, bandwidth)
+                       sequences, log_ps, state.Amoves, scores, bandwidth)
         score = score_proposal(m, state,
                                sequences, log_ps, scores,
                                use_ref,
@@ -1234,8 +1256,9 @@ function quiver2(template::AbstractString,
                        bandwidth, true, false)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
-            if length(chosen_cands) > 1 && (state.score < chosen_cands[1].score
-                                            || isapprox(state.score, chosen_cands[1].score))
+            if length(chosen_cands) > 1 &&
+                (state.score < chosen_cands[1].score ||
+                 isapprox(state.score, chosen_cands[1].score))
                 if verbose > 1
                     println(STDERR, "  rejecting multiple candidates in favor of best")
                 end
@@ -1264,12 +1287,12 @@ function quiver2(template::AbstractString,
                    bandwidth, recompute_As, true)
         if verbose > 1
             println(STDERR, "  score: $(state.score)")
-        end
-        if (state.score < old_score &&
-            stage_iterations[Int(state.stage)] > 0 &&
-            (batch == -1 || batch == length(sequences)))
-             println(STDERR, "  WARNING: not using batches, but score decreased.")
-             println(STDERR, "  (ignore this warning if indel penalties increased)")
+            if (state.score < old_score &&
+                stage_iterations[Int(state.stage)] > 0 &&
+                (batch == -1 || batch == length(sequences)))
+                println(STDERR, "  WARNING: not using batches, but score decreased.")
+                println(STDERR, "  (ignore this warning if indel penalties increased)")
+            end
         end
         if ((state.score - old_score) / old_score > batch_threshold &&
             batch < length(sequences) &&
