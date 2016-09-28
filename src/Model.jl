@@ -93,6 +93,7 @@ type State
     Bs::Vector{BandedArray{Float64}}
     stage::Stage
     converged::Bool
+    bandwidth::Int
 end
 
 @enum DPMove dp_none=0 dp_match=1 dp_ins=2 dp_del=3 dp_codon_ins=4 dp_codon_del=5
@@ -575,13 +576,12 @@ function getcands(state::State,
                   scores::Scores,
                   reference::ASCIIString,
                   ref_log_p::Vector{Float64},
-                  ref_scores::Scores,
-                  bandwidth::Int)
+                  ref_scores::Scores)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
     for m in candstask(state.stage, state.template,
                        sequences, log_ps, state.Amoves,
-                       scores, bandwidth)
+                       scores, state.bandwidth)
         score = score_proposal(m, state,
                                sequences, log_ps, scores,
                                use_ref,
@@ -605,6 +605,33 @@ function backtrace(moves::BandedArray{Int})
         j += jj
     end
     return reverse(taken_moves)
+end
+
+function band_tolerance(Amoves::BandedArray{Int})
+    nrows, ncols = size(Amoves)
+    dist = nrows
+    i, j = nrows, ncols
+    while i > 1 || j > 1
+        start, stop = row_range(Amoves, j)
+        if start > 1
+            dist = min(dist, abs(i - start))
+        end
+        if stop < nrows
+            dist = min(dist, abs(i - stop))
+        end
+        m = Amoves[i, j]
+        ii, jj = offsets[m]
+        i += ii
+        j += jj
+    end
+    start, stop = row_range(Amoves, j)
+    if start > 1
+        dist = min(dist, abs(i - start))
+    end
+    if stop < nrows
+        dist = min(dist, abs(i - stop))
+    end
+    return dist
 end
 
 function moves_to_alignment_strings(moves::Vector{DPMove},
@@ -737,7 +764,8 @@ function has_single_indels(template::AbstractString,
 end
 
 
-function initial_state(template, seqs, lps, scores, bandwidth)
+function initial_state(template, seqs, lps, scores,
+                       bandwidth)
     As = [forward(template, s, p, scores, bandwidth)
           for (s, p) in zip(seqs, lps)]
     Bs = [backward(template, s, p, scores, bandwidth)
@@ -750,7 +778,7 @@ function initial_state(template, seqs, lps, scores, bandwidth)
     Amoves = BandedArray{Int}[]
 
     return State(score, template, A_t, B_t, As, Amoves,
-                 Bs, initial_stage, false)
+                 Bs, initial_stage, false, bandwidth)
 end
 
 
@@ -760,35 +788,43 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
                     reference::AbstractString,
                     ref_log_p::Vector{Float64},
                     ref_scores::Scores,
-                    bandwidth::Int, recompute_As::Bool, recompute_Bs::Bool)
+                    bandwidth_delta::Int,
+                    recompute_As::Bool, recompute_Bs::Bool,
+                    verbose::Int)
+    tolerance = 0
     if recompute_As
-        if state.stage == frame_correction_stage
+        while tolerance < codon_length
             state.As = BandedArray{Float64}[]
             state.Amoves = BandedArray{Int}[]
             for (s, p) in zip(seqs, lps)
-                As, Amoves = forward_moves(state.template, s, p, scores, bandwidth)
+                As, Amoves = forward_moves(state.template, s, p, scores, state.bandwidth)
                 push!(state.As, As)
                 push!(state.Amoves, Amoves)
             end
-        else
-            state.As = [forward(state.template, s, p, scores, bandwidth)
-                        for (s, p) in zip(seqs, lps)]
-        end
-        if ((state.stage == frame_correction_stage ||
-             state.stage == scoring_stage) &&
-            length(reference) > 0)
-            state.A_t = forward(state.template, reference, ref_log_p,
-                                ref_scores, bandwidth)
+            tolerance = minimum([band_tolerance(Am) for Am in state.Amoves])
+            if ((state.stage == frame_correction_stage ||
+                 state.stage == scoring_stage) &&
+                length(reference) > 0)
+                state.A_t, Amoves_t = forward_moves(state.template, reference, ref_log_p,
+                                                    ref_scores, state.bandwidth)
+                tolerance = min(tolerance, band_tolerance(Amoves_t))
+            end
+            if tolerance < codon_length
+                state.bandwidth += bandwidth_delta
+                if verbose > 1
+                    println("NEW BANDWIDTH: $(state.bandwidth)")
+                end
+            end
         end
     end
     if recompute_Bs
-        state.Bs = [backward(state.template, s, p, scores, bandwidth)
+        state.Bs = [backward(state.template, s, p, scores, state.bandwidth)
                     for (s, p) in zip(seqs, lps)]
         if ((state.stage == frame_correction_stage ||
              state.stage == scoring_stage) &&
             length(reference) > 0)
             state.B_t = backward(state.template, reference, ref_log_p,
-                                 ref_scores, bandwidth)
+                                 ref_scores, state.bandwidth)
         end
     end
     state.score = sum([A[end, end] for A in state.As])
@@ -817,8 +853,7 @@ function estimate_probs(state::State,
                         scores::Scores,
                         reference::AbstractString,
                         ref_log_p::Vector{Float64},
-                        ref_scores::Scores,
-                        bandwidth::Int)
+                        ref_scores::Scores)
     # `position_scores[i]` gives the following log probabilities
     # for `template[i]`: [A, C, G, T, -]
     position_scores = zeros(length(state.template), 5) + state.score
@@ -832,7 +867,7 @@ function estimate_probs(state::State,
 
     use_ref = (length(reference) > 0)
     for m in candstask(scoring_stage, state.template,
-                       sequences, log_ps, state.Amoves, scores, bandwidth)
+                       sequences, log_ps, state.Amoves, scores, state.bandwidth)
         score = score_proposal(m, state,
                                sequences, log_ps, scores,
                                use_ref,
@@ -890,7 +925,8 @@ function quiver2(template::AbstractString,
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
                  top_n::Int=6,
-                 bandwidth::Int=10, min_dist::Int=9,
+                 bandwidth::Int=10, bandwidth_delta::Int=5,
+                 min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
     if (scores.mismatch >= 0.0 || scores.mismatch == -Inf ||
@@ -988,8 +1024,7 @@ function quiver2(template::AbstractString,
         penalties_increased = false
 
         candidates = getcands(state, seqs, lps, scores,
-                              reference, ref_log_p_vec, ref_scores,
-                              bandwidth)
+                              reference, ref_log_p_vec, ref_scores)
 
         recompute_As = true
         if length(candidates) == 0
@@ -1047,7 +1082,7 @@ function quiver2(template::AbstractString,
                                                       for c in chosen_cands])
             recompute!(state, seqs, lps, scores,
                        reference, ref_log_p_vec, ref_scores,
-                       bandwidth, true, false)
+                       bandwidth_delta, true, false, verbose)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
             if length(chosen_cands) > 1 &&
@@ -1078,7 +1113,7 @@ function quiver2(template::AbstractString,
         end
         recompute!(state, seqs, lps, scores,
                    reference, ref_log_p_vec, ref_scores,
-                   bandwidth, recompute_As, true)
+                   bandwidth_delta, recompute_As, true, verbose)
         if verbose > 1
             println(STDERR, "  score: $(state.score) ($(state.stage))")
         end
@@ -1087,7 +1122,10 @@ function quiver2(template::AbstractString,
             !penalties_increased &&
             batch == length(sequences))
             if verbose > 1
-                println(STDERR, "  WARNING: not using batches, but score decreased")
+                # caused by bandwidth being too small.
+                # this should not usually happen, because bandwidth
+                # should be increased before this.
+                println(STDERR, "  WARNING: not using batches, but score decreased.")
             end
         end
         if ((state.score - old_score) / old_score > batch_threshold &&
@@ -1099,7 +1137,7 @@ function quiver2(template::AbstractString,
             lps = log_ps[indices]
             recompute!(state, seqs, lps, scores,
                        reference, ref_log_p_vec, ref_scores,
-                       bandwidth, true, true)
+                       bandwidth_delta, true, true, verbose)
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
             end
@@ -1125,10 +1163,9 @@ function quiver2(template::AbstractString,
     # FIXME: recomputing for all sequences may be costly
     recompute!(state, sequences, log_ps, scores,
                reference, ref_log_p_vec, ref_scores,
-               bandwidth, true, true)
+               bandwidth_delta, true, true, verbose)
     base_probs, ins_probs = estimate_probs(state, sequences, log_ps, scores,
-                                           reference, ref_log_p_vec, ref_scores,
-                                           bandwidth)
+                                           reference, ref_log_p_vec, ref_scores)
     return state.template, base_probs, ins_probs, info
 end
 

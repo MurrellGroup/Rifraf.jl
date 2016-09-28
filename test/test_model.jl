@@ -327,7 +327,7 @@ function test_quiver2()
                                              reference=reference,
                                              ref_log_p=log10(template_error_rate),
                                              ref_scores=ref_scores,
-                                             bandwidth=3, min_dist=9, batch=5,
+                                             bandwidth=10, min_dist=9, batch=5,
                                              max_iters=100)
         if length(result) % 3 != 0
             n_out_frame += 1
@@ -356,10 +356,10 @@ function test_base_probs()
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0]]
-    bandwidth = 3
+    bandwidth = 5
     state = Quiver2.Model.initial_state(template, seqs, lps, scores, bandwidth)
     base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, scores,
-                                             "", Float64[], scores, bandwidth)
+                                             "", Float64[], scores)
     @test base[1, 2] > 0.9
     del_probs = base[:, end]
     @test del_probs[1] < 1e-9
@@ -372,13 +372,13 @@ function test_ins_probs()
     seqs = ["CGTAT",
             "CGTAT",
             "CGTAT"]
-    bandwidth = 3
+    bandwidth = 5
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     state = Quiver2.Model.initial_state(template, seqs, lps, scores, bandwidth)
     base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, scores,
-                                             "", Float64[], scores, bandwidth)
+                                             "", Float64[], scores)
     @test maximum(ins[1, :]) < 1e-9
     @test ins[3, 4] > 0.9
 end
@@ -388,13 +388,13 @@ function test_indel_probs()
     seqs = ["CGTAT",
             "CGTAT",
             "CGTAT"]
-    bandwidth = 3
+    bandwidth = 5
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     state = Quiver2.Model.initial_state(template, seqs, lps, scores, bandwidth)
     base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, scores,
-                                             "", Float64[], scores, bandwidth)
+                                             "", Float64[], scores)
     probs = Quiver2.Model.estimate_indel_probs(base, ins)
     @test probs[1] == probs[4]
     @test probs[1] < 0.5
