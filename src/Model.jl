@@ -15,7 +15,6 @@ export quiver2, ErrorModel, Scores, normalize, modified_emissions
 # frame_correction_stage:
 #   - use reference. (allow codon moves in reference alignment)
 #   - propose all proposals
-#   - try model surgery if converges
 # refinement stage:
 #   - do not use reference
 #   - propose subsitutions only
@@ -636,44 +635,6 @@ function moves_to_alignment_strings(moves::Vector{DPMove},
     return string(aligned_t...), string(aligned_s...)
 end
 
-function moves_to_col_scores(moves::Vector{DPMove},
-                             t::AbstractString, s::AbstractString,
-                             log_p::Vector{Float64})
-    ncols = length(t) + 1
-    deletions = zeros(Float64, ncols)
-    insertions = zeros(Float64, (4, ncols))
-    i = 0
-    j = 0
-    for move in moves
-        ii, jj = offsets[Int(move)]
-        i -= ii
-        j -= jj
-        cj = j + 1
-
-        # TODO: code duplication
-        cur_log_p = log_p[max(i, 1)]
-        next_log_p = log_p[min(i + 1, length(log_p))]
-
-        start = max(1, i-2)
-        stop = min(i, length(log_p))
-        max_p = start <= stop ? maximum(log_p[start:stop]) : -Inf
-        del_p = max(cur_log_p, next_log_p)
-
-        if move == dp_ins
-            insertions[baseints[s[i]], cj] += log_p[i]
-        elseif move == dp_del
-            deletions[cj] += del_p
-        elseif move == dp_codon_ins
-            insertions[baseints[s[i]], cj] += log_p[i-2]
-            insertions[baseints[s[i-1]], cj] += log_p[i-1]
-            insertions[baseints[s[i-2]], cj] += log_p[i]
-        elseif move == dp_codon_del
-            deletions[cj:cj-2] += del_p
-        end
-    end
-    return insertions, deletions
-end
-
 
 function moves_to_indices(moves::Vector{DPMove},
                           t::AbstractString, s::AbstractString)
@@ -715,20 +676,12 @@ function align(t::AbstractString, s::AbstractString,
     return moves_to_alignment_strings(moves, t, s)
 end
 
-function col_scores(t::AbstractString, s::AbstractString,
-                    log_p::Vector{Float64},
-                    scores::Scores,
-                    bandwidth::Int)
-    moves = align_moves(t, s, log_p, scores, bandwidth)
-    return moves_to_col_scores(moves, t, s, log_p)
-end
-
 function best_codons(template::AbstractString,
                      sequences::Vector{ASCIIString},
                      log_ps::Vector{Vector{Float64}},
                      scores::Scores,
                      bandwidth::Int;
-                     Amoves::Vector{BandedArray{Int}}=Vector{BandedArray}[])
+                     Amoves::Vector{BandedArray{Int}}=BandedArray{Int}[])
     if length(Amoves) == length(sequences)
         moves = [backtrace(Am) for Am in Amoves]
     else
@@ -767,149 +720,6 @@ function base_consensus(d::Dict{Char, Float64})
     return minimum([(v, k) for (k, v) in d])[2]
 end
 
-
-function surgery_proposals(template::AbstractString,
-                           sequences::Vector{ASCIIString},
-                           log_ps::Vector{Vector{Float64}},
-                           scores::Scores,
-                           reference::ASCIIString,
-                           ref_log_p::Vector{Float64},
-                           ref_scores::Scores,
-                           bandwidth::Int, top_n::Int)
-    ncols = length(template) + 1
-    top_n = min(top_n, ncols)
-    insertions = zeros(Float64, (4, ncols))
-    deletions = zeros(Float64, ncols)
-    for (seq, lp) in zip(sequences, log_ps)
-        inscols, delcols = col_scores(template, seq, lp, scores,
-                                      bandwidth)
-        insertions += inscols
-        deletions += delcols
-    end
-    inscols, delcols = col_scores(template,
-                                  reference, ref_log_p,
-                                  ref_scores, bandwidth)
-    insertions += inscols
-    deletions += delcols
-
-    # push identical indels to end of runs
-    for j in 1:length(template)
-        base = template[j]
-        i = baseints[base]
-        x = insertions[i, j]
-        insertions[i, j] = 0.0
-        insertions[i, j + 1] += x
-
-        if j < length(template)
-            if base == template[j+1]
-                y = deletions[j + 1]
-                deletions[j + 2] += y
-                deletions[j + 1] = 0.0
-            end
-        end
-    end
-
-    top_ins_cols = sortperm(collect(minimum(insertions, 1)))[1:top_n]
-    top_ins_cols = filter(j -> minimum(insertions[:, j]) < 0.0, top_ins_cols)
-    top_bases = [bases[sortperm(insertions[:, j])[1]] for j in top_ins_cols]
-
-    top_del_cols = sortperm(deletions)[1:top_n]
-    top_del_cols = filter(j -> deletions[j] < 0.0, top_del_cols)
-
-    ins_proposals = Proposal[Insertion(j-1, b)
-                             for (j, b) in zip(top_ins_cols, top_bases)]
-    del_proposals = Proposal[Deletion(j-1) for j in top_del_cols]
-    return ins_proposals, del_proposals
-end
-
-function score_template(template::AbstractString,
-                        sequences::Vector{ASCIIString},
-                        log_ps::Vector{Vector{Float64}},
-                        scores::Scores,
-                        reference::ASCIIString,
-                        ref_log_p::Vector{Float64},
-                        ref_scores::Scores,
-                        bandwidth::Int)
-    score = sum([forward(template, s, p, scores, bandwidth)[end, end]
-                 for (s, p) in zip(sequences, log_ps)])
-    score += forward(template, reference, ref_log_p,
-                     ref_scores, bandwidth)[end, end]
-    return score
-end
-
-
-function test_template(new_template::AbstractString,
-                       best_template::AbstractString,
-                       best_score::Float64,
-                       sequences::Vector{ASCIIString},
-                       log_ps::Vector{Vector{Float64}},
-                       scores::Scores,
-                       reference::ASCIIString,
-                       ref_log_p::Vector{Float64},
-                       ref_scores::Scores,
-                       bandwidth::Int)
-    new_score = score_template(new_template, sequences, log_ps,
-                               scores, reference, ref_log_p,
-                               ref_scores, bandwidth)
-    if new_score > best_score
-        return new_template, new_score
-    end
-    return best_template, best_score
-end
-
-
-"""explore top moves to other frames not explored by single or codon
-proposals"""
-function model_surgery(template::AbstractString,
-                       score::Float64,
-                       sequences::Vector{ASCIIString},
-                       log_ps::Vector{Vector{Float64}},
-                       scores::Scores,
-                       reference::ASCIIString,
-                       ref_log_p::Vector{Float64},
-                       ref_scores::Scores,
-                       bandwidth::Int, top_n::Int)
-    old_template = template
-    best_template = template
-    best_score = score
-    successful = true
-    while successful
-        prev_score = best_score
-        insertions, deletions = surgery_proposals(old_template,
-                                                  sequences, log_ps,
-                                                  scores, reference, ref_log_p,
-                                                  ref_scores, bandwidth, 6)
-        # offsetting insertions and deletions
-        for k in 1:minimum([length(insertions), length(deletions), 2])
-            for proposals in product(subsets(insertions, k), subsets(deletions, k))
-                new_template = apply_proposals(old_template, collect(chain(proposals...)))
-                best_template, best_score = test_template(new_template,
-                                                          best_template,
-                                                          best_score,
-                                                          sequences, log_ps,
-                                                          scores, reference, ref_log_p,
-                                                          ref_scores, bandwidth)
-            end
-        end
-        # double and triple insertions and deletions
-        for collection in (insertions, deletions)
-            for k in 1:min(length(collection), 3)
-                for proposals in subsets(collection, k)
-                    new_template = apply_proposals(old_template, collect(proposals))
-                    best_template, best_score = test_template(new_template,
-                                                              best_template,
-                                                              best_score,
-                                                              sequences, log_ps,
-                                                              scores, reference, ref_log_p,
-                                                              ref_scores, bandwidth)
-                end
-            end
-        end
-        # TODO: codon insertions and deletions
-        successful = (best_score > prev_score)
-    end
-    return best_template, best_score
-end
 
 function has_single_indels(template::AbstractString,
                            reference::AbstractString,
@@ -1079,8 +889,7 @@ function quiver2(template::AbstractString,
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=log10(0.1),
                  min_ref_indel_score::Float64=log10(1e-9),
-                 # surgery::Bool=false,
-                 # top_n::Int=6,
+                 top_n::Int=6,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
@@ -1161,7 +970,6 @@ function quiver2(template::AbstractString,
     consensus_lengths = Int[length(template)]
     consensus_noref = ""
     consensus_ref = ""
-    # consensus_surgery = ""
 
     stage_iterations = zeros(Int, Int(typemax(Stage)))
     for i in 1:max_iters
@@ -1198,6 +1006,7 @@ function quiver2(template::AbstractString,
                     if verbose > 1
                         println(STDERR, "  alignment had single indels but indel scores already minimized.")
                     end
+                    consensus_ref = state.template
                     state.stage = refinement_stage
                 else
                     # TODO: this is not probabilistically correct
@@ -1212,28 +1021,6 @@ function quiver2(template::AbstractString,
                         println(STDERR, "  alignment to reference had single indels. increasing penalty.")
                     end
                 end
-                # consensus_ref = state.template
-                # if surgery
-                #     if verbose > 1
-                #         println(STDERR, "  trying model surgery. before: $(state.score)")
-                #     end
-                #     new_template, new_score = model_surgery(state.template, state.score,
-                #                                             seqs, lps, scores,
-                #                                             reference, ref_log_p_vec,
-                #                                             ref_scores, bandwidth, top_n)
-                #     if new_score > state.score
-                #         if verbose > 1
-                #             println(STDERR, "  model surgery successful. after: $new_score)")
-                #         end
-                #         state.template = new_template
-                #     else
-                #         if verbose > 1
-                #             println(STDERR, "  model surgery not successful")
-                #         end
-                #     end
-                #     consensus_surgery = state.template
-                # end
-                # state.stage = refinement_stage
             elseif state.stage == refinement_stage
                 state.converged = true
                 break
@@ -1323,7 +1110,6 @@ function quiver2(template::AbstractString,
                 "ref_scores" => ref_scores,
                 "consensus_noref" => consensus_noref,
                 "consensus_ref" => consensus_ref,
-                # "consensus_surgery" => consensus_surgery,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
                 )

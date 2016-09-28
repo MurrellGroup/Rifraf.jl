@@ -359,7 +359,7 @@ function test_base_probs()
     bandwidth = 3
     state = Quiver2.Model.initial_state(template, seqs, lps, scores, bandwidth)
     base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, scores,
-                                             "", Float64[], scores)
+                                             "", Float64[], scores, bandwidth)
     @test base[1, 2] > 0.9
     del_probs = base[:, end]
     @test del_probs[1] < 1e-9
@@ -378,7 +378,7 @@ function test_ins_probs()
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     state = Quiver2.Model.initial_state(template, seqs, lps, scores, bandwidth)
     base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, scores,
-                                             "", Float64[], scores)
+                                             "", Float64[], scores, bandwidth)
     @test maximum(ins[1, :]) < 1e-9
     @test ins[3, 4] > 0.9
 end
@@ -394,7 +394,7 @@ function test_indel_probs()
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     state = Quiver2.Model.initial_state(template, seqs, lps, scores, bandwidth)
     base, ins = Quiver2.Model.estimate_probs(state, seqs, lps, scores,
-                                             "", Float64[], scores)
+                                             "", Float64[], scores, bandwidth)
     probs = Quiver2.Model.estimate_indel_probs(base, ins)
     @test probs[1] == probs[4]
     @test probs[1] < 0.5
@@ -409,11 +409,8 @@ function test_align()
     log_p = [-2.0, -3.0, -3.0]
     moves = Model.align_moves(template, seq, log_p, scores, bandwidth)
     t, s = Model.moves_to_alignment_strings(moves, template, seq)
-    ins, del = Model.moves_to_col_scores(moves, template, seq, log_p)
     @test t == "ATAA"
     @test s == "A-AA"
-    @test minimum(ins) == 0.0
-    @test del == [0.0, 0.0, -2.0, 0.0, 0.0]
 end
 
 function test_align_2()
@@ -423,44 +420,7 @@ function test_align_2()
     log_p = fill(log10(0.1), length(seq))
     moves = Model.align_moves(template, seq, log_p, scores, bandwidth)
     t, s = Model.moves_to_alignment_strings(moves, template, seq)
-    ins, del = Model.moves_to_col_scores(moves, template, seq, log_p)
     @test t[end-1:end] == "TT"
-    @test minimum(del) == 0.0
-end
-
-function test_model_surgery()
-    expected = "AAACCCTTT"
-    template = "AACCTT"
-    seqs = ["AAACCCTT",
-            "AAACCTTT",
-            "AACCCTTT",
-            "AAACCCTTT",
-            ]
-    log_ps = Vector{Float64}[fill(log10(0.1), length(s)) for s in seqs]
-    seq_errors = Model.ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
-    seq_scores = Model.Scores(seq_errors)
-    reference = "AAACCCGGGTTT"
-    ref_log_p = fill(log10(0.3), length(reference))
-    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
-    ref_scores = Model.Scores(ref_errors)
-    bandwidth = 10
-    top_n = 3
-
-    ins, del = Model.surgery_proposals(template, seqs, log_ps,
-                                       seq_scores, reference,
-                                       ref_log_p, ref_scores,
-                                       bandwidth, top_n)
-    @test length(del) == 0
-
-    score = Quiver2.Model.score_template(template, seqs, log_ps,
-                                         scores, reference, ref_log_p,
-                                         ref_scores, bandwidth)
-
-    new_template, new_score = Quiver2.Model.model_surgery(template, score,
-                                                          seqs, log_ps, scores,
-                                                          reference, ref_log_p,
-                                                          ref_scores, bandwidth, top_n)
-    @test new_template == expected
 end
 
 function test_best_codons()
@@ -474,7 +434,6 @@ function test_best_codons()
     codons = Quiver2.Model.best_codons(template, sequences, log_ps,
                                        scores, bandwidth)
     expected = "AAACCCGGG"
-    println(codons)
     for j in 1:length(codons)
         @test string(codons[j].bases...) == expected[j:j+2]
     end
@@ -505,5 +464,4 @@ test_ins_probs()
 test_indel_probs()
 test_align()
 test_align_2()
-test_model_surgery()
 test_best_codons()
