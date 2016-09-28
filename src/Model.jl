@@ -887,8 +887,8 @@ function quiver2(template::AbstractString,
                  reference::AbstractString="",
                  ref_log_p::Float64=0.0,
                  ref_scores::Scores=default_ref_scores,
-                 ref_indel_penalty::Float64=log10(0.1),
-                 min_ref_indel_score::Float64=log10(1e-9),
+                 ref_indel_penalty::Float64=-3.0,
+                 min_ref_indel_score::Float64=-15.0,
                  top_n::Int=6,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
@@ -907,6 +907,12 @@ function quiver2(template::AbstractString,
     end
 
     if length(reference) > 0
+        if ref_indel_penalty >= 0.0
+            error("ref_indel_penalty must be < 0.0")
+        end
+        if min_ref_indel_score >= 0.0
+            error("min_ref_indel_score must be < 0.0")
+        end
         if (ref_log_p == -Inf || ref_log_p >= 0.0)
             error("ref_log_p=$ref_log_p but should be less than 0.0")
         end
@@ -968,8 +974,7 @@ function quiver2(template::AbstractString,
     end
     n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(template)]
-    consensus_noref = ""
-    consensus_ref = ""
+    consensus_stages = ["", "", ""]
 
     stage_iterations = zeros(Int, Int(typemax(Stage)))
     for i in 1:max_iters
@@ -979,6 +984,8 @@ function quiver2(template::AbstractString,
         if verbose > 1
             println(STDERR, "iteration $i : $(state.stage)")
         end
+
+        penalties_increased = false
 
         candidates = getcands(state, seqs, lps, scores,
                               reference, ref_log_p_vec, ref_scores,
@@ -990,8 +997,8 @@ function quiver2(template::AbstractString,
                 println(STDERR, "  no candidates found")
             end
             push!(n_proposals, zeros(Int, Int(typemax(DPMove))))
+            consensus_stages[Int(state.stage)] = state.template
             if state.stage == initial_stage
-                consensus_noref = state.template
                 if empty_ref
                     state.converged = true
                     break
@@ -1006,9 +1013,9 @@ function quiver2(template::AbstractString,
                     if verbose > 1
                         println(STDERR, "  alignment had single indels but indel scores already minimized.")
                     end
-                    consensus_ref = state.template
                     state.stage = refinement_stage
                 else
+                    penalties_increased = true
                     # TODO: this is not probabilistically correct
                     ref_scores = Scores(ref_scores.mismatch,
                                         max(ref_scores.insertion + ref_indel_penalty,
@@ -1073,12 +1080,14 @@ function quiver2(template::AbstractString,
                    reference, ref_log_p_vec, ref_scores,
                    bandwidth, recompute_As, true)
         if verbose > 1
-            println(STDERR, "  score: $(state.score)")
-            if (state.score < old_score &&
-                stage_iterations[Int(state.stage)] > 0 &&
-                (batch == -1 || batch == length(sequences)))
-                println(STDERR, "  WARNING: not using batches, but score decreased.")
-                println(STDERR, "  (ignore this warning if indel penalties increased)")
+            println(STDERR, "  score: $(state.score) ($(state.stage))")
+        end
+        if (state.score < old_score &&
+            stage_iterations[Int(state.stage)] > 0 &&
+            !penalties_increased &&
+            batch == length(sequences))
+            if verbose > 1
+                println(STDERR, "  WARNING: not using batches, but score decreased")
             end
         end
         if ((state.score - old_score) / old_score > batch_threshold &&
@@ -1108,8 +1117,7 @@ function quiver2(template::AbstractString,
                 "stage_iterations" => stage_iterations,
                 "exceeded_max_iterations" => exceeded,
                 "ref_scores" => ref_scores,
-                "consensus_noref" => consensus_noref,
-                "consensus_ref" => consensus_ref,
+                "consensus_stages" => consensus_stages,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
                 )
@@ -1141,8 +1149,7 @@ function quiver2(template::DNASequence,
      insertion_probs, info) = quiver2(new_template, new_sequences, phreds, scores;
                                       reference=new_reference,
                                       kwargs...)
-    info["consensus_noref"] = DNASequence(info["consensus_noref"])
-    info["consensus_ref"] = DNASequence(info["consensus_ref"])
+    info["consensus_stages"] = DNASequence[DNASequence(s) for s in info["consensus_stages"]]
     return (DNASequence(result), base_probs, insertion_probs, info)
 end
 
