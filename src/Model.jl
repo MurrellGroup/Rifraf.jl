@@ -34,6 +34,12 @@ immutable ErrorModel
     codon_deletion::Float64
 end
 
+function ErrorModel(mismatch::Float64,
+                    insertion::Float64,
+                    deletion::Float64)
+    return ErrorModel(mismatch, insertion, deletion, 0.0, 0.0)
+end
+
 function normalize(errors::ErrorModel)
     args = Float64[errors.mismatch,
                    errors.insertion,
@@ -62,16 +68,18 @@ function Scores(errors::ErrorModel)
     return Scores(m, i, d, ci, cd)
 end
 
-function modified_emissions(scores::Scores)
-    return Scores(scores.mismatch + log10(1.0 / 3.0),
-                  scores.insertion + log10(0.25),
+function modified_emissions(scores::Scores;
+                            mismatch_emission::Float64=(1.0 / 3.0),
+                            insertion_emission::Float64=0.25)
+    return Scores(scores.mismatch + log10(mismatch_emission),
+                  scores.insertion + log10(insertion_emission),
                   scores.deletion,
-                  scores.codon_insertion + log10(0.25^3),
+                  scores.codon_insertion + log10(insertion_emission^3),
                   scores.codon_deletion)
 end
 
-const default_ref_errors = normalize(ErrorModel(10.0, 0.1, 0.1, 1.0, 1.0))
-const default_ref_scores = modified_emissions(Scores(default_ref_errors))
+# default to invalid scores, to force user to set them
+const default_ref_scores = Scores(0.0, 0.0, 0.0, 0.0, 0.0)
 
 # just to avoid magical constants in code
 const codon_length = 3
@@ -965,16 +973,20 @@ function quiver2(template::AbstractString,
                  reference::AbstractString="",
                  ref_log_p::Float64=0.0,
                  ref_scores::Scores=default_ref_scores,
-                 surgery::Bool=true,
-                 top_n::Int=6,
+                 ref_indel_penalty::Float64=log10(0.1),
+                 min_ref_indel_score::Float64=log10(1e-9),
+                 # surgery::Bool=false,
+                 # top_n::Int=6,
                  bandwidth::Int=10, min_dist::Int=9,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
+    if (scores.mismatch >= 0.0 || scores.mismatch == -Inf ||
+        scores.insertion >= 0.0 || scores.insertion == -Inf ||
+        scores.deletion >= 0.0 || scores.deletion == -Inf)
+        error("scores must be between -Inf and 0.0")
+    end
     if scores.codon_insertion > -Inf || scores.codon_deletion > -Inf
         error("error model cannot allow codon indels")
-    end
-    if scores.insertion == -Inf || scores.deletion == -Inf
-        error("indel scores must be allowed")
     end
 
     if bandwidth < 0
@@ -985,9 +997,25 @@ function quiver2(template::AbstractString,
         if (ref_log_p == -Inf || ref_log_p >= 0.0)
             error("ref_log_p=$ref_log_p but should be less than 0.0")
         end
-        if ref_scores.insertion == -Inf || ref_scores.deletion == -Inf
-            error("ref indel scores cannot be -Inf")
+        if (ref_scores.mismatch >= 0.0 ||
+            ref_scores.insertion >= 0.0 ||
+            ref_scores.deletion >= 0.0 ||
+            ref_scores.codon_insertion >= 0.0 ||
+            ref_scores.codon_deletion >= 0.0)
+            error("ref scores cannot be >= 0")
         end
+        if (ref_scores.mismatch == -Inf ||
+            ref_scores.insertion == -Inf ||
+            ref_scores.deletion == -Inf ||
+            ref_scores.codon_insertion == -Inf ||
+            ref_scores.codon_deletion == -Inf)
+            error("ref scores cannot be -Inf")
+        end
+        if (ref_scores.insertion < min_ref_indel_score ||
+            ref_scores.deletion < min_ref_indel_score)
+            error("ref indel scores are less than specified minimum")
+        end
+
     end
 
     ref_log_p_vec = fill(ref_log_p, length(reference))
@@ -1029,7 +1057,7 @@ function quiver2(template::AbstractString,
     consensus_lengths = Int[length(template)]
     consensus_noref = ""
     consensus_ref = ""
-    consensus_surgery = ""
+    # consensus_surgery = ""
 
     stage_iterations = zeros(Int, Int(typemax(Stage)))
     for i in 1:max_iters
@@ -1057,28 +1085,50 @@ function quiver2(template::AbstractString,
                 end
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
-                consensus_ref = state.template
-                if surgery
+                if !has_single_indels(state.template, reference, ref_log_p_vec, ref_scores, bandwidth)
+                    consensus_ref = state.template
+                    state.stage = refinement_stage
+                elseif (ref_scores.insertion == min_ref_indel_score ||
+                        ref_scores.deletion == min_ref_indel_score)
                     if verbose > 1
-                        println(STDERR, "  trying model surgery. before: $(state.score)")
+                        println(STDERR, "  alignment had single indels but indel scores already minimized.")
                     end
-                    new_template, new_score = model_surgery(state.template, state.score,
-                                                            seqs, lps, scores,
-                                                            reference, ref_log_p_vec,
-                                                            ref_scores, bandwidth, top_n)
-                    if new_score > state.score
-                        if verbose > 1
-                            println(STDERR, "  model surgery successful. after: $new_score)")
-                        end
-                        state.template = new_template
-                    else
-                        if verbose > 1
-                            println(STDERR, "  model surgery not successful")
-                        end
+                    state.stage = refinement_stage
+                else
+                    # TODO: this is not probabilistically correct
+                    ref_scores = Scores(ref_scores.mismatch,
+                                        max(ref_scores.insertion + ref_indel_penalty,
+                                            min_ref_indel_score),
+                                        max(ref_scores.deletion + ref_indel_penalty,
+                                            min_ref_indel_score),
+                                        ref_scores.codon_insertion,
+                                        ref_scores.codon_deletion)
+                    if verbose > 1
+                        println(STDERR, "  alignment to reference had single indels. decreasing score.")
                     end
-                    consensus_surgery = state.template
                 end
-                state.stage = refinement_stage
+                # consensus_ref = state.template
+                # if surgery
+                #     if verbose > 1
+                #         println(STDERR, "  trying model surgery. before: $(state.score)")
+                #     end
+                #     new_template, new_score = model_surgery(state.template, state.score,
+                #                                             seqs, lps, scores,
+                #                                             reference, ref_log_p_vec,
+                #                                             ref_scores, bandwidth, top_n)
+                #     if new_score > state.score
+                #         if verbose > 1
+                #             println(STDERR, "  model surgery successful. after: $new_score)")
+                #         end
+                #         state.template = new_template
+                #     else
+                #         if verbose > 1
+                #             println(STDERR, "  model surgery not successful")
+                #         end
+                #     end
+                #     consensus_surgery = state.template
+                # end
+                # state.stage = refinement_stage
             elseif state.stage == refinement_stage
                 state.converged = true
                 break
@@ -1166,7 +1216,7 @@ function quiver2(template::AbstractString,
                 "ref_scores" => ref_scores,
                 "consensus_noref" => consensus_noref,
                 "consensus_ref" => consensus_ref,
-                "consensus_surgery" => consensus_surgery,
+                # "consensus_surgery" => consensus_surgery,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
                 )

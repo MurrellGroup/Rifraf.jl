@@ -12,8 +12,11 @@ import Quiver2.Util
 
 function parse_commandline()
     s = ArgParseSettings()
-    rps = Quiver2.Model.default_penalties
     @add_arg_table s begin
+        "--modify-scores"
+        help = "modify scores to match emission probabilities"
+        action = :store_true
+
         "--reference"
         help = string("reference fasta file.",
                       " uses first sequence unless --reference-map is given.")
@@ -25,25 +28,25 @@ function parse_commandline()
         arg_type = AbstractString
         default = ""
 
-        "--mismatch-penalty"
-        help = "reference mismatch penalty"
+        "--ref-error-rate"
+        help = "reference error rate"
         arg_type = Float64
-        default = rps.mismatch_penalty
+        default = 0.0
 
-        "--indel-penalty"
-        help = "reference indel penalty"
-        arg_type = Float64
-        default = rps.indel_penalty
+        "--ref-errors"
+        help = "comma-seperated reference error ratios - mm, ins, del, codon ins, codon del"
+        arg_type = AbstractString
+        default = "0,0,0,0,0"
 
-        "--max-indel-penalty"
-        help = "max reference indel penalty"
+        "--ref-indel-penalty"
+        help = "log10 penalty added to reference indel scores"
         arg_type = Float64
-        default = rps.max_indel_penalty
+        default = log10(0.1)
 
-        "--codon-indel-penalty"
-        help = "codon reference indel penalty"
+        "--min-ref-indel-score"
+        help = "minimum reference indel scores"
         arg_type = Float64
-        default = rps.codon_indel_penalty
+        default = log10(1e-9)
 
         "--prefix"
         help = "prepended to each filename to make name"
@@ -69,6 +72,11 @@ function parse_commandline()
         arg_type = Int
         default = 10
 
+        "--batch-threshold"
+        help = "fraction score decrease before increasing batch size"
+        arg_type = Float64
+        default = 0.05
+
         "--max-iters"
         help = "maximum iterations before giving up"
         arg_type = Int
@@ -83,6 +91,11 @@ function parse_commandline()
         help = "print progress"
         arg_type = Int
         default = 0
+
+        "seq-errors"
+        help = "comma-seperated sequence error ratios - mismatch, insertion, deletion"
+        arg_type = ASCIIString
+        required = true
 
         "input"
         help = "a single file or a glob. each filename should be unique."
@@ -116,21 +129,30 @@ end
         reference = ref_record.seq
     end
 
-    penalties = Quiver2.Model.Penalties(args["mismatch-penalty"],
-                                        args["indel-penalty"],
-                                        args["max-indel-penalty"],
-                                        args["codon-indel-penalty"])
+    score_args = map(x -> parse(Float64, x), split(args["seq-errors"], ","))
+    ref_score_args = map(x -> parse(Float64, x), split(args["ref-errors"], ","))
+    scores = Quiver2.Model.Scores(Quiver2.Model.ErrorModel(score_args...))
+    ref_scores = Quiver2.Model.Scores(Quiver2.Model.ErrorModel(ref_score_args...))
+    if args["modify-scores"]
+        scores = Quiver2.Model.modified_emissions(scores)
+        ref_scores = Quiver2.Model.modified_emissions(ref_scores)
+    end
     sequences, phreds = read_fastq(file)
     template = sequences[1]
     if args["verbose"] > 0
         println(STDERR, "starting run")
     end
     return quiver2(template, sequences, phreds,
+                   scores;
                    reference=reference,
-                   penalties=penalties,
+                   ref_scores=ref_scores,
+                   ref_log_p=log10(args["ref-error-rate"]),
+                   ref_indel_penalty=args["ref-indel-penalty"],
+                   min_ref_indel_score=args["min-ref-indel-score"],
                    bandwidth=args["bandwidth"],
                    min_dist=args["min-dist"],
                    batch=args["batch"],
+                   batch_threshold=args["batch-threshold"],
                    max_iters=args["max-iters"],
                    verbose=args["verbose"])
 end
