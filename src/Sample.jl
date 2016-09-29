@@ -182,9 +182,9 @@ function hmm_sample(sequence::DNASequence,
 end
 
 
-function sample_from_reference(reference::DNASequence,
-                               error_rate::Float64,
-                               errors::ErrorModel)
+function sample_reference(reference::DNASequence,
+                          error_rate::Float64,
+                          errors::ErrorModel)
     errors = Model.normalize(errors)
     if errors.insertion > 0.0 || errors.deletion > 0.0
         error("non-codon indels are not allowed in template")
@@ -258,10 +258,10 @@ function sample(nseqs::Int, len::Int,
         error("Reference length must be a multiple of three")
     end
 
-    reference = random_seq(len)
-    template = sample_from_reference(reference,
-                                     ref_error_rate,
-                                     ref_errors)
+    template = random_seq(len)
+    reference = sample_reference(template,
+                                 ref_error_rate,
+                                 ref_errors)
     dist = BetaAlt(template_error_mean, template_error_std,
                    minval=MIN_PROB, maxval=MAX_PROB)
     template_error_p = Float64[rand(dist) for i = 1:length(template)]
