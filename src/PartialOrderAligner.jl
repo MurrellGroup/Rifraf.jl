@@ -16,12 +16,6 @@ immutable NodeLabel
 end
 
 
-immutable Scores
-    mismatch::Float64
-    indel::Float64
-end
-
-
 immutable PartialOrderGraph
     graph::DiGraph
     # has all same nodes as `graph`. edges link aligned nodes.
@@ -34,6 +28,9 @@ end
 
 
 function PartialOrderGraph(scores::Scores)
+    if scores.codon_insertion > -Inf || scores.codon_deletion > -Inf
+        error("codon indels not allowed")
+    end
     g = DiGraph()
     aligned_nodes = Graph()
     node_chars = Char[]
@@ -94,11 +91,11 @@ function align(g::PartialOrderGraph, sequence::ASCIIString)
     moves = Array(Tuple{Int, Int}, (u, v))
     moves[1, 1] = (0, 0)
     for i = 2:u
-        result[i, 1] = result[i-1, 1] + g.scores.indel
+        result[i, 1] = result[i-1, 1] + g.scores.deletion
         moves[i, 1] = (i-1, 1)
     end
     for j = 2:v
-        result[1, j] = result[1, j-1] + g.scores.indel
+        result[1, j] = result[1, j-1] + g.scores.insertion
         moves[1, j] = (1, j-1)
     end
 
@@ -119,7 +116,7 @@ function align(g::PartialOrderGraph, sequence::ASCIIString)
                 move = (prev_row, j-1)
             end
             # skip node (vertical move)
-            score = result[prev_row, j] + g.scores.indel
+            score = result[prev_row, j] + g.scores.deletion
             if score > best_score
                 best_score = score
                 move = (prev_row, j)
@@ -139,14 +136,14 @@ function align(g::PartialOrderGraph, sequence::ASCIIString)
                     move = (prev_row, j-1)
                 end
                 # skip node (vertical move)
-                score = result[prev_row, j] + g.scores.indel
+                score = result[prev_row, j] + g.scores.deletion
                 if score > best_score
                     best_score = score
                     move = (prev_row, j)
                 end
             end
             # insert new node (horizontal move)
-            score = result[i, j-1] + g.scores.indel
+            score = result[i, j-1] + g.scores.insertion
             if score > best_score
                 best_score = score
                 move = (i, j-1)
@@ -191,7 +188,8 @@ function add_alignment!(g::PartialOrderGraph, alignment::GraphAlignment)
             prev_node = aligned_node
         else
             # create new node; maybe add alignment edge
-            new_node = add_vertex!(g.graph)
+            add_vertex!(g.graph)
+            new_node = nv(g.graph)
             push!(g.node_chars, char)
             if has_vertex(g.graph, prev_node)
                 add_edge!(g.graph, prev_node, new_node)
