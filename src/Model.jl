@@ -1153,7 +1153,6 @@ function quiver2(template::AbstractString,
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
             end
-
         end
     end
     state.stage = scoring_stage

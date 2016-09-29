@@ -26,11 +26,11 @@ end
 
 function test_sample()
     (ref, template, template_error_p,
-     seqs, actual, reported) = sample(10, 99,
-                                      0.05, ref_errors,
-                                      0.05, 0.01,
-                                      0.5, 0.5,
-                                      seq_errors)
+     seqs, actual, phreds) = sample(10, 99,
+                                    0.05, ref_errors,
+                                    0.05, 0.01,
+                                    0.5, 0.5,
+                                    seq_errors)
 end
 
 test_sample_from_reference()

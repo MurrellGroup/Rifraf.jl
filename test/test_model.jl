@@ -290,8 +290,8 @@ function test_quiver2()
     # can't guarantee this test actually passes, since it is random
     n_seqs=10
     ref_len=90
-    template_error_rate = 0.03
-    template_errors = Model.ErrorModel(8.0, 0.0, 0.0, 1.0, 1.0)
+    ref_error_rate = 0.03
+    ref_sample_errors = Model.ErrorModel(8.0, 0.0, 0.0, 1.0, 1.0)
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
 
@@ -311,8 +311,8 @@ function test_quiver2()
         use_ref = rand([true, false])
         (reference, template, template_error, reads,
          actual, phreds) = sample(n_seqs, ref_len,
-                                  template_error_rate,
-                                  template_errors,
+                                  ref_error_rate,
+                                  ref_sample_errors,
                                   template_error_mean,
                                   template_error_std,
                                   log_seq_actual_std,
@@ -326,7 +326,7 @@ function test_quiver2()
         result, q1, q2, info = Model.quiver2(initial_template, reads,
                                              phreds, seq_scores,
                                              reference=reference,
-                                             ref_log_p=log10(template_error_rate),
+                                             ref_log_p=log10(ref_error_rate),
                                              ref_scores=ref_scores,
                                              bandwidth=10, min_dist=9, batch=5,
                                              max_iters=100)

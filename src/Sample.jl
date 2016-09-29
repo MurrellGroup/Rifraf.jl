@@ -230,23 +230,25 @@ end
 """
 nseqs: number of sequences to sample
 len: length of the reference
-template_error_rate: overall error rate sampling template
+
+ref_error_rate: overall error rate sampling template
     from reference
-template_error_ratios: (sub, ins, del) error ratios for
-    sampling template from reference
+ref_errors: error model for sampling template from reference
+
 template_error_mean: mean of Beta distribution for drawing
     per-base template sequencing error rates
 template_error_std: standard deviation of same Beta
+
 log_seq_actual_std: standard deviation for jittering actual
-    sequence per-base error rate (measurement noise)
+    sequence per-base log error rate (measurement noise)
 log_seq_quality_std: standard deviation for jittering reported
-    sequence per-base error rate (quality score estimation noise)
-seq_error_ratios: (sub, ins, del) sequence error ratios
+    sequence per-base log error rate (quality score estimation noise)
+seq_error_ratios: sequence error model
 
 """
 function sample(nseqs::Int, len::Int,
-                template_error_rate::Float64,
-                template_errors::ErrorModel,
+                ref_error_rate::Float64,
+                ref_errors::ErrorModel,
                 template_error_mean::Float64,
                 template_error_std::Float64,
                 log_seq_actual_std::Float64,
@@ -258,8 +260,8 @@ function sample(nseqs::Int, len::Int,
 
     reference = random_seq(len)
     template = sample_from_reference(reference,
-                                     template_error_rate,
-                                     template_errors)
+                                     ref_error_rate,
+                                     ref_errors)
     dist = BetaAlt(template_error_mean, template_error_std,
                    minval=MIN_PROB, maxval=MAX_PROB)
     template_error_p = Float64[rand(dist) for i = 1:length(template)]
