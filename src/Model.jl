@@ -693,7 +693,6 @@ function moves_to_indices(moves::Vector{DPMove},
     return result
 end
 
-
 function align_moves(t::AbstractString, s::AbstractString,
                      log_p::Vector{Float64},
                      scores::Scores,
@@ -1169,6 +1168,7 @@ function quiver2(template::AbstractString,
                 "consensus_stages" => consensus_stages,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
+                "bandwidth" => state.bandwidth,
                 )
 
     # FIXME: recomputing for all sequences may be costly
