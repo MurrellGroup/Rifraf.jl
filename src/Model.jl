@@ -1140,6 +1140,7 @@ function quiver2(template::AbstractString,
             end
         end
         if ((state.score - old_score) / old_score > batch_threshold &&
+            !penalties_increased &&
             batch < length(sequences) &&
             stage_iterations[Int(state.stage)] > 0)
             batch = min(batch + base_batch, length(sequences))
@@ -1171,7 +1172,7 @@ function quiver2(template::AbstractString,
                 "bandwidth" => state.bandwidth,
                 )
 
-    # FIXME: recomputing for all sequences may be costly
+    # FIXME: recomputing for all sequences is costly
     recompute!(state, sequences, log_ps, scores,
                reference, ref_log_p_vec, ref_scores,
                bandwidth_delta, true, true, verbose)

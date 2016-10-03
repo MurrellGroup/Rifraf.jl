@@ -9,8 +9,9 @@ using Quiver2.Util
 using Quiver2.Model
 
 export rbase, mutate_base, random_codon
-export random_seq, sample_from_reference
+export random_seq, sample_reference
 export sample_from_template, sample, BetaAlt
+export sample_mixture
 
 function rbase()
     bases = [DNA_A, DNA_C, DNA_G, DNA_T]
@@ -24,6 +25,16 @@ function mutate_base(base::DNANucleotide)
     end
     return result
 end
+
+function mutate_seq(seq::DNASequence, n_diffs::Int)
+    seq = copy(seq)
+    positions = Base.rand(1:length(seq), n_diffs)
+    for i in positions
+        seq[i] = mutate_base(seq[i])
+    end
+    return seq
+end
+
 
 function random_codon()
     return (rbase(), rbase(), rbase())
@@ -132,18 +143,18 @@ function hmm_sample(sequence::DNASequence,
         p = (i > length(sequence) ? error_p[i - 1] : error_p[i])
         prev_p = (i == 1 ? error_p[1] : error_p[i - 1])
         # insertion between i-1 and i
-        mean_p = mean([p, prev_p])
-        ins_p = mean_p * ins_ratio
+        max_p = max(p, prev_p)
+        ins_p = max_p * ins_ratio
         if codon
             ins_p /= 3.0
         end
         if Base.rand(Bernoulli(ins_p)) == 1
             if codon
                 push!(final_seq, random_codon()...)
-                push!(final_error_p, collect(repeated(mean_p / ins_ratio, 3))...)
+                push!(final_error_p, collect(repeated(max_p / ins_ratio, 3))...)
             else
                 push!(final_seq, rbase())
-                push!(final_error_p, mean_p)
+                push!(final_error_p, max_p)
             end
         end
         if i > length(sequence)
@@ -162,7 +173,7 @@ function hmm_sample(sequence::DNASequence,
             if i > length(sequence) - 2
                 del_p = 0.0
             else
-                del_p = mean(error_p[i:i+2]) * del_ratio / 3
+                del_p = maximum(error_p[i:i+2]) * del_ratio / 3.0
             end
         end
         if Base.rand(Bernoulli(del_p)) == 1
@@ -227,6 +238,52 @@ function sample_from_template(template::DNASequence,
     return DNASequence(seq), actual_error_p, phreds
 end
 
+
+function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
+                        n_diffs::Int,
+                        ref_error_rate::Float64,
+                        ref_errors::ErrorModel,
+                        template_error_mean::Float64,
+                        template_error_std::Float64,
+                        log_seq_actual_std::Float64,
+                        log_seq_reported_std::Float64,
+                        seq_errors::ErrorModel)
+    if len % 3 != 0
+        error("Reference length must be a multiple of three")
+    end
+
+    template1 = random_seq(len)
+    template2 = mutate_seq(template1, n_diffs)
+    templates = DNASequence[template1, template2]
+
+    reference = sample_reference(template1,
+                                 ref_error_rate,
+                                 ref_errors)
+    dist = BetaAlt(template_error_mean, template_error_std,
+                   minval=MIN_PROB, maxval=MAX_PROB)
+    template_error_p = Float64[rand(dist) for i = 1:len]
+
+    seqs = DNASequence[]
+    actual_error_ps = Vector{Float64}[]
+    phreds = Vector{Int8}[]
+    for (t, n) in zip(templates, nseqs)
+        for i = 1:n
+            (seq, actual_error_p, phred) = sample_from_template(t,
+                                                                template_error_p,
+                                                                seq_errors,
+                                                                log_seq_actual_std,
+                                                                log_seq_reported_std)
+            push!(seqs, seq)
+            push!(actual_error_ps, actual_error_p)
+            push!(phreds, phred)
+        end
+    end
+    return (DNASequence(reference),
+            DNASequence[DNASequence(t) for t in templates],
+            template_error_p, seqs, actual_error_ps, phreds)
+
+end
+
 """
 nseqs: number of sequences to sample
 len: length of the reference
@@ -254,36 +311,18 @@ function sample(nseqs::Int, len::Int,
                 log_seq_actual_std::Float64,
                 log_seq_reported_std::Float64,
                 seq_errors::ErrorModel)
-    if len % 3 != 0
-        error("Reference length must be a multiple of three")
-    end
-
-    template = random_seq(len)
-    reference = sample_reference(template,
-                                 ref_error_rate,
-                                 ref_errors)
-    dist = BetaAlt(template_error_mean, template_error_std,
-                   minval=MIN_PROB, maxval=MAX_PROB)
-    template_error_p = Float64[rand(dist) for i = 1:length(template)]
-
-    # left off here
-    seqs = DNASequence[]
-    actual_error_ps = Vector{Float64}[]
-    phreds = Vector{Int8}[]
-
-    for i = 1:nseqs
-        (seq, actual_error_p, phred) = sample_from_template(template,
-                                                            template_error_p,
-                                                            seq_errors,
-                                                            log_seq_actual_std,
-                                                            log_seq_reported_std)
-        push!(seqs, seq)
-        push!(actual_error_ps, actual_error_p)
-        push!(phreds, phred)
-    end
-    return (DNASequence(reference), DNASequence(template),
-            template_error_p, seqs, actual_error_ps, phreds)
+    (ref, templates, t_p, seqs, actual,
+     phreds) = sample_mixture((nseqs, 0), len, 0,
+                              ref_error_rate,
+                              ref_errors,
+                              template_error_mean,
+                              template_error_std,
+                              log_seq_actual_std,
+                              log_seq_reported_std,
+                              seq_errors)
+    return ref, templates[1], t_p, seqs, actual, phreds
 end
+
 
 """Write template into FASTA and sequences into FASTQ."""
 function write_samples(filename, reference, template, template_error, seqs, phreds)

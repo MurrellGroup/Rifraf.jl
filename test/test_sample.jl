@@ -8,11 +8,9 @@ srand(1)
 const seq_errors = ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0)
 const ref_errors = ErrorModel(1.0, 0.0, 0.0, 1.0, 1.0)
 
-function test_sample_from_reference()
-    reference = random_seq(102)
-    template = sample_from_reference(reference,
-                                     0.1,
-                                     ref_errors)
+function test_sample_reference()
+    template = random_seq(102)
+    reference = sample_reference(template, 0.1, ref_errors)
 end
 
 function test_sample_from_template()
@@ -33,6 +31,17 @@ function test_sample()
                                     seq_errors)
 end
 
-test_sample_from_reference()
+function test_sample_mixture()
+    (ref, template, template_error_p,
+     seqs, actual, phreds) = sample_mixture((10, 10), 99, 1,
+                                            0.05, ref_errors,
+                                            0.05, 0.01,
+                                            0.5, 0.5,
+                                            seq_errors)
+    @test length(seqs) == 20
+end
+
+test_sample_reference()
 test_sample_from_template()
 test_sample()
+test_sample_mixture()
