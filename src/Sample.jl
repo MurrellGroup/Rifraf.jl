@@ -151,7 +151,7 @@ function hmm_sample(sequence::DNASequence,
         if Base.rand(Bernoulli(ins_p)) == 1
             if codon
                 push!(final_seq, random_codon()...)
-                push!(final_error_p, collect(repeated(max_p / ins_ratio, 3))...)
+                push!(final_error_p, collect(repeated(max_p, 3))...)
             else
                 push!(final_seq, rbase())
                 push!(final_error_p, max_p)
