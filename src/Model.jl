@@ -935,9 +935,8 @@ function quiver2(template::AbstractString,
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
-                 top_n::Int=6,
                  bandwidth::Int=10, bandwidth_delta::Int=5,
-                 min_dist::Int=9,
+                 min_dist::Int=15,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
     if (scores.mismatch >= 0.0 || scores.mismatch == -Inf ||
