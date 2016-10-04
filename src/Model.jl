@@ -1171,11 +1171,11 @@ function quiver2(template::AbstractString,
                 "bandwidth" => state.bandwidth,
                 )
 
-    # FIXME: recomputing for all sequences is costly
-    recompute!(state, sequences, log_ps, scores,
+    # FIXME: recomputing for all sequences is costly, but using batch is less accurate
+    recompute!(state, seqs, lps, scores,
                reference, ref_log_p_vec, ref_scores,
                bandwidth_delta, true, true, verbose)
-    base_probs, ins_probs = estimate_probs(state, sequences, log_ps, scores,
+    base_probs, ins_probs = estimate_probs(state, seqs, lps, scores,
                                            reference, ref_log_p_vec, ref_scores)
     return state.template, base_probs, ins_probs, info
 end
