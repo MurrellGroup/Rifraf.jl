@@ -138,6 +138,8 @@ function hmm_sample(sequence::DNASequence,
     end
     final_seq = []
     final_error_p = Float64[]
+    seqbools = Bool[]
+    tbools = Bool[]
     skip = 0
     for i = 1:(length(sequence) + 1)
         p = (i > length(sequence) ? error_p[i - 1] : error_p[i])
@@ -152,9 +154,11 @@ function hmm_sample(sequence::DNASequence,
             if codon
                 push!(final_seq, random_codon()...)
                 push!(final_error_p, collect(repeated(max_p, 3))...)
+                push!(seqbools, false, false, false)
             else
                 push!(final_seq, rbase())
                 push!(final_error_p, max_p)
+                push!(seqbools, false)
             end
         end
         if i > length(sequence)
@@ -168,28 +172,34 @@ function hmm_sample(sequence::DNASequence,
             continue
         end
         # deletion of i
-        del_p = p * del_ratio
         if codon
             if i > length(sequence) - 2
                 del_p = 0.0
             else
                 del_p = maximum(error_p[i:i+2]) * del_ratio / 3.0
             end
+        else
+            del_p = p * del_ratio
         end
         if Base.rand(Bernoulli(del_p)) == 1
             # skip position i, and possibly the entire codon starting at i
             skip = codon ? 2 : 0
+            append!(tbools, fill(false, skip + 1))
         else
             # mutation of position i
             if Base.rand(Bernoulli(p * sub_ratio)) == 1
                 push!(final_seq, mutate_base(sequence[i]))
+                push!(seqbools, false)
+                push!(tbools, false)
             else
                 push!(final_seq, sequence[i])
+                push!(seqbools, true)
+                push!(tbools, true)
             end
             push!(final_error_p, p)
         end
     end
-    return DNASequence(final_seq), final_error_p
+    return DNASequence(final_seq), final_error_p, seqbools, tbools
 end
 
 
@@ -201,7 +211,7 @@ function sample_reference(reference::DNASequence,
         error("non-codon indels are not allowed in template")
     end
     error_p = error_rate * ones(length(reference))
-    template, e = hmm_sample(reference, error_p, errors)
+    template, e, sbools, tbools = hmm_sample(reference, error_p, errors)
     return template
 end
 
@@ -228,14 +238,14 @@ function sample_from_template(template::DNASequence,
     jittered_error_p = jitter_vector(template_error_p,
                                      log_actual_error_std)
 
-    seq, actual_error_p = hmm_sample(template, jittered_error_p,
-                                     errors)
+    seq, actual_error_p, sbools, tbools = hmm_sample(template, jittered_error_p,
+                                                     errors)
 
     # add noise to simulate quality score estimation error
     reported_error_p = jitter_vector(actual_error_p,
                                      log_reported_error_std)
     phreds = p_to_phred(reported_error_p)
-    return DNASequence(seq), actual_error_p, phreds
+    return DNASequence(seq), actual_error_p, phreds, sbools, tbools
 end
 
 
@@ -266,21 +276,27 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
     seqs = DNASequence[]
     actual_error_ps = Vector{Float64}[]
     phreds = Vector{Int8}[]
+    seqbools = Vector{Bool}[]
+    tbools = Vector{Bool}[]
     for (t, n) in zip(templates, nseqs)
         for i = 1:n
-            (seq, actual_error_p, phred) = sample_from_template(t,
-                                                                template_error_p,
-                                                                seq_errors,
-                                                                log_seq_actual_std,
-                                                                log_seq_reported_std)
+            (seq, actual_error_p, phred, cb,
+             db) = sample_from_template(t,
+                                        template_error_p,
+                                        seq_errors,
+                                        log_seq_actual_std,
+                                        log_seq_reported_std)
             push!(seqs, seq)
             push!(actual_error_ps, actual_error_p)
             push!(phreds, phred)
+            push!(seqbools, cb)
+            push!(tbools, db)
         end
     end
     return (DNASequence(reference),
             DNASequence[DNASequence(t) for t in templates],
-            template_error_p, seqs, actual_error_ps, phreds)
+            template_error_p, seqs, actual_error_ps, phreds,
+            seqbools, tbools)
 
 end
 
@@ -312,7 +328,7 @@ function sample(nseqs::Int, len::Int,
                 log_seq_reported_std::Float64,
                 seq_errors::ErrorModel)
     (ref, templates, t_p, seqs, actual,
-     phreds) = sample_mixture((nseqs, 0), len, 0,
+     phreds, cb, db) = sample_mixture((nseqs, 0), len, 0,
                               ref_error_rate,
                               ref_errors,
                               template_error_mean,
@@ -320,7 +336,7 @@ function sample(nseqs::Int, len::Int,
                               log_seq_actual_std,
                               log_seq_reported_std,
                               seq_errors)
-    return ref, templates[1], t_p, seqs, actual, phreds
+    return ref, templates[1], t_p, seqs, actual, phreds, cb, db
 end
 
 

@@ -192,14 +192,15 @@ function test_random_proposal(proposal, template_len)
     log_actual_error_std = 0.5
     log_reported_error_std = 0.5
 
-    bioseq, actual, phreds = sample_from_template(template_seq,
-                                                  template_error_p,
-                                                  errors,
-                                                  log_actual_error_std,
-                                                  log_reported_error_std)
+    (bioseq, actual, phreds, sbools,
+     tbools) = sample_from_template(template_seq,
+                                    template_error_p,
+                                    errors,
+                                    log_actual_error_std,
+                                    log_reported_error_std)
     log_p = Float64[Float64(q) / (-10.0) for q in phreds]
     seq = convert(AbstractString, bioseq)
-    bandwidth = max(5 * abs(length(template) - length(seq)), 20)
+    bandwidth = max(5 * abs(length(template) - length(seq)), 30)
 
     new_template = Proposals.update_template(template, proposal)
     Anew = Model.forward(new_template, seq, log_p, local_scores, bandwidth)
@@ -310,15 +311,15 @@ function test_quiver2()
 
     for i in 1:n
         use_ref = rand([true, false])
-        (reference, template, template_error, reads,
-         actual, phreds) = sample(n_seqs, len,
-                                  ref_error_rate,
-                                  ref_sample_errors,
-                                  template_error_mean,
-                                  template_error_std,
-                                  log_seq_actual_std,
-                                  log_seq_reported_std,
-                                  seq_errors)
+        (reference, template, template_error, reads, actual, phreds, sbools,
+         tbools) = sample(n_seqs, len,
+                          ref_error_rate,
+                          ref_sample_errors,
+                          template_error_mean,
+                          template_error_std,
+                          log_seq_actual_std,
+                          log_seq_reported_std,
+                          seq_errors)
         if !use_ref
             reference = DNASequence("")
         end
