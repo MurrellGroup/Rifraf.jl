@@ -171,9 +171,16 @@ function update(A::BandedArray{Float64},
                 log_p::Vector{Float64},
                 scores::Scores;
                 newcols::Array{Float64, 2}=empty_array,
-                acol=-1)
+                acol=-1, trim=false)
     result = (-Inf, dp_none)
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1, log_p, scores)
+    # allow terminal insertions for free
+    if trim & (j == 1)
+        ins_score = 0.0
+    end
+    if trim & (j == size(A)[2])
+        ins_score = 0.0
+    end
     result = update_helper(newcols, A, i, j, acol, dp_match, match_score, result...)
     result = update_helper(newcols, A, i, j, acol, dp_ins, ins_score, result...)
     result = update_helper(newcols, A, i, j, acol, dp_del, del_score, result...)
@@ -202,7 +209,7 @@ end
 function forward_moves(t::AbstractString, s::AbstractString,
                        log_p::Vector{Float64},
                        scores::Scores,
-                       bandwidth::Int)
+                       bandwidth::Int; trim::Bool=false)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
@@ -219,7 +226,7 @@ function forward_moves(t::AbstractString, s::AbstractString,
             sbase = i > 1 ? s[i-1] : 'X'
             tbase = j > 1 ? t[j-1] : 'X'
             x = update(result, i, j, sbase, tbase,
-                       log_p, scores)
+                       log_p, scores, trim=trim)
             result[i, j] = x[1]
             moves[i, j] = x[2]
         end
@@ -696,16 +703,18 @@ end
 function align_moves(t::AbstractString, s::AbstractString,
                      log_p::Vector{Float64},
                      scores::Scores,
-                     bandwidth::Int)
-    A, Amoves = forward_moves(t, s, log_p, scores, bandwidth)
+                     bandwidth::Int;
+                     trim::Bool=false)
+    A, Amoves = forward_moves(t, s, log_p, scores, bandwidth, trim=trim)
     return backtrace(Amoves)
 end
 
 function align(t::AbstractString, s::AbstractString,
                log_p::Vector{Float64},
                scores::Scores,
-               bandwidth::Int)
-    moves = align_moves(t, s, log_p, scores, bandwidth)
+               bandwidth::Int;
+               trim::Bool=false)
+    moves = align_moves(t, s, log_p, scores, bandwidth, trim=trim)
     return moves_to_alignment_strings(moves, t, s)
 end
 
