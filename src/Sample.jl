@@ -2,7 +2,6 @@ module Sample
 
 using Bio.Seq
 using Distributions
-using Iterators
 
 using Quiver2.QIO
 using Quiver2.Util

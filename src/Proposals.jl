@@ -73,34 +73,34 @@ function are_unambiguous(ms::Vector{Proposal})
     return ins_good && others_good
 end
 
-function update_template(template::AbstractString,
+function update_template(template::String,
                          proposal::Substitution)
     return string(template[1:(proposal.pos - 1)],
                   proposal.base,
                   template[(proposal.pos + 1):end])
 end
 
-function update_template(template::AbstractString,
+function update_template(template::String,
                          proposal::Insertion)
     return string(template[1:(proposal.pos)],
                   proposal.base,
                   template[(proposal.pos+1):end])
 end
 
-function update_template(template::AbstractString,
+function update_template(template::String,
                          proposal::CodonInsertion)
     return string(template[1:(proposal.pos)],
                   join(proposal.bases),
                   template[(proposal.pos+1):end])
 end
 
-function update_template(template::AbstractString,
+function update_template(template::String,
                          proposal::Deletion)
     return string(template[1:(proposal.pos - 1)],
                   template[(proposal.pos + 1):end])
 end
 
-function update_template(template::AbstractString,
+function update_template(template::String,
                          proposal::CodonDeletion)
     return string(template[1:(proposal.pos - 1)],
                   template[(proposal.pos + 3):end])
@@ -123,7 +123,7 @@ end
 type AmbiguousProposalsError <: Exception end
 
 
-function apply_proposals(template::AbstractString,
+function apply_proposals(template::String,
                          proposals::Vector{Proposal})
     if !are_unambiguous(proposals)
         throw(AmbiguousProposalsError())

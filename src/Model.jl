@@ -1,7 +1,6 @@
 module Model
 
 using Bio.Seq
-using Iterators
 
 using Quiver2.BandedArrays
 using Quiver2.Proposals
@@ -85,7 +84,7 @@ const codon_length = 3
 
 type State
     score::Float64
-    template::AbstractString
+    template::String
     A_t::BandedArray{Float64}
     B_t::BandedArray{Float64}
     As::Vector{BandedArray{Float64}}
@@ -206,7 +205,7 @@ end
 """Does backtracing to find best alignment.
 
 """
-function forward_moves(t::AbstractString, s::AbstractString,
+function forward_moves(t::String, s::String,
                        log_p::Vector{Float64},
                        scores::Scores,
                        bandwidth::Int; trim::Bool=false)
@@ -239,7 +238,7 @@ end
 F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
-function forward(t::AbstractString, s::AbstractString,
+function forward(t::String, s::String,
                  log_p::Vector{Float64}, scores::Scores,
                  bandwidth::Int)
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
@@ -265,7 +264,7 @@ end
 B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
-function backward(t::AbstractString, s::AbstractString,
+function backward(t::String, s::String,
                   log_p::Vector{Float64},
                   scores::Scores,
                   bandwidth::Int)
@@ -299,7 +298,7 @@ end
 end
 
 
-function get_sub_template(proposal::Proposal, seq::AbstractString,
+function get_sub_template(proposal::Proposal, seq::String,
                           next_posn::Int, n_after::Int)
     # next valid position in sequence after this proposal
     t = typeof(proposal)
@@ -321,8 +320,8 @@ function seq_score_deletion(A::BandedArray{Float64}, B::BandedArray{Float64},
     Bcol = sparsecol(B, bcol)
     (amin, amax), (bmin, bmax) = equal_ranges(row_range(A, acol),
                                               row_range(B, bcol))
-    asub = sub(Acol, amin:amax)
-    bsub = sub(Bcol, bmin:bmax)
+    asub = view(Acol, amin:amax)
+    bsub = view(Bcol, bmin:bmax)
     return summax(asub, bsub)
 end
 
@@ -341,8 +340,8 @@ const boffsets = Dict(Substitution => 2,
 
 function score_nocodon(proposal::Proposal,
                        A::BandedArray{Float64}, B::BandedArray{Float64},
-                       template::AbstractString,
-                       seq::AbstractString, log_p::Vector{Float64},
+                       template::String,
+                       seq::String, log_p::Vector{Float64},
                        scores::Scores,
                        newcols::Array{Float64, 2})
     target_col = proposal.pos + 1
@@ -383,8 +382,8 @@ function score_nocodon(proposal::Proposal,
     Bcol = sparsecol(B, bj)
     (amin, amax), (bmin, bmax) = equal_ranges((imin, imax),
                                               row_range(B, bj))
-    asub = sub(Acol, amin:amax)
-    bsub = sub(Bcol, bmin:bmax)
+    asub = view(Acol, amin:amax)
+    bsub = view(Bcol, bmin:bmax)
     score = summax(asub, bsub)
     if score == -Inf
         error("failed to compute a valid score")
@@ -394,8 +393,8 @@ end
 
 function seq_score_proposal(proposal::Proposal,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
-                            template::AbstractString,
-                            seq::AbstractString, log_p::Vector{Float64},
+                            template::String,
+                            seq::String, log_p::Vector{Float64},
                             scores::Scores,
                             newcols::Array{Float64, 2})
     codon_moves = (scores.codon_insertion > -Inf ||
@@ -479,8 +478,8 @@ function seq_score_proposal(proposal::Proposal,
             Bcol = sparsecol(B, bj)
             (amin, amax), (bmin, bmax) = equal_ranges((imin, imax),
                                                       row_range(B, bj))
-            asub = sub(Acol, amin:amax)
-            bsub = sub(Bcol, bmin:bmax)
+            asub = view(Acol, amin:amax)
+            bsub = view(Bcol, bmin:bmax)
             score = summax(asub, bsub)
         end
         if score > best_score
@@ -509,11 +508,11 @@ end
 
 function score_proposal(m::Proposal,
                         state::State,
-                        sequences::Vector{ASCIIString},
+                        sequences::Vector{String},
                         log_ps::Vector{Vector{Float64}},
                         scores::Scores,
                         use_ref::Bool,
-                        reference::ASCIIString,
+                        reference::String,
                         ref_log_p::Vector{Float64},
                         ref_scores::Scores,
                         newcols::Array{Float64, 2})
@@ -531,8 +530,8 @@ end
 
 
 function candstask(stage::Stage,
-                   template::AbstractString,
-                   sequences::Vector{ASCIIString},
+                   template::String,
+                   sequences::Vector{String},
                    log_ps::Vector{Vector{Float64}},
                    Amoves::Vector{BandedArray{Int}},
                    scores::Scores,
@@ -579,16 +578,16 @@ end
 
 
 function getcands(state::State,
-                  sequences::Vector{ASCIIString},
+                  sequences::Vector{String},
                   log_ps::Vector{Vector{Float64}},
                   scores::Scores,
-                  reference::ASCIIString,
+                  reference::String,
                   ref_log_p::Vector{Float64},
                   ref_scores::Scores)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
 
-    maxlen = maximum([length(s) for s in sequences])
+    maxlen = maximum(length(s) for s in sequences)
     nrows = max(maxlen, length(reference)) + 1
     newcols = zeros(Float64, (nrows, 6))
 
@@ -649,7 +648,7 @@ function band_tolerance(Amoves::BandedArray{Int})
 end
 
 function moves_to_alignment_strings(moves::Vector{DPMove},
-                                    t::AbstractString, s::AbstractString)
+                                    t::String, s::String)
     aligned_t = Char[]
     aligned_s = Char[]
     i, j = (0, 0)
@@ -678,7 +677,7 @@ end
 
 
 function moves_to_indices(moves::Vector{DPMove},
-                          t::AbstractString, s::AbstractString)
+                          t::String, s::String)
     tlen = length(t)
     slen = length(s)
     result = zeros(Int, tlen + 1)
@@ -700,7 +699,7 @@ function moves_to_indices(moves::Vector{DPMove},
     return result
 end
 
-function align_moves(t::AbstractString, s::AbstractString,
+function align_moves(t::String, s::String,
                      log_p::Vector{Float64},
                      scores::Scores,
                      bandwidth::Int;
@@ -709,7 +708,7 @@ function align_moves(t::AbstractString, s::AbstractString,
     return backtrace(Amoves)
 end
 
-function align(t::AbstractString, s::AbstractString,
+function align(t::String, s::String,
                log_p::Vector{Float64},
                scores::Scores,
                bandwidth::Int;
@@ -718,8 +717,8 @@ function align(t::AbstractString, s::AbstractString,
     return moves_to_alignment_strings(moves, t, s)
 end
 
-function best_codons(template::AbstractString,
-                     sequences::Vector{ASCIIString},
+function best_codons(template::String,
+                     sequences::Vector{String},
                      log_ps::Vector{Vector{Float64}},
                      scores::Scores,
                      bandwidth::Int;
@@ -749,7 +748,7 @@ function best_codons(template::AbstractString,
                 end
             end
         end
-        if maximum([minimum(values(c)) for c in cands]) == 0.0
+        if maximum(minimum(values(c)) for c in cands) == 0.0
             break
         end
         codon = [base_consensus(c) for c in cands]
@@ -759,12 +758,12 @@ function best_codons(template::AbstractString,
 end
 
 function base_consensus(d::Dict{Char, Float64})
-    return minimum([(v, k) for (k, v) in d])[2]
+    return minimum((v, k) for (k, v) in d)[2]
 end
 
 
-function has_single_indels(template::AbstractString,
-                           reference::AbstractString,
+function has_single_indels(template::String,
+                           reference::String,
                            ref_log_p::Vector{Float64},
                            ref_scores::Scores,
                            bandwidth::Int)
@@ -785,7 +784,7 @@ function initial_state(template, seqs, lps, scores,
           for (s, p) in zip(seqs, lps)]
     Bs = [backward(template, s, p, scores, bandwidth)
           for (s, p) in zip(seqs, lps)]
-    score = sum([A[end, end] for A in As])
+    score = sum(A[end, end] for A in As)
 
     A_t = BandedArray(Float64, (1, 1), 1)
     B_t = BandedArray(Float64, (1, 1), 1)
@@ -797,10 +796,10 @@ function initial_state(template, seqs, lps, scores,
 end
 
 
-function recompute!(state::State, seqs::Vector{ASCIIString},
+function recompute!(state::State, seqs::Vector{String},
                     lps::Vector{Vector{Float64}},
                     scores::Scores,
-                    reference::AbstractString,
+                    reference::String,
                     ref_log_p::Vector{Float64},
                     ref_scores::Scores,
                     bandwidth_delta::Int,
@@ -816,7 +815,7 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
                 push!(state.As, As)
                 push!(state.Amoves, Amoves)
             end
-            tolerance = minimum([band_tolerance(Am) for Am in state.Amoves])
+            tolerance = minimum(band_tolerance(Am) for Am in state.Amoves)
             if ((state.stage == frame_correction_stage ||
                  state.stage == scoring_stage) &&
                 length(reference) > 0)
@@ -842,7 +841,7 @@ function recompute!(state::State, seqs::Vector{ASCIIString},
                                  ref_scores, state.bandwidth)
         end
     end
-    state.score = sum([A[end, end] for A in state.As])
+    state.score = sum(A[end, end] for A in state.As)
     if ((state.stage == frame_correction_stage ||
          state.stage == scoring_stage) &&
         length(reference) > 0)
@@ -863,10 +862,10 @@ end
 
 
 function estimate_probs(state::State,
-                        sequences::Vector{ASCIIString},
+                        sequences::Vector{String},
                         log_ps::Vector{Vector{Float64}},
                         scores::Scores,
-                        reference::AbstractString,
+                        reference::String,
                         ref_log_p::Vector{Float64},
                         ref_scores::Scores)
     # `position_scores[i]` gives the following log probabilities
@@ -880,7 +879,7 @@ function estimate_probs(state::State,
     # - do not penalize mismatches
     # - use max indel penalty
 
-    maxlen = maximum([length(s) for s in sequences])
+    maxlen = maximum(length(s) for s in sequences)
     nrows = max(maxlen, length(reference)) + 1
     newcols = zeros(Float64, (nrows, 6))
 
@@ -935,11 +934,11 @@ function estimate_indel_probs(position_probs, insertion_probs)
 end
 
 
-function quiver2(template::AbstractString,
-                 sequences::Vector{ASCIIString},
+function quiver2(template::String,
+                 sequences::Vector{String},
                  phreds::Vector{Vector{Int8}},
                  scores::Scores;
-                 reference::AbstractString="",
+                 reference::String="",
                  ref_log_p::Float64=0.0,
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
@@ -998,11 +997,11 @@ function quiver2(template::AbstractString,
         error("invalid max iters: $max_iters")
     end
 
-    if any([minimum(p) < 0 for p in phreds])
+    if any(minimum(p) < 0 for p in phreds)
         error("phred score cannot be negative")
     end
     log_ps = phred_to_log_p(phreds)
-    if any([minimum(p) == -Inf for p in log_ps])
+    if any(minimum(p) == -Inf for p in log_ps)
         error("a log error probability is negative infinity")
     end
 
@@ -1199,9 +1198,9 @@ function quiver2(template::DNASequence,
                  scores::Scores;
                  reference::DNASequence=DNASequence(""),
                  kwargs...)
-    new_reference = convert(ASCIIString, reference)
-    new_template = convert(ASCIIString, template)
-    new_sequences = ASCIIString[convert(ASCIIString, s) for s in sequences]
+    new_reference = convert(String, reference)
+    new_template = convert(String, template)
+    new_sequences = String[convert(String, s) for s in sequences]
     (result, base_probs,
      insertion_probs, info) = quiver2(new_template, new_sequences, phreds, scores;
                                       reference=new_reference,

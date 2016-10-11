@@ -20,12 +20,12 @@ function parse_commandline()
         "--reference"
         help = string("reference fasta file.",
                       " uses first sequence unless --reference-map is given.")
-        arg_type = AbstractString
+        arg_type = String
         default = ""
 
         "--reference-map"
         help = "file mapping input filename to reference id"
-        arg_type = AbstractString
+        arg_type = String
         default = ""
 
         "--ref-error-rate"
@@ -35,7 +35,7 @@ function parse_commandline()
 
         "--ref-errors"
         help = "comma-seperated reference error ratios - mm, ins, del, codon ins, codon del"
-        arg_type = AbstractString
+        arg_type = String
         default = "0,0,0,0,0"
 
         "--ref-indel-penalty"
@@ -50,7 +50,7 @@ function parse_commandline()
 
         "--prefix"
         help = "prepended to each filename to make name"
-        arg_type = AbstractString
+        arg_type = String
         default = ""
 
         "--keep-unique-name"
@@ -84,7 +84,7 @@ function parse_commandline()
 
         "--indel-file"
         help = "if given, a file to store indel probabilities"
-        arg_type = AbstractString
+        arg_type = String
         default = ""
 
         "--verbose", "-v"
@@ -94,7 +94,7 @@ function parse_commandline()
 
         "seq-errors"
         help = "comma-seperated sequence error ratios - mismatch, insertion, deletion"
-        arg_type = ASCIIString
+        arg_type = String
         required = true
 
         "input"

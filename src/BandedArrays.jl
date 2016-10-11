@@ -45,7 +45,7 @@ Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int) = (A.data[data_row(A, i,
 
 function sparsecol(A::BandedArray, j::Int)
     start, stop = data_row_range(A, j)
-    return sub(A.data, start:stop, j)
+    return view(A.data, start:stop, j)
 end
 
 # TODO: bounds checks

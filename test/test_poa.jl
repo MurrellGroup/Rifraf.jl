@@ -28,10 +28,10 @@ function test_poa()
                                     log_seq_actual_std,
                                     log_seq_reported_std,
                                     errors)
-    seqstrings = ASCIIString[convert(ASCIIString, s) for s in seqs]
+    seqstrings = String[convert(String, s) for s in seqs]
     g = PartialOrderGraph(seqstrings, scores)
     c = consensus(g)
-    @test c == convert(ASCIIString, template)
+    @test c == convert(String, template)
 end
 
 test_poa()

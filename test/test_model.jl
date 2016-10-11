@@ -179,7 +179,7 @@ end
 
 function test_random_proposal(proposal, template_len)
     template_seq = random_seq(template_len)
-    template = convert(AbstractString, template_seq)
+    template = convert(String, template_seq)
 
     template_error_p = Float64[0.1 for i=1:length(template)]
     codon_moves = rand([true, false])
@@ -199,7 +199,7 @@ function test_random_proposal(proposal, template_len)
                                     log_actual_error_std,
                                     log_reported_error_std)
     log_p = Float64[Float64(q) / (-10.0) for q in phreds]
-    seq = convert(AbstractString, bioseq)
+    seq = convert(String, bioseq)
     bandwidth = max(5 * abs(length(template) - length(seq)), 30)
 
     new_template = Proposals.update_template(template, proposal)

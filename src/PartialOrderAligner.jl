@@ -40,7 +40,7 @@ function PartialOrderGraph(scores::Scores)
 end
 
 
-function PartialOrderGraph(sequences::Vector{ASCIIString},
+function PartialOrderGraph(sequences::Vector{String},
                            scores::Scores)
     g = PartialOrderGraph(scores)
     for s in sequences
@@ -51,11 +51,11 @@ end
 
 
 immutable GraphAlignment
-    sequence::ASCIIString
+    sequence::String
     # 0 for insertion
     nodes::Vector{Int}
 
-    function GraphAlignment(s::ASCIIString, n::Vector{Int})
+    function GraphAlignment(s::String, n::Vector{Int})
         if length(s) != length(n)
             error("sequence and node vector lengths differ")
         end
@@ -72,7 +72,7 @@ function length(a::GraphAlignment)
 end
 
 
-function align(g::PartialOrderGraph, sequence::ASCIIString)
+function align(g::PartialOrderGraph, sequence::String)
     if nv(g.graph) == 0
         # trivial alignment
         return GraphAlignment(sequence, zeros(Int, length(sequence)))
@@ -207,7 +207,7 @@ function add_alignment!(g::PartialOrderGraph, alignment::GraphAlignment)
 end
 
 
-function add_sequence!(g::PartialOrderGraph, sequence::ASCIIString)
+function add_sequence!(g::PartialOrderGraph, sequence::String)
     alignment = align(g, sequence)
     add_alignment!(g, alignment)
 end
@@ -225,8 +225,8 @@ function consensus(g::PartialOrderGraph)
         start, stop = e
         start_labels = g.node_labels[start]
         stop_labels = g.node_labels[stop]
-        s1 = Set([label.seq for label in start_labels])
-        s2 = Set([label.seq for label in stop_labels])
+        s1 = Set(label.seq for label in start_labels)
+        s2 = Set(label.seq for label in stop_labels)
         edge_weights[start, stop] = length(intersect(s1, s2))
     end
 
