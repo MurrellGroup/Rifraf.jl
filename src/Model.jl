@@ -40,6 +40,9 @@ immutable PString
         if length(seq) != length(log_p)
             error("length mismatch")
         end
+        if length(seq) == 0
+            return new(seq, Float64[], Float64[])
+        end
         if minimum(log_p) == -Inf
             error("a log error probability is negative infinity")
         end
