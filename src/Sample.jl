@@ -40,7 +40,7 @@ function random_codon()
 end
 
 function random_seq(n)
-    return DNASequence([rbase() for i in 1:n])
+    return DNASequence(map(_ -> rbase(), 1:n))
 end
 
 function rescale(x, lower, upper)
@@ -106,14 +106,6 @@ function jitter_vector(x::Vector{Float64},
     result[map(a -> a < MIN_PROB, result)] = MIN_PROB
     result[map(a -> a > MAX_PROB, result)] = MAX_PROB
     return result
-end
-
-
-function substitute(base, p::Float64)
-    if Base.rand(Bernoulli(x)) == 1
-        return mutate_base(base)
-    end
-    return base
 end
 
 
@@ -210,7 +202,7 @@ function sample_reference(reference::DNASequence,
         error("non-codon indels are not allowed in template")
     end
     error_p = error_rate * ones(length(reference))
-    template, e, sbools, tbools = hmm_sample(reference, error_p, errors)
+    template, _, _, _ = hmm_sample(reference, error_p, errors)
     return template
 end
 
@@ -270,7 +262,7 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                                  ref_errors)
     dist = BetaAlt(template_error_mean, template_error_std,
                    minval=MIN_PROB, maxval=MAX_PROB)
-    template_error_p = Float64[rand(dist) for i = 1:len]
+    template_error_p = map(_ -> rand(dist), 1:len)
 
     seqs = DNASequence[]
     actual_error_ps = Vector{Float64}[]

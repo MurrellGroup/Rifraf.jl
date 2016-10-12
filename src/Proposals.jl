@@ -3,7 +3,7 @@ module Proposals
 export Proposal, Substitution, Insertion, CodonInsertion,
        Deletion, CodonDeletion, CandProposal,
        are_unambiguous, base_shift, affected_positions, apply_proposals,
-       AmbiguousProposalsError, random_codon
+       AmbiguousProposalsError
 
 abstract Proposal
 abstract SingleProposal <: Proposal

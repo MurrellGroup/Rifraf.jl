@@ -1,6 +1,6 @@
 module Util
 
-export p_to_phred, phred_to_log_p, phred_to_p, normalize, inv_log10, mean_log_p
+export p_to_phred, phred_to_log_p, phred_to_p, normalize
 
 MAX_PHRED = Int('~') - 33
 
@@ -29,11 +29,6 @@ end
 
 function normalize(parts::Vector{Float64})
     return parts / sum(parts)
-end
-
-
-function inv_log10(logp::Float64)
-    log10(1.0 - exp10(logp))
 end
 
 end

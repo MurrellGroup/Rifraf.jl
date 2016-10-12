@@ -1,6 +1,6 @@
 module BandedArrays
 
-export BandedArray, sparsecol, data_row, row_range, data_row_range, inband, full, flip
+export BandedArray, sparsecol, data_row, row_range, data_row_range, inband, flip
 
 immutable BandedArray{T} <: AbstractArray{T,2}
     data::Array{T,2}
@@ -9,7 +9,7 @@ immutable BandedArray{T} <: AbstractArray{T,2}
     h_offset::Int
     v_offset::Int
 
-    function BandedArray(data, shape, bandwidth)
+    function BandedArray(data::Array{T, 2}, shape::Tuple{Int, Int}, bandwidth::Int)
         # TODO: check bandwidth
         drows = datarows(shape, bandwidth)
         nrows, ncols = shape
