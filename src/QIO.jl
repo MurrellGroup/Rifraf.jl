@@ -5,7 +5,7 @@ using Bio.Seq
 export read_fasta_records, read_fasta, write_fasta, read_fastq_records, read_fastq, write_fastq
 
 function read_fasta_records(filename)
-    stream = open(filename, FASTA)
+    stream = open(FASTAReader, filename)
     records = FASTASeqRecord[]
     for entry in stream
         push!(records, entry)
@@ -19,7 +19,7 @@ function read_fasta(filename)
 end
 
 function write_fasta(filename, seqs)
-    stream = open(filename, "w", FASTA)
+    stream = open(FASTAWriter, filename)
     for i = 1:length(seqs)
         s = seqs[i]
         write(stream, Seq.FASTASeqRecord(string("seq_", i), s))
@@ -28,7 +28,7 @@ function write_fasta(filename, seqs)
 end
 
 function read_fastq_records(filename)
-    stream = open(filename, "r", FASTQ, quality_encoding=Seq.SANGER_QUAL_ENCODING)
+    stream = open(FASTQReader, filename, quality_encoding=:sanger)
     records = FASTQSeqRecord[]
     for record in stream
         if any([q < 0 for q in record.metadata.quality])
@@ -51,7 +51,7 @@ function read_fastq(filename)
 end
 
 function write_fastq(filename, seqs, phreds::Vector{Vector{Int8}})
-    stream = open(filename, "w", FASTQ, ascii_offset=33)
+    stream = open(FASTQWriter, filename, quality_encoding=:sanger)
     i = 0
     for (s, q) in zip(seqs, phreds)
         i += 1

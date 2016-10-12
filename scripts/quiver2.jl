@@ -226,7 +226,7 @@ function main()
         refids = [name_to_ref[name] for name in basenames]
     end
     results = pmap((f, rid) -> dofile(f, reffile, rid, args),
-                   infiles, refids, err_stop=true)
+                   infiles, refids)
 
     plen = 0
     slen = 0
@@ -247,7 +247,7 @@ function main()
               ",", "indel_rate",
               "\n")
     end
-    stream = open(args["output"], "w", FASTQ, ascii_offset=33)
+    stream = open(FASTQWriter, args["output"], quality_encoding=:sanger)
     for i=1:length(results)
         if typeof(results[i]) == RemoteException
             throw(results[i])
