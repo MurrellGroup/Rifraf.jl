@@ -393,7 +393,6 @@ function score_nocodon(proposal::Proposal,
         return seq_score_deletion(A, B, acol, bcol)
     end
     # need to compute new columns
-    # TODO: reuse an array for `newcols`
     n_new = (t == CodonInsertion? 3 : 1)
     nrows, ncols = size(A)
 
@@ -482,9 +481,8 @@ function seq_score_proposal(proposal::Proposal,
     sub_template = get_sub_template(proposal, template,
                                     next_posn, n_after)
 
-    # TODO: reuse an array for `newcols`
-    n_new = n_bases + n_after
 
+    n_new = n_bases + n_after
     # compute new columns
     for j in 1:n_new
         range_col = min(acol + j, ncols)
