@@ -483,8 +483,6 @@ function seq_score_proposal(proposal::Proposal,
 
     sub_template = get_sub_template(proposal, template,
                                     next_posn, n_after)
-
-
     n_new = n_bases + n_after
     # compute new columns
     for j in 1:n_new
