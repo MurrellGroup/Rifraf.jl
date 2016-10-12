@@ -414,7 +414,7 @@ function score_nocodon(proposal::Proposal,
 
     # add up results
     imin, imax = row_range(A, min(acol + n_new, ncols))
-    Acol = newcols[amin:amax, n_new]
+    Acol = view(newcols, imin:imax, n_new)
 
     bj = proposal.pos + 1
     Bcol = sparsecol(B, bj)
