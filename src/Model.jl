@@ -571,7 +571,8 @@ function candstask(stage::Stage,
                    sequences::Vector{PString},
                    Amoves::Vector{BandedArray{Int}},
                    scores::Scores,
-                   bandwidth::Int)
+                   bandwidth::Int,
+                   propose_codons::Bool)
     len = length(template)
     function _it()
         # substitutions
@@ -596,7 +597,7 @@ function candstask(stage::Stage,
                 produce(Deletion(j))
             end
         end
-        if stage == frame_correction_stage
+        if propose_codons && stage == frame_correction_stage
             # codon deletions
             for j in 1:(len-2)
                 produce(CodonDeletion(j))
@@ -617,7 +618,8 @@ function getcands(state::State,
                   sequences::Vector{PString},
                   scores::Scores,
                   reference::PString,
-                  ref_scores::Scores)
+                  ref_scores::Scores,
+                  propose_codons::Bool)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
 
@@ -626,7 +628,8 @@ function getcands(state::State,
     newcols = zeros(Float64, (nrows, 6))
 
     for m in candstask(state.stage, state.template, sequences,
-                       state.Amoves, scores, state.bandwidth)
+                       state.Amoves, scores, state.bandwidth,
+                       propose_codons)
         score = score_proposal(m, state, sequences, scores, use_ref,
                                reference, ref_scores, newcols)
         if score > state.score && !isapprox(score, state.score)
@@ -907,8 +910,9 @@ function estimate_probs(state::State,
     newcols = zeros(Float64, (nrows, 6))
 
     use_ref = (length(reference) > 0)
-    for m in candstask(scoring_stage, state.template,
-                       sequences, state.Amoves, scores, state.bandwidth)
+    for m in candstask(scoring_stage, state.template, sequences,
+                       state.Amoves, scores, state.bandwidth,
+                       false)
         score = score_proposal(m, state,
                                sequences, scores,
                                use_ref,
@@ -965,6 +969,7 @@ function quiver2(template::String,
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
+                 propose_codons::Bool=false,
                  bandwidth::Int=10, bandwidth_delta::Int=5,
                  min_dist::Int=15,
                  batch::Int=10, batch_threshold::Float64=0.05,
@@ -1053,10 +1058,8 @@ function quiver2(template::String,
         end
 
         penalties_increased = false
-
-        candidates = getcands(state, seqs, scores,
-                              ref_pstring, ref_scores)
-
+        candidates = getcands(state, seqs, scores, ref_pstring,
+                              ref_scores, propose_codons)
         recompute_As = true
         if length(candidates) == 0
             if verbose > 1
