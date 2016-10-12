@@ -1,12 +1,11 @@
 module PartialOrderAligner
 
-export PartialOrderGraph, length, align, add_alignment!, add_sequence!, consensus
-
 using LightGraphs
 using Quiver2.Model
 
 import Base.length
 
+export PartialOrderGraph, length, align, add_alignment!, add_sequence!, consensus
 
 immutable NodeLabel
     # which sequence this node came from
