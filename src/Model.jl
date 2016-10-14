@@ -743,7 +743,7 @@ function align(t::String, s::PString,
                bandwidth::Int;
                trim::Bool=false)
     moves = align_moves(t, s, scores, bandwidth, trim=trim)
-    return moves_to_alignment_strings(moves, t, s)
+    return moves_to_alignment_strings(moves, t, s.seq)
 end
 
 function best_codons(template::String,
