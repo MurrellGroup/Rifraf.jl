@@ -163,9 +163,10 @@ function move_scores(t_base::Char,
                      log_p::Vector{Float64},
                      inv_log_p::Vector{Float64},
                      scores::Scores)
-    cur_log_p = log_p[max(seq_i, 1)]
+    cur_i = max(seq_i, 1)
+    cur_log_p = log_p[cur_i]
     next_log_p = log_p[min(seq_i + 1, length(log_p))]
-    match_score = s_base == t_base ? inv_log_p[max(seq_i, 1)] : cur_log_p + scores.mismatch
+    match_score = s_base == t_base ? inv_log_p[cur_i] : cur_log_p + scores.mismatch
     ins_score = cur_log_p + scores.insertion
     del_score = max(cur_log_p, next_log_p) + scores.deletion
     return match_score, ins_score, del_score
@@ -707,6 +708,10 @@ function moves_to_alignment_strings(moves::Vector{DPMove},
 end
 
 
+""" Compute index vector mapping from position in `t` to position in
+`s`.
+
+"""
 function moves_to_indices(moves::Vector{DPMove},
                           t::String, s::String)
     tlen = length(t)
@@ -744,6 +749,14 @@ function align(t::String, s::PString,
                trim::Bool=false)
     moves = align_moves(t, s, scores, bandwidth, trim=trim)
     return moves_to_alignment_strings(moves, t, s.seq)
+end
+
+function align(t::String, s::String, phreds::Vector{Int8},
+               scores::Scores,
+               bandwidth::Int;
+               trim::Bool=false)
+    moves = align_moves(t, PString(s, phreds), scores, bandwidth, trim=trim)
+    return moves_to_alignment_strings(moves, t, s)
 end
 
 function best_codons(template::String,
@@ -960,7 +973,8 @@ end
 
 
 function quiver2(template::String,
-                 sequences::Vector{PString},
+                 seqstrings::Vector{String},
+                 log_ps::Vector{Vector{Float64}},
                  scores::Scores;
                  reference::String="",
                  ref_log_p::Float64=0.0,
@@ -1013,8 +1027,9 @@ function quiver2(template::String,
             ref_scores.deletion < min_ref_indel_score)
             error("ref indel scores are less than specified minimum")
         end
-
     end
+
+    sequences = PString[PString(s, p) for (s, p) in zip(seqstrings, log_ps)]
 
     ref_log_p_vec = fill(ref_log_p, length(reference))
     ref_pstring = PString(reference, ref_log_p_vec)
@@ -1208,9 +1223,8 @@ function quiver2(template::String,
     if any(minimum(p) < 0 for p in phreds)
         error("phred score cannot be negative")
     end
-    new_sequences = PString[PString(s, p)
-                            for (s, p) in zip(sequences, phreds)]
-    return quiver2(template, new_sequences, scores; kwargs...)
+    log_ps = Util.phred_to_log_p(phreds)
+    return quiver2(template, sequences, log_ps, scores; kwargs...)
 end
 
 
