@@ -9,7 +9,7 @@ using Quiver2.Model
 
 export rbase, mutate_base, random_codon
 export random_seq, sample_reference
-export sample_from_template, sample, BetaAlt
+export sample_from_template, sample
 export sample_mixture
 
 function rbase()
@@ -55,44 +55,6 @@ end
 const MIN_PROB = 1e-10
 const MAX_PROB = 0.5
 
-
-"""A beta distribution parametrized by mean and standard deviation."""
-type BetaAlt <: Sampleable{Univariate,Continuous}
-    mean::Float64
-    std::Float64
-
-    minval::Float64
-    maxval::Float64
-
-    alpha::Float64
-    beta::Float64
-    d::Sampleable{Univariate,Continuous}
-
-    function BetaAlt(mean::Float64, std::Float64; minval::Float64=0.0, maxval::Float64=1.0)
-        if mean <= minval || mean >= maxval
-            error("mean must be in ($minval, $maxval)\n")
-        end
-        mean_scaled = rescale(mean, minval, maxval)
-        std_scaled = std / (maxval - minval)
-        if std_scaled <= 0
-            error("std must be > 0")
-        end
-        variance = std_scaled ^ 2
-        max_variance = mean_scaled * (1 - mean_scaled)
-        if variance >= max_variance
-            error("variance cannot be larger than mean * (1 - mean)")
-        end
-        nu = mean_scaled * (1 - mean_scaled) / variance - 1.0
-        alpha = mean_scaled * nu
-        beta = (1.0 - mean_scaled) * nu
-        d = Beta(alpha, beta)
-        new(mean, std, minval, maxval, alpha, beta, d)
-    end
-end
-
-function rand(s::BetaAlt)
-    return restore(Distributions.rand(s.d), s.minval, s.maxval)
-end
 
 """
 Add independent log-gaussian noise to each position in vector.
@@ -244,7 +206,7 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                         n_diffs::Int,
                         ref_error_rate::Float64,
                         ref_errors::ErrorModel,
-                        template_error_mean::Float64,
+                        template_error_rate::Float64,
                         template_error_std::Float64,
                         log_seq_actual_std::Float64,
                         log_seq_reported_std::Float64,
@@ -260,9 +222,27 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
     reference = sample_reference(template1,
                                  ref_error_rate,
                                  ref_errors)
-    dist = BetaAlt(template_error_mean, template_error_std,
-                   minval=MIN_PROB, maxval=MAX_PROB)
-    template_error_p = map(_ -> rand(dist), 1:len)
+
+    # give some positions a high error rate
+    # TODO: do not hardcode
+    tlen = length(template1)
+    background_rate = template_error_rate / 10.0
+    template_error_p = fill(background_rate, tlen)
+    n_errors = Int(round(template_error_rate * tlen))
+    n_background_errors = background_rate * tlen
+    foreground_rate = (n_errors - n_background_errors) / n_errors
+    template_error_p[rand(1:tlen, n_errors)] = foreground_rate
+
+    # spread out errors a bit
+    ksize = Int(ceil(template_error_std))
+    kgrid = -ksize:ksize
+    kernel = exp(-(kgrid .^ 2) / (2 * template_error_std ^ 2))
+    kernel = kernel / sum(kernel)
+    template_error_p = conv(template_error_p, kernel)
+
+    println(sum(template_error_p))
+    println(minimum(template_error_p))
+    println(maximum(template_error_p))
 
     seqs = DNASequence[]
     actual_error_ps = Vector{Float64}[]
@@ -313,7 +293,7 @@ seq_error_ratios: sequence error model
 function sample(nseqs::Int, len::Int,
                 ref_error_rate::Float64,
                 ref_errors::ErrorModel,
-                template_error_mean::Float64,
+                template_error_rate::Float64,
                 template_error_std::Float64,
                 log_seq_actual_std::Float64,
                 log_seq_reported_std::Float64,
@@ -322,7 +302,7 @@ function sample(nseqs::Int, len::Int,
      phreds, cb, db) = sample_mixture((nseqs, 0), len, 0,
                               ref_error_rate,
                               ref_errors,
-                              template_error_mean,
+                              template_error_rate,
                               template_error_std,
                               log_seq_actual_std,
                               log_seq_reported_std,
