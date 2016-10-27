@@ -238,11 +238,12 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
     kgrid = -ksize:ksize
     kernel = exp(-(kgrid .^ 2) / (2 * template_error_std ^ 2))
     kernel = kernel / sum(kernel)
-    template_error_p = conv(template_error_p, kernel)
+    convolved = conv(template_error_p, kernel)
 
-    println(sum(template_error_p))
-    println(minimum(template_error_p))
-    println(maximum(template_error_p))
+    # mirror ends
+    template_error_p = convolved[(ksize+1):(end-ksize)]
+    template_error_p[1:ksize] += reverse(convolved[1:ksize])
+    template_error_p[(end-ksize):end] += reverse(convolved[(end-ksize):end])
 
     seqs = DNASequence[]
     actual_error_ps = Vector{Float64}[]
