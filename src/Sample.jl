@@ -229,24 +229,28 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
 
     # give some positions a high error rate
     tlen = length(template1)
-    background_rate = error_rate * bg_frac
+    expected_errors = error_rate * tlen
+    n_errors = Int(ceil(expected_errors))
+    n_background_errors = error_rate * bg_frac * tlen
+    background_rate = n_background_errors / tlen
+    foreground_rate = (expected_errors - n_background_errors) / n_errors
     template_error_p = fill(background_rate, tlen)
-    n_errors = Int(round(error_rate * tlen))
-    n_background_errors = background_rate * tlen
-    foreground_rate = (n_errors - n_background_errors) / n_errors
-    template_error_p[rand(1:tlen, n_errors)] += foreground_rate
+    indices = Distributions.sample(1:tlen, n_errors, replace=false)
+    template_error_p[indices] += foreground_rate
 
     # spread out errors
-    ksize = n_std
-    kgrid = -ksize:ksize
-    kernel = exp(-(kgrid .^ 2) / (2 * n_std ^ 2))
-    kernel = kernel / sum(kernel)
-    convolved = conv(template_error_p, kernel)
+    if n_std > 0
+        ksize = n_std
+        kgrid = -ksize:ksize
+        kernel = exp(-(kgrid .^ 2) / (2 * n_std ^ 2))
+        kernel = kernel / sum(kernel)
+        convolved = conv(template_error_p, kernel)
 
-    # mirror ends
-    template_error_p = convolved[(ksize+1):(end-ksize)]
-    template_error_p[1:ksize] += reverse(convolved[1:ksize])
-    template_error_p[(end-ksize):end] += reverse(convolved[(end-ksize):end])
+        # mirror ends
+        template_error_p = convolved[(ksize+1):(end-ksize)]
+        template_error_p[1:ksize] += reverse(convolved[1:ksize])
+        template_error_p[(end-ksize):end] += reverse(convolved[(end-ksize):end])
+    end
 
     seqs = DNASequence[]
     actual_error_ps = Vector{Float64}[]
