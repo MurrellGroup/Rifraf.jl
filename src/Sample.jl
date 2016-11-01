@@ -206,11 +206,15 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                         n_diffs::Int,
                         ref_error_rate::Float64,
                         ref_errors::ErrorModel,
-                        template_error_rate::Float64,
-                        template_error_std::Float64,
+                        error_rate::Float64,
+                        n_std::Int,
+                        bg_frac::Float64,
                         log_seq_actual_std::Float64,
                         log_seq_reported_std::Float64,
                         seq_errors::ErrorModel)
+    if bg_frac < 0.0 || bg_frac > 1.0
+        error("invalid background rate")
+    end
     if len % 3 != 0
         error("Reference length must be a multiple of three")
     end
@@ -224,19 +228,18 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                                  ref_errors)
 
     # give some positions a high error rate
-    # TODO: do not hardcode
     tlen = length(template1)
-    background_rate = template_error_rate / 10.0
+    background_rate = error_rate * bg_frac
     template_error_p = fill(background_rate, tlen)
-    n_errors = Int(round(template_error_rate * tlen))
+    n_errors = Int(round(error_rate * tlen))
     n_background_errors = background_rate * tlen
     foreground_rate = (n_errors - n_background_errors) / n_errors
     template_error_p[rand(1:tlen, n_errors)] = foreground_rate
 
     # spread out errors a bit
-    ksize = Int(ceil(template_error_std))
+    ksize = n_std
     kgrid = -ksize:ksize
-    kernel = exp(-(kgrid .^ 2) / (2 * template_error_std ^ 2))
+    kernel = exp(-(kgrid .^ 2) / (2 * n_std ^ 2))
     kernel = kernel / sum(kernel)
     convolved = conv(template_error_p, kernel)
 
@@ -280,9 +283,9 @@ ref_error_rate: overall error rate sampling template
     from reference
 ref_errors: error model for sampling template from reference
 
-template_error_mean: mean of Beta distribution for drawing
-    per-base template sequencing error rates
-template_error_std: standard deviation of same Beta
+error_rate: mean number of errors in sequences
+n_std: number of std deviations in Gaussian kernel
+bg_frac: fraction of error rate in non-erroneous bases
 
 log_seq_actual_std: standard deviation for jittering actual
     sequence per-base log error rate (measurement noise)
@@ -294,20 +297,22 @@ seq_error_ratios: sequence error model
 function sample(nseqs::Int, len::Int,
                 ref_error_rate::Float64,
                 ref_errors::ErrorModel,
-                template_error_rate::Float64,
-                template_error_std::Float64,
+                error_rate::Float64,
+                n_std::Int,
+                bg_frac::Float64,
                 log_seq_actual_std::Float64,
                 log_seq_reported_std::Float64,
                 seq_errors::ErrorModel)
     (ref, templates, t_p, seqs, actual,
      phreds, cb, db) = sample_mixture((nseqs, 0), len, 0,
-                              ref_error_rate,
-                              ref_errors,
-                              template_error_rate,
-                              template_error_std,
-                              log_seq_actual_std,
-                              log_seq_reported_std,
-                              seq_errors)
+                                      ref_error_rate,
+                                      ref_errors,
+                                      error_rate,
+                                      n_std,
+                                      bg_frac,
+                                      log_seq_actual_std,
+                                      log_seq_reported_std,
+                                      seq_errors)
     return ref, templates[1], t_p, seqs, actual, phreds, cb, db
 end
 

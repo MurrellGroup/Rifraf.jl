@@ -311,7 +311,8 @@ function test_quiver2()
     ref_scores = Model.Scores(ref_errors)
 
     template_error_mean = 0.005
-    template_error_std = 0.001
+    template_n_std = 5
+    bg_frac = 0.1
     log_seq_actual_std = 0.2
     log_seq_reported_std = 0.2
 
@@ -330,7 +331,8 @@ function test_quiver2()
                           ref_error_rate,
                           ref_sample_errors,
                           template_error_mean,
-                          template_error_std,
+                          template_n_std,
+                          bg_frac,
                           log_seq_actual_std,
                           log_seq_reported_std,
                           seq_errors)
@@ -339,13 +341,14 @@ function test_quiver2()
         end
         initial_template = reads[1]
 
-        result, q1, q2, info = Model.quiver2(initial_template, reads,
-                                             phreds, seq_scores,
-                                             reference=reference,
-                                             ref_log_p=log10(ref_error_rate),
-                                             ref_scores=ref_scores,
-                                             bandwidth=10, min_dist=9, batch=5,
-                                             max_iters=100)
+        (result, q1, q2, q3,
+         info) = Model.quiver2(initial_template, reads,
+                               phreds, seq_scores,
+                               reference=reference,
+                               ref_log_p=log10(ref_error_rate),
+                               ref_scores=ref_scores,
+                               bandwidth=10, min_dist=9, batch=5,
+                               max_iters=100)
         if length(result) % 3 != 0
             n_out_frame += 1
         end

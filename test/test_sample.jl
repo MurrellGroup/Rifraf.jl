@@ -26,8 +26,8 @@ function test_sample()
     (ref, template, template_error_p,
      seqs, actual, phreds) = sample(10, 99,
                                     0.05, ref_errors,
-                                    0.05, 0.01,
-                                    0.5, 0.5,
+                                    0.05, 3, 0.1,
+                                    1.0, 0.2,
                                     seq_errors)
 end
 
@@ -35,8 +35,8 @@ function test_sample_mixture()
     (ref, template, template_error_p,
      seqs, actual, phreds) = sample_mixture((10, 10), 99, 1,
                                             0.05, ref_errors,
-                                            0.05, 0.01,
-                                            0.5, 0.5,
+                                            0.05, 3, 0.1,
+                                            1.0, 0.2,
                                             seq_errors)
     @test length(seqs) == 20
 end
