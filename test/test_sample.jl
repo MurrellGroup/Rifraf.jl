@@ -23,12 +23,15 @@ function test_sample_from_template()
 end
 
 function test_sample()
+    len = 900
+    error_rate = 0.05
     (ref, template, template_error_p,
-     seqs, actual, phreds) = sample(10, 99,
+     seqs, actual, phreds) = sample(10, len,
                                     0.05, ref_errors,
-                                    0.05, 3, 0.1,
+                                    error_rate, 3, 0.1,
                                     1.0, 0.2,
                                     seq_errors)
+    @test_approx_eq_eps sum(template_error_p) (len * error_rate) 0.1
 end
 
 function test_sample_mixture()

@@ -234,9 +234,9 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
     n_errors = Int(round(error_rate * tlen))
     n_background_errors = background_rate * tlen
     foreground_rate = (n_errors - n_background_errors) / n_errors
-    template_error_p[rand(1:tlen, n_errors)] = foreground_rate
+    template_error_p[rand(1:tlen, n_errors)] += foreground_rate
 
-    # spread out errors a bit
+    # spread out errors
     ksize = n_std
     kgrid = -ksize:ksize
     kernel = exp(-(kgrid .^ 2) / (2 * n_std ^ 2))
