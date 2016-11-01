@@ -713,9 +713,7 @@ end
 
 """
 function moves_to_indices(moves::Vector{DPMove},
-                          t::String, s::String)
-    tlen = length(t)
-    slen = length(s)
+                          tlen::Int, slen::Int)
     result = zeros(Int, tlen + 1)
     i, j = (1, 1)
     last_j = 0
@@ -770,7 +768,7 @@ function best_codons(template::String,
         moves = [align_moves(template, s, scores, bandwidth)
                  for s in sequences]
     end
-    indices = [moves_to_indices(m, template, s.seq)
+    indices = [moves_to_indices(m, length(template), length(s.seq))
                for (m, s) in zip(moves, sequences)]
 
     results = []
@@ -969,6 +967,40 @@ function estimate_indel_probs(position_probs, insertion_probs)
                              no_ins_error_prob[1:end-1],
                              no_ins_error_prob[2:end])
     return reshape(result, length(result))
+end
+
+function base_distribution(base::Char, lp, ilp)
+    result = fill(lp - log10(3), 4)
+    result[baseints[base]] = ilp
+    return result
+end
+
+
+function posterior_error_probs(tlen::Int,
+                               seqs::Vector{PString},
+                               Amoves::Vector{BandedArray{Int}})
+    # TODO: incorporate scores
+    probs = zeros(tlen, 4)
+    for (s, Am) in zip(seqs, Amoves)
+        moves = backtrace(Am)
+        result = zeros(Int, tlen + 1)
+        i, j = (1, 1)
+        for move in moves
+            (ii, jj) = offsets[Int(move)]
+            i -= ii
+            j -= jj
+            s_i = i - 1
+            t_j = j - 1
+            if move == dp_match
+                probs[t_j, 1:4] += base_distribution(s.seq[s_i],
+                                                     s.log_p[s_i],
+                                                     s.inv_log_p[s_i])
+            end
+        end
+    end
+    probs = exp10(probs)
+    probs = 1.0 - maximum(probs ./ sum(probs, 2), 2)
+    return probs
 end
 
 
@@ -1212,7 +1244,11 @@ function quiver2(template::String,
                bandwidth_delta, true, true, verbose)
     base_probs, ins_probs = estimate_probs(state, seqs, scores,
                                            ref_pstring, ref_scores)
-    return state.template, base_probs, ins_probs, info
+
+    post = posterior_error_probs(length(state.template),
+                                 seqs, state.Amoves)
+
+    return state.template, base_probs, ins_probs, post, info
 end
 
 function quiver2(template::String,
@@ -1241,12 +1277,12 @@ function quiver2(template::DNASequence,
     new_reference = convert(String, reference)
     new_template = convert(String, template)
     new_sequences = String[convert(String, s) for s in sequences]
-    (result, base_probs,
-     insertion_probs, info) = quiver2(new_template, new_sequences, phreds, scores;
-                                      reference=new_reference,
-                                      kwargs...)
+    (result, base_probs, insertion_probs, post,
+     info) = quiver2(new_template, new_sequences, phreds, scores;
+                     reference=new_reference,
+                     kwargs...)
     info["consensus_stages"] = DNASequence[DNASequence(s) for s in info["consensus_stages"]]
-    return (DNASequence(result), base_probs, insertion_probs, info)
+    return (DNASequence(result), base_probs, insertion_probs, post, info)
 end
 
 end
