@@ -42,7 +42,7 @@ function random_seq(n)
 end
 
 const MIN_PROB = 1e-10
-const MAX_PROB = 0.8
+const MAX_PROB = 0.3
 
 
 """
