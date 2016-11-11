@@ -227,7 +227,7 @@ function test_random_proposal(proposal, template_len)
     newcols = zeros(Float64, size(A)[1], 6)
     score = Model.seq_score_proposal(proposal, A, B, template, pseq,
                                      local_scores, newcols)
-    @test_approx_eq score Anew[end, end]
+    @test_approx_eq_eps score Anew[end, end] 0.1
 end
 
 function test_random_substitutions()
@@ -303,20 +303,19 @@ end
 
 function test_quiver2()
     # can't guarantee this test actually passes, since it is random
-    n_seqs=10
-    len=90
-    ref_error_rate = 0.03
+    n_seqs = 10
+    len = 90
+    ref_error_rate = 0.3
     ref_sample_errors = Model.ErrorModel(8.0, 0.0, 0.0, 1.0, 1.0)
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
 
-    template_error_mean = 0.005
-    template_n_std = 5
-    bg_frac = 0.1
-    log_seq_actual_std = 0.2
-    log_seq_reported_std = 0.2
+    template_error_mean = 0.001
+    template_alpha = 1e-1
+    log_seq_actual_std = 0.1
+    log_seq_reported_std = 0.01
 
-    seq_errors = Model.ErrorModel(1.0 / 7.0, 3.0 / 7.0, 3.0 / 7.0, 0.0, 0.0)
+    seq_errors = Model.ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
     seq_scores = Model.Scores(seq_errors)
 
     n = 100
@@ -331,8 +330,7 @@ function test_quiver2()
                           ref_error_rate,
                           ref_sample_errors,
                           template_error_mean,
-                          template_n_std,
-                          bg_frac,
+                          template_alpha,
                           log_seq_actual_std,
                           log_seq_reported_std,
                           seq_errors)

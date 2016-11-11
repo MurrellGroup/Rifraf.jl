@@ -24,22 +24,23 @@ end
 
 function test_sample()
     len = 900
-    error_rate = 0.05
+    error_rate = 0.01
     (ref, template, template_error_p,
-     seqs, actual, phreds) = sample(10, len,
+     seqs, actual, phreds) = sample(3, len,
                                     0.05, ref_errors,
-                                    error_rate, 3, 0.1,
-                                    1.0, 0.2,
+                                    error_rate, 1e-1,
+                                    0.1, 0.01,
                                     seq_errors)
-    @test_approx_eq_eps sum(template_error_p) (len * error_rate) 0.1
+    @test_approx_eq_eps mean(template_error_p) error_rate 0.1
 end
 
 function test_sample_mixture()
+    error_rate = 0.01
     (ref, template, template_error_p,
      seqs, actual, phreds) = sample_mixture((10, 10), 99, 1,
                                             0.05, ref_errors,
-                                            0.05, 3, 0.1,
-                                            1.0, 0.2,
+                                            error_rate, 1e-1,
+                                            0.1, 0.01,
                                             seq_errors)
     @test length(seqs) == 20
 end

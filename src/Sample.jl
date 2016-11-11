@@ -13,8 +13,7 @@ export sample_from_template, sample
 export sample_mixture
 
 function rbase()
-    bases = [DNA_A, DNA_C, DNA_G, DNA_T]
-    return bases[Base.rand(1:4)]
+    return Distributions.sample([DNA_A, DNA_C, DNA_G, DNA_T])
 end
 
 function mutate_base(base::DNANucleotide)
@@ -34,7 +33,6 @@ function mutate_seq(seq::DNASequence, n_diffs::Int)
     return seq
 end
 
-
 function random_codon()
     return (rbase(), rbase(), rbase())
 end
@@ -42,15 +40,6 @@ end
 function random_seq(n)
     return DNASequence(map(_ -> rbase(), 1:n))
 end
-
-function rescale(x, lower, upper)
-    return (x - lower) / (upper - lower)
-end
-
-function restore(y, lower, upper)
-    return y * (upper - lower) + lower
-end
-
 
 const MIN_PROB = 1e-10
 const MAX_PROB = 0.8
@@ -168,7 +157,6 @@ function sample_reference(reference::DNASequence,
     return template
 end
 
-
 """
 template_error_p: vector of per-base error rates
 actual_error_std: standard deviation of Beta distribution
@@ -207,14 +195,10 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                         ref_error_rate::Float64,
                         ref_errors::ErrorModel,
                         error_rate::Float64,
-                        n_std::Int,
-                        bg_frac::Float64,
+                        alpha::Float64,
                         log_seq_actual_std::Float64,
                         log_seq_reported_std::Float64,
                         seq_errors::ErrorModel)
-    if bg_frac < 0.0 || bg_frac > 1.0
-        error("invalid background rate")
-    end
     if len % 3 != 0
         error("Reference length must be a multiple of three")
     end
@@ -227,30 +211,10 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                                  ref_error_rate,
                                  ref_errors)
 
-    # give some positions a high error rate
-    tlen = length(template1)
-    expected_errors = error_rate * tlen
-    n_errors = Int(ceil(expected_errors))
-    n_background_errors = error_rate * bg_frac * tlen
-    background_rate = n_background_errors / tlen
-    foreground_rate = (expected_errors - n_background_errors) / n_errors
-    template_error_p = fill(background_rate, tlen)
-    indices = Distributions.sample(1:tlen, n_errors, replace=false)
-    template_error_p[indices] += foreground_rate
-
-    # spread out errors
-    if n_std > 0
-        ksize = n_std
-        kgrid = -ksize:ksize
-        kernel = exp(-(kgrid .^ 2) / (2 * n_std ^ 2))
-        kernel = kernel / sum(kernel)
-        convolved = conv(template_error_p, kernel)
-
-        # mirror ends
-        template_error_p = convolved[(ksize+1):(end-ksize)]
-        template_error_p[1:ksize] += reverse(convolved[1:ksize])
-        template_error_p[(end-ksize):end] += reverse(convolved[(end-ksize):end])
-    end
+    # generate template error rates from four-parameter Beta distribution
+    beta = alpha * (error_rate - MAX_PROB) / (MIN_PROB - error_rate)
+    error_dist = Beta(alpha, beta)
+    template_error_p = rand(error_dist, len) * (MAX_PROB - MIN_PROB) + MIN_PROB
 
     seqs = DNASequence[]
     actual_error_ps = Vector{Float64}[]
@@ -288,8 +252,8 @@ ref_error_rate: overall error rate sampling template
 ref_errors: error model for sampling template from reference
 
 error_rate: mean number of errors in sequences
-n_std: number of std deviations in Gaussian kernel
-bg_frac: fraction of error rate in non-erroneous bases
+alpha: alpha parameter of Beta distribution for template error
+    rate. Larger values -> less deviation in samples.
 
 log_seq_actual_std: standard deviation for jittering actual
     sequence per-base log error rate (measurement noise)
@@ -302,8 +266,7 @@ function sample(nseqs::Int, len::Int,
                 ref_error_rate::Float64,
                 ref_errors::ErrorModel,
                 error_rate::Float64,
-                n_std::Int,
-                bg_frac::Float64,
+                alpha::Float64,
                 log_seq_actual_std::Float64,
                 log_seq_reported_std::Float64,
                 seq_errors::ErrorModel)
@@ -312,8 +275,7 @@ function sample(nseqs::Int, len::Int,
                                       ref_error_rate,
                                       ref_errors,
                                       error_rate,
-                                      n_std,
-                                      bg_frac,
+                                      alpha,
                                       log_seq_actual_std,
                                       log_seq_reported_std,
                                       seq_errors)
