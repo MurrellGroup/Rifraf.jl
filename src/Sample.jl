@@ -53,7 +53,7 @@ end
 
 
 const MIN_PROB = 1e-10
-const MAX_PROB = 0.5
+const MAX_PROB = 0.8
 
 
 """
