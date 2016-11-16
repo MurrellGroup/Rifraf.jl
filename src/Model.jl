@@ -100,25 +100,20 @@ immutable Scores
     codon_deletion::Float64
 end
 
-function Scores(errors::ErrorModel)
+function Scores(errors::ErrorModel,
+                mismatch_emission::Float64=(1.0 / 3.0),
+                insertion_emission::Float64=0.25)
     args = Float64[errors.mismatch,
                    errors.insertion,
                    errors.deletion,
                    errors.codon_insertion,
                    errors.codon_deletion]
     m, i, d, ci, cd = log10(Util.normalize(args))
-    return Scores(m, i, d, ci, cd)
+    return Scores(m + log10(mismatch_emission),
+                  i + log10(insertion_emission),
+                  d, ci + log10(insertion_emission^3), cd)
 end
 
-function modified_emissions(scores::Scores;
-                            mismatch_emission::Float64=(1.0 / 3.0),
-                            insertion_emission::Float64=0.25)
-    return Scores(scores.mismatch + log10(mismatch_emission),
-                  scores.insertion + log10(insertion_emission),
-                  scores.deletion,
-                  scores.codon_insertion + log10(insertion_emission^3),
-                  scores.codon_deletion)
-end
 
 # default to invalid scores, to force user to set them
 const default_ref_scores = Scores(0.0, 0.0, 0.0, 0.0, 0.0)
