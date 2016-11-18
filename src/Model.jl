@@ -100,18 +100,21 @@ immutable Scores
     codon_deletion::Float64
 end
 
-function Scores(errors::ErrorModel,
-                mismatch_emission::Float64=(1.0 / 3.0),
-                insertion_emission::Float64=0.25)
+function Scores(errors::ErrorModel;
+                mismatch::Float64=0.0,
+                insertion::Float64=0.0,
+                deletion::Float64=0.0)
     args = Float64[errors.mismatch,
                    errors.insertion,
                    errors.deletion,
                    errors.codon_insertion,
                    errors.codon_deletion]
     m, i, d, ci, cd = log10(Util.normalize(args))
-    return Scores(m + log10(mismatch_emission),
-                  i + log10(insertion_emission),
-                  d, ci + log10(insertion_emission^3), cd)
+    return Scores(m + mismatch,
+                  i + insertion,
+                  d + deletion,
+                  ci + 3 * insertion,
+                  cd + 3 * deletion)
 end
 
 
@@ -123,7 +126,7 @@ const codon_length = 3
 
 type State
     score::Float64
-    template::String
+    consensus::String
     A_t::BandedArray{Float64}
     B_t::BandedArray{Float64}
     As::Vector{BandedArray{Float64}}
@@ -337,8 +340,8 @@ end
 end
 
 
-function get_sub_template(proposal::Proposal, seq::String,
-                          next_posn::Int, n_after::Int)
+function get_sub_consensus(proposal::Proposal, seq::String,
+                           next_posn::Int, n_after::Int)
     # next valid position in sequence after this proposal
     t = typeof(proposal)
     pos = proposal.pos
@@ -398,13 +401,13 @@ function score_nocodon(proposal::Proposal,
     # last valid A column
     acol = proposal.pos + (t == Substitution ? 0 : 1)
     # new bases
-    sub_template = t == CodonInsertion ? string(proposal.bases...) : string(proposal.base)
+    sub_consensus = t == CodonInsertion ? string(proposal.bases...) : string(proposal.base)
     for j in 1:n_new
         amin, amax = row_range(A, min(acol + j, ncols))
         for i in amin:amax
             seq_base = i > 1 ? pseq.seq[i-1] : 'X'
             x = update(A, i, acol + j,
-                       seq_base, sub_template[j],
+                       seq_base, sub_consensus[j],
                        pseq, scores;
                        newcols=newcols, acol=acol)
             newcols[i, j] = x[1]
@@ -430,7 +433,7 @@ end
 
 function seq_score_proposal(proposal::Proposal,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
-                            template::String,
+                            consensus::String,
                             pseq::PString,
                             scores::Scores,
                             newcols::Array{Float64, 2})
@@ -469,16 +472,16 @@ function seq_score_proposal(proposal::Proposal,
     just_a = last_bcol >= ncols
     next_posn = proposal.pos + (t == CodonDeletion ? 3 : 1)
     if just_a
-        # go to end of template
-        n_after = length(template) - next_posn + 1
+        # go to end of consensus
+        n_after = length(consensus) - next_posn + 1
     end
 
     if n_bases == 0 && n_after == 0
         error("no new columns need to be recomputed.")
     end
 
-    sub_template = get_sub_template(proposal, template,
-                                    next_posn, n_after)
+    sub_consensus = get_sub_consensus(proposal, consensus,
+                                      next_posn, n_after)
     n_new = n_bases + n_after
     # compute new columns
     for j in 1:n_new
@@ -487,7 +490,7 @@ function seq_score_proposal(proposal::Proposal,
         for i in amin:amax
             seq_base = i > 1 ? pseq.seq[i-1] : 'X'
             x = update(A, i, acol + j,
-                       seq_base, sub_template[j],
+                       seq_base, sub_consensus[j],
                        pseq, scores;
                        newcols=newcols, acol=acol)
             newcols[i, j] = x[1]
@@ -549,11 +552,11 @@ function score_proposal(m::Proposal,
                         newcols::Array{Float64, 2})
     score = 0.0
     for si in 1:length(sequences)
-        score += seq_score_proposal(m, state.As[si], state.Bs[si], state.template,
+        score += seq_score_proposal(m, state.As[si], state.Bs[si], state.consensus,
                                     sequences[si], scores, newcols)
     end
     if use_ref
-        score += seq_score_proposal(m, state.A_t, state.B_t, state.template,
+        score += seq_score_proposal(m, state.A_t, state.B_t, state.consensus,
                                     reference, ref_scores, newcols)
     end
     return score
@@ -561,18 +564,18 @@ end
 
 
 function candstask(stage::Stage,
-                   template::String,
+                   consensus::String,
                    sequences::Vector{PString},
                    Amoves::Vector{BandedArray{Int}},
                    scores::Scores,
                    bandwidth::Int,
                    propose_codons::Bool)
-    len = length(template)
+    len = length(consensus)
     function _it()
         # substitutions
         for j in 1:len
             for base in "ACGT"
-                if template[j] != base
+                if consensus[j] != base
                     produce(Substitution(j, base))
                 end
             end
@@ -597,7 +600,7 @@ function candstask(stage::Stage,
                 produce(CodonDeletion(j))
             end
             # codon insertions
-            for proposal in best_codons(template, sequences,
+            for proposal in best_codons(consensus, sequences,
                                         scores, bandwidth,
                                         Amoves=Amoves)
                 produce(proposal)
@@ -621,7 +624,7 @@ function getcands(state::State,
     nrows = max(maxlen, length(reference)) + 1
     newcols = zeros(Float64, (nrows, 6))
 
-    for m in candstask(state.stage, state.template, sequences,
+    for m in candstask(state.stage, state.consensus, sequences,
                        state.Amoves, scores, state.bandwidth,
                        propose_codons)
         score = score_proposal(m, state, sequences, scores, use_ref,
@@ -697,6 +700,7 @@ function moves_to_alignment_strings(moves::Vector{DPMove},
             append!(aligned_s, [s[i], s[i-1], s[i-2]])
         elseif move == dp_codon_del
             append!(aligned_t, [t[j], t[j-1], t[j-2]])
+            append!(aligned_s, ['-', '-', '-'])
         end
     end
     return string(aligned_t...), string(aligned_s...)
@@ -752,7 +756,7 @@ function align(t::String, s::String, phreds::Vector{Int8},
     return moves_to_alignment_strings(moves, t, s)
 end
 
-function best_codons(template::String,
+function best_codons(consensus::String,
                      sequences::Vector{PString},
                      scores::Scores,
                      bandwidth::Int;
@@ -760,14 +764,14 @@ function best_codons(template::String,
     if length(Amoves) == length(sequences)
         moves = [backtrace(Am) for Am in Amoves]
     else
-        moves = [align_moves(template, s, scores, bandwidth)
+        moves = [align_moves(consensus, s, scores, bandwidth)
                  for s in sequences]
     end
-    indices = [moves_to_indices(m, length(template), length(s.seq))
+    indices = [moves_to_indices(m, length(consensus), length(s.seq))
                for (m, s) in zip(moves, sequences)]
 
     results = []
-    for j in 1:(length(template) + 1)
+    for j in 1:(length(consensus) + 1)
         cands = map(_ -> Dict{Char, Float64}('A' => 0.0,
                                              'C' => 0.0,
                                              'G' => 0.0,
@@ -795,26 +799,26 @@ function base_consensus(d::Dict{Char, Float64})
 end
 
 
-function has_single_indels(template::String,
+function has_single_indels(consensus::String,
                            reference::PString,
                            ref_scores::Scores,
                            bandwidth::Int)
-    has_right_length = length(template) % codon_length == 0
-    moves = align_moves(template, reference,
+    has_right_length = length(consensus) % codon_length == 0
+    moves = align_moves(consensus, reference,
                         ref_scores, bandwidth)
     result = dp_ins in moves || dp_del in moves
     if !result && !has_right_length
-        error("template length is not a multiple of three")
+        error("consensus length is not a multiple of three")
     end
     return result
 end
 
 
-function initial_state(template::String, seqs::Vector{PString},
+function initial_state(consensus::String, seqs::Vector{PString},
                        scores::Scores, bandwidth::Int)
-    As = [forward(template, s, scores, bandwidth)
+    As = [forward(consensus, s, scores, bandwidth)
           for s in seqs]
-    Bs = [backward(template, s, scores, bandwidth)
+    Bs = [backward(consensus, s, scores, bandwidth)
           for s in seqs]
     score = sum(A[end, end] for A in As)
 
@@ -823,7 +827,7 @@ function initial_state(template::String, seqs::Vector{PString},
 
     Amoves = BandedArray{Int}[]
 
-    return State(score, template, A_t, B_t, As, Amoves,
+    return State(score, consensus, A_t, B_t, As, Amoves,
                  Bs, initial_stage, false, bandwidth)
 end
 
@@ -839,7 +843,7 @@ function recompute!(state::State, seqs::Vector{PString},
             state.As = BandedArray{Float64}[]
             state.Amoves = BandedArray{Int}[]
             for s in seqs
-                As, Amoves = forward_moves(state.template, s, scores,
+                As, Amoves = forward_moves(state.consensus, s, scores,
                                            state.bandwidth)
                 push!(state.As, As)
                 push!(state.Amoves, Amoves)
@@ -849,7 +853,7 @@ function recompute!(state::State, seqs::Vector{PString},
             if ((state.stage == frame_correction_stage ||
                  state.stage == scoring_stage) &&
                 length(reference) > 0)
-                state.A_t, Amoves_t = forward_moves(state.template,
+                state.A_t, Amoves_t = forward_moves(state.consensus,
                                                     reference,
                                                     ref_scores,
                                                     state.bandwidth)
@@ -864,12 +868,12 @@ function recompute!(state::State, seqs::Vector{PString},
         end
     end
     if recompute_Bs
-        state.Bs = [backward(state.template, s, scores, state.bandwidth)
+        state.Bs = [backward(state.consensus, s, scores, state.bandwidth)
                     for s in seqs]
         if ((state.stage == frame_correction_stage ||
              state.stage == scoring_stage) &&
             length(reference) > 0)
-            state.B_t = backward(state.template, reference,
+            state.B_t = backward(state.consensus, reference,
                                  ref_scores, state.bandwidth)
         end
     end
@@ -899,11 +903,11 @@ function estimate_probs(state::State,
                         reference::PString,
                         ref_scores::Scores)
     # `position_scores[i]` gives the following log probabilities
-    # for `template[i]`: [A, C, G, T, -]
-    position_scores = zeros(length(state.template), 5) + state.score
+    # for `consensus[i]`: [A, C, G, T, -]
+    position_scores = zeros(length(state.consensus), 5) + state.score
     # `insertion_scores[i]` gives the following log probabilities for an
-    # insertion before `template[i]` of [A, C, G, T]
-    insertion_scores = zeros(length(state.template) + 1, 4)
+    # insertion before `consensus[i]` of [A, C, G, T]
+    insertion_scores = zeros(length(state.consensus) + 1, 4)
 
     # TODO: should we modify penalties before using reference?
     # - do not penalize mismatches
@@ -914,7 +918,7 @@ function estimate_probs(state::State,
     newcols = zeros(Float64, (nrows, 6))
 
     use_ref = (length(reference) > 0)
-    for m in candstask(scoring_stage, state.template, sequences,
+    for m in candstask(scoring_stage, state.consensus, sequences,
                        state.Amoves, scores, state.bandwidth,
                        false)
         score = score_proposal(m, state,
@@ -999,7 +1003,7 @@ function posterior_error_probs(tlen::Int,
 end
 
 
-function quiver2(template::String,
+function quiver2(consensus::String,
                  seqstrings::Vector{String},
                  log_ps::Vector{Vector{Float64}},
                  scores::Scores;
@@ -1078,20 +1082,20 @@ function quiver2(template::String,
     if verbose > 1
         println(STDERR, "computing initial alignments")
     end
-    state = initial_state(template, seqs, scores, bandwidth)
+    state = initial_state(consensus, seqs, scores, bandwidth)
     empty_ref = length(reference) == 0
 
     if verbose > 1
         println(STDERR, "initial score: $(state.score)")
     end
     n_proposals = Vector{Int}[]
-    consensus_lengths = Int[length(template)]
+    consensus_lengths = Int[length(consensus)]
     consensus_stages = ["", "", ""]
 
     stage_iterations = zeros(Int, Int(typemax(Stage)))
     for i in 1:max_iters
         stage_iterations[Int(state.stage)] += 1
-        old_template = state.template
+        old_consensus = state.consensus
         old_score = state.score
         if verbose > 1
             println(STDERR, "iteration $i : $(state.stage)")
@@ -1106,7 +1110,7 @@ function quiver2(template::String,
                 println(STDERR, "  no candidates found")
             end
             push!(n_proposals, zeros(Int, Int(typemax(DPMove))))
-            consensus_stages[Int(state.stage)] = state.template
+            consensus_stages[Int(state.stage)] = state.consensus
             if state.stage == initial_stage
                 if empty_ref
                     state.converged = true
@@ -1114,8 +1118,8 @@ function quiver2(template::String,
                 end
                 state.stage = frame_correction_stage
             elseif state.stage == frame_correction_stage
-                if !has_single_indels(state.template, ref_pstring, ref_scores, bandwidth)
-                    consensus_ref = state.template
+                if !has_single_indels(state.consensus, ref_pstring, ref_scores, bandwidth)
+                    consensus_ref = state.consensus
                     state.stage = refinement_stage
                 elseif (ref_scores.insertion == min_ref_indel_score ||
                         ref_scores.deletion == min_ref_indel_score)
@@ -1151,9 +1155,9 @@ function quiver2(template::String,
             if verbose > 1
                 println(STDERR, "  filtered to $(length(chosen_cands)) candidates")
             end
-            state.template = apply_proposals(old_template,
-                                             Proposal[c.proposal
-                                                      for c in chosen_cands])
+            state.consensus = apply_proposals(old_consensus,
+                                              Proposal[c.proposal
+                                                       for c in chosen_cands])
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
                        bandwidth_delta, true, false, verbose)
@@ -1166,9 +1170,9 @@ function quiver2(template::String,
                     println(STDERR, "  rejecting multiple candidates in favor of best")
                 end
                 chosen_cands = CandProposal[chosen_cands[1]]
-                state.template = apply_proposals(old_template,
-                                                 Proposal[c.proposal
-                                                          for c in chosen_cands])
+                state.consensus = apply_proposals(old_consensus,
+                                                  Proposal[c.proposal
+                                                           for c in chosen_cands])
             else
                 # no need to recompute unless batch changes
                 recompute_As = false
@@ -1178,7 +1182,7 @@ function quiver2(template::String,
                                for t in [Substitution, Insertion, Deletion, CodonInsertion, CodonDeletion]]
             push!(n_proposals, proposal_counts)
         end
-        push!(consensus_lengths, length(state.template))
+        push!(consensus_lengths, length(state.consensus))
         if batch < length(sequences)
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
@@ -1220,7 +1224,7 @@ function quiver2(template::String,
     if verbose > 0
         println(STDERR, "done. converged: $(state.converged)")
     end
-    push!(consensus_lengths, length(state.template))
+    push!(consensus_lengths, length(state.consensus))
     exceeded = sum(stage_iterations) >= max_iters
 
     info = Dict("converged" => state.converged,
@@ -1240,13 +1244,13 @@ function quiver2(template::String,
     base_probs, ins_probs = estimate_probs(state, seqs, scores,
                                            ref_pstring, ref_scores)
 
-    post = posterior_error_probs(length(state.template),
+    post = posterior_error_probs(length(state.consensus),
                                  seqs, state.Amoves)
 
-    return state.template, base_probs, ins_probs, post, info
+    return state.consensus, base_probs, ins_probs, post, info
 end
 
-function quiver2(template::String,
+function quiver2(consensus::String,
                  sequences::Vector{String},
                  phreds::Vector{Vector{Int8}},
                  scores::Scores;
@@ -1255,7 +1259,7 @@ function quiver2(template::String,
         error("phred score cannot be negative")
     end
     log_ps = Util.phred_to_log_p(phreds)
-    return quiver2(template, sequences, log_ps, scores; kwargs...)
+    return quiver2(consensus, sequences, log_ps, scores; kwargs...)
 end
 
 
@@ -1263,17 +1267,17 @@ end
 Alternate quiver2() using BioJulia types.
 
 """
-function quiver2(template::DNASequence,
+function quiver2(consensus::DNASequence,
                  sequences::Vector{DNASequence},
                  phreds::Vector{Vector{Int8}},
                  scores::Scores;
                  reference::DNASequence=DNASequence(""),
                  kwargs...)
     new_reference = convert(String, reference)
-    new_template = convert(String, template)
+    new_consensus = convert(String, consensus)
     new_sequences = String[convert(String, s) for s in sequences]
     (result, base_probs, insertion_probs, post,
-     info) = quiver2(new_template, new_sequences, phreds, scores;
+     info) = quiver2(new_consensus, new_sequences, phreds, scores;
                      reference=new_reference,
                      kwargs...)
     info["consensus_stages"] = DNASequence[DNASequence(s) for s in info["consensus_stages"]]
