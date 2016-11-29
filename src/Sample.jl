@@ -45,15 +45,11 @@ const MIN_PROB = 1e-10
 const MAX_PROB = 0.3
 
 
-"""
-Add independent log-gaussian noise to each position in vector.
-
-Keep within range [0, 1].
-"""
-function jitter_vector(x::Vector{Float64},
-                       log_std::Float64,
-                       mult::Float64=1.0)
-    error = randn(length(x)) * log_std
+"""Add independent noise to each position in vector."""
+function jitter_phred(x::Vector{Float64},
+                      phred_std::Float64,
+                      mult::Float64=1.0)
+    error = randn(length(x)) * phred_std / 10.0
     error[map(i -> i < 0.0, error)] *= mult
     result = exp10(log10(x) + error)
     result[map(a -> a < MIN_PROB, result)] = MIN_PROB
@@ -173,31 +169,32 @@ end
 
 """
 template_error_p: vector of per-base error rates
-actual_error_std: standard deviation of Beta distribution
-    for actual errors
-reported_error_std: standard deviation of Beta distribution
-    for reported erros
-codon: if true, only do codon indels
+actual_error_std: standard deviation of true phred values
+reported_error_std: standard deviation of reported phred values
 
 """
 function sample_from_template(template::DNASequence,
                               template_error_p::Vector{Float64},
                               errors::ErrorModel,
-                              seq_p_scale::Float64,
-                              log_actual_error_std::Float64,
-                              log_reported_error_std::Float64;
+                              phred_scale::Float64,
+                              actual_std::Float64,
+                              reported_std::Float64;
                               jitter_mult::Float64=1.0,
                               mutation_mult::Float64=1.0,
                               correct_mult::Float64=1.0)
+    if jitter_mult < 1.0
+        error("jitter_mult must be >= 1.0")
+    end
     errors = Model.normalize(errors)
     if errors.codon_insertion > 0.0 || errors.codon_deletion > 0.0
         error("codon indels are not allowed in sequences")
     end
     # add noise to simulate measurement error
-    d = Exponential(seq_p_scale)
-    jittered_error_p = jitter_vector(template_error_p / (1 + rand(d)),
-                                     log_actual_error_std,
-                                     jitter_mult)
+    d = Exponential(phred_scale)
+    base_vector = exp10((-10.0 * log10(template_error_p) + rand(d)) / (-10.0))
+    jittered_error_p = jitter_phred(base_vector,
+                                    actual_std,
+                                    jitter_mult)
 
     seq, actual_error_p, sbools, tbools = hmm_sample(template,
                                                      jittered_error_p,
@@ -206,8 +203,8 @@ function sample_from_template(template::DNASequence,
                                                      correct_mult=correct_mult)
 
     # add noise to simulate quality score estimation error
-    reported_error_p = jitter_vector(actual_error_p,
-                                     log_reported_error_std)
+    reported_error_p = jitter_phred(actual_error_p,
+                                    reported_std)
     phreds = p_to_phred(reported_error_p)
     return DNASequence(seq), actual_error_p, phreds, sbools, tbools
 end
@@ -219,9 +216,9 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                         ref_errors::ErrorModel,
                         error_rate::Float64,
                         alpha::Float64,
-                        seq_p_scale::Float64,
-                        log_seq_actual_std::Float64,
-                        log_seq_reported_std::Float64,
+                        phred_scale::Float64,
+                        actual_std::Float64,
+                        reported_std::Float64,
                         seq_errors::ErrorModel;
                         jitter_mult::Float64=1.0,
                         mutation_mult::Float64=1.0,
@@ -254,9 +251,9 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
              db) = sample_from_template(t,
                                         template_error_p,
                                         seq_errors,
-                                        seq_p_scale,
-                                        log_seq_actual_std,
-                                        log_seq_reported_std,
+                                        phred_scale,
+                                        actual_std,
+                                        reported_std,
                                         jitter_mult=jitter_mult,
                                         mutation_mult=mutation_mult,
                                         correct_mult=correct_mult)
@@ -286,7 +283,7 @@ error_rate: mean number of errors in sequences
 alpha: alpha parameter of Beta distribution for template error
     rate. Larger values -> less deviation in samples.
 
-log_seq_actual_std: standard deviation for jittering actual
+actual_std: standard deviation for jittering actual
     sequence per-base log error rate (measurement noise)
 log_seq_quality_std: standard deviation for jittering reported
     sequence per-base log error rate (quality score estimation noise)
@@ -298,9 +295,9 @@ function sample(nseqs::Int, len::Int,
                 ref_errors::ErrorModel,
                 error_rate::Float64,
                 alpha::Float64,
-                seq_p_scale::Float64,
-                log_seq_actual_std::Float64,
-                log_seq_reported_std::Float64,
+                phred_scale::Float64,
+                actual_std::Float64,
+                reported_std::Float64,
                 seq_errors::ErrorModel;
                 jitter_mult::Float64=1.0,
                 mutation_mult::Float64=1.0,
@@ -311,9 +308,9 @@ function sample(nseqs::Int, len::Int,
                                       ref_errors,
                                       error_rate,
                                       alpha,
-                                      seq_p_scale,
-                                      log_seq_actual_std,
-                                      log_seq_reported_std,
+                                      phred_scale,
+                                      actual_std,
+                                      reported_std,
                                       seq_errors,
                                       jitter_mult=jitter_mult,
                                       mutation_mult=mutation_mult,
