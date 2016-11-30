@@ -1120,6 +1120,7 @@ function quiver2(consensus::String,
                 # estimate reference error rate
                 edit_dist = levenshtein(reference, state.consensus)
                 est_err_rate = edit_dist / min(length(reference), length(state.consensus))
+                est_err_rate = max(est_err_rate, 1e-10)
                 ref_log_p_vec = fill(log10(est_err_rate), length(reference))
                 ref_pstring = PString(reference, ref_log_p_vec)
             elseif state.stage == frame_correction_stage
