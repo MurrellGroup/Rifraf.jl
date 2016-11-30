@@ -2,6 +2,8 @@ module Model
 
 using Bio.Seq
 
+using Levenshtein
+
 using Quiver2.BandedArrays
 using Quiver2.Proposals
 using Quiver2.Util
@@ -9,7 +11,7 @@ using Quiver2.Util
 import Base.length
 import Base.reverse
 
-export quiver2, ErrorModel, Scores, normalize, modified_emissions
+export quiver2, ErrorModel, Scores, normalize
 
 # initial_stage:
 #   - do not use reference.
@@ -1008,7 +1010,6 @@ function quiver2(consensus::String,
                  log_ps::Vector{Vector{Float64}},
                  scores::Scores;
                  reference::String="",
-                 ref_log_p::Float64=0.0,
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
@@ -1037,9 +1038,6 @@ function quiver2(consensus::String,
         if min_ref_indel_score >= 0.0
             error("min_ref_indel_score must be < 0.0")
         end
-        if (ref_log_p == -Inf || ref_log_p >= 0.0)
-            error("ref_log_p=$ref_log_p but should be less than 0.0")
-        end
         if (ref_scores.mismatch >= 0.0 ||
             ref_scores.insertion >= 0.0 ||
             ref_scores.deletion >= 0.0 ||
@@ -1062,7 +1060,9 @@ function quiver2(consensus::String,
 
     sequences = PString[PString(s, p) for (s, p) in zip(seqstrings, log_ps)]
 
-    ref_log_p_vec = fill(ref_log_p, length(reference))
+    # will need to update reference log_p vector after initial stage
+    est_err_rate = 1.0
+    ref_log_p_vec = fill(log10(est_err_rate), length(reference))
     ref_pstring = PString(reference, ref_log_p_vec)
 
     if max_iters < 1
@@ -1117,6 +1117,11 @@ function quiver2(consensus::String,
                     break
                 end
                 state.stage = frame_correction_stage
+                # estimate reference error rate
+                edit_dist = levenshtein(reference, state.consensus)
+                est_err_rate = edit_dist / min(length(reference), length(state.consensus))
+                ref_log_p_vec = fill(log10(est_err_rate), length(reference))
+                ref_pstring = PString(reference, ref_log_p_vec)
             elseif state.stage == frame_correction_stage
                 if !has_single_indels(state.consensus, ref_pstring, ref_scores, bandwidth)
                     consensus_ref = state.consensus
@@ -1235,6 +1240,7 @@ function quiver2(consensus::String,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
                 "bandwidth" => state.bandwidth,
+                "est_ref_err_rate" => est_err_rate,
                 )
 
     # FIXME: recomputing for all sequences is costly, but using batch is less accurate
