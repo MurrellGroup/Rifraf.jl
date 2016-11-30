@@ -18,28 +18,28 @@ function inv_log10(logp::Float64)
 end
 
 
-function test_get_sub_template()
+function test_get_sub_consensus()
     seq = "ACGT"
     codon = ('A', 'A', 'A')
     proposal = Proposals.CodonInsertion(0, codon)
     next_posn = 1
     n_after = 3
     expected = "AAAACG"
-    result = Quiver2.Model.get_sub_template(proposal, seq, next_posn, n_after)
+    result = Quiver2.Model.get_sub_consensus(proposal, seq, next_posn, n_after)
     @test expected == result
 
     proposal = Proposals.CodonInsertion(3, codon)
     next_posn = 4
     n_after = 1
     expected = "AAAT"
-    result = Quiver2.Model.get_sub_template(proposal, seq, next_posn, n_after)
+    result = Quiver2.Model.get_sub_consensus(proposal, seq, next_posn, n_after)
     @test expected == result
 
     proposal = Proposals.CodonInsertion(4, codon)
     next_posn = 5
     n_after = 0
     expected = "AAA"
-    result = Quiver2.Model.get_sub_template(proposal, seq, next_posn, n_after)
+    result = Quiver2.Model.get_sub_consensus(proposal, seq, next_posn, n_after)
     @test expected == result
 end
 
@@ -202,6 +202,7 @@ function test_random_proposal(proposal, template_len)
         local_errors = Model.ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
     end
     local_scores = Model.Scores(local_errors)
+    phred_scale = 3.0
     log_actual_error_std = 0.5
     log_reported_error_std = 0.5
 
@@ -209,6 +210,7 @@ function test_random_proposal(proposal, template_len)
      tbools) = sample_from_template(template_seq,
                                     template_error_p,
                                     errors,
+                                    phred_scale,
                                     log_actual_error_std,
                                     log_reported_error_std)
     log_p = Float64[Float64(q) / (-10.0) for q in phreds]
@@ -312,8 +314,9 @@ function test_quiver2()
 
     template_error_mean = 0.001
     template_alpha = 1e-1
-    log_seq_actual_std = 0.1
-    log_seq_reported_std = 0.01
+    phred_scale = 3.0
+    log_seq_actual_std = 3.0
+    log_seq_reported_std = 0.3
 
     seq_errors = Model.ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
     seq_scores = Model.Scores(seq_errors)
@@ -331,6 +334,7 @@ function test_quiver2()
                           ref_sample_errors,
                           template_error_mean,
                           template_alpha,
+                          phred_scale,
                           log_seq_actual_std,
                           log_seq_reported_std,
                           seq_errors)
@@ -343,7 +347,6 @@ function test_quiver2()
          info) = Model.quiver2(initial_template, reads,
                                phreds, seq_scores,
                                reference=reference,
-                               ref_log_p=log10(ref_error_rate),
                                ref_scores=ref_scores,
                                bandwidth=10, min_dist=9, batch=5,
                                max_iters=100)
@@ -473,7 +476,7 @@ end
 
 srand(1234)
 
-test_get_sub_template()
+test_get_sub_consensus()
 test_perfect_forward()
 test_imperfect_backward()
 test_imperfect_forward()
