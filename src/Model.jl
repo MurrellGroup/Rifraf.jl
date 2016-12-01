@@ -920,13 +920,17 @@ function estimate_probs(state::State,
     newcols = zeros(Float64, (nrows, 6))
 
     use_ref = (length(reference) > 0)
+    # do not want to penalize indels too harshly, otherwise consensus
+    # appears too likely.
+    # TODO: how to set scores correctly for estimating qvs?
+    qv_ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
     for m in candstask(scoring_stage, state.consensus, sequences,
                        state.Amoves, scores, state.bandwidth,
                        false)
         score = score_proposal(m, state,
                                sequences, scores,
                                use_ref,
-                               reference, ref_scores,
+                               reference, qv_ref_scores,
                                newcols)
         if typeof(m) == Substitution
             position_scores[m.pos, baseints[m.base]] = score
