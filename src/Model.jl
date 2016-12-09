@@ -11,7 +11,7 @@ using Quiver2.Util
 import Base.length
 import Base.reverse
 
-export quiver2, ErrorModel, Scores, normalize
+export quiver2, ErrorModel, Scores, normalize, estimate_point_probs, estimate_indel_probs
 
 # initial_stage:
 #   - do not use reference.

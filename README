@@ -1,0 +1,10 @@
+Example script usage:
+
+julia ./scripts/quiver2.jl \
+      --reference ./data/references.fasta \
+      --reference-map ./data/ref-map.tsv \
+      --phred-cap 30 \
+      --ref-errors 8,0.1,0.1,1,1 \
+      1,2,2 \
+      "example-*-sequences.fastq" \
+      consensus-seqs.fastq

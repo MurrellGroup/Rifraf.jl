@@ -13,10 +13,6 @@ import Quiver2.Util
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
-        "--modify-scores"
-        help = "modify scores to match emission probabilities"
-        action = :store_true
-
         "--reference"
         help = string("reference fasta file.",
                       " uses first sequence unless --reference-map is given.")
@@ -28,15 +24,15 @@ function parse_commandline()
         arg_type = String
         default = ""
 
-        "--ref-error-rate"
-        help = "reference error rate"
-        arg_type = Float64
-        default = 0.0
+        "--phred-cap"
+        help = "maximum PHRED score"
+        arg_type = Int8
+        default = Int8(0)
 
         "--ref-errors"
-        help = "comma-seperated reference error ratios - mm, ins, del, codon ins, codon del"
+        help = "comma-seperated reference error ratios - mm, codon ins, codon del"
         arg_type = String
-        default = "0,0,0,0,0"
+        default = "10,0.1,0.1,1,1"
 
         "--ref-indel-penalty"
         help = "log10 penalty added to reference indel scores"
@@ -122,7 +118,14 @@ end
         ref_records = read_fasta_records(reffile)
     end
     if length(refid) > 0
-        ref_record = collect(filter(r -> r.name == refid, ref_records))[1]
+        filt_records = collect(filter(r -> r.name == refid, ref_records))
+        if length(filt_records) == 0
+            error("reference '$refid' not found in `$reffile`")
+        end
+        if length(filt_records) > 1
+            error("multiple references with id '$refid' found in `$reffile`")
+        end
+        ref_record = filt_records[1]
         reference = ref_record.seq
     elseif length(ref_records) > 0
         ref_record = ref_records[1]
@@ -130,23 +133,24 @@ end
     end
 
     score_args = map(x -> parse(Float64, x), split(args["seq-errors"], ","))
+    scores = Scores(ErrorModel(score_args...))
+
     ref_score_args = map(x -> parse(Float64, x), split(args["ref-errors"], ","))
-    scores = Quiver2.Model.Scores(Quiver2.Model.ErrorModel(score_args...))
-    ref_scores = Quiver2.Model.Scores(Quiver2.Model.ErrorModel(ref_score_args...))
-    if args["modify-scores"]
-        scores = Quiver2.Model.modified_emissions(scores)
-        ref_scores = Quiver2.Model.modified_emissions(ref_scores)
-    end
+    ref_scores = Scores(ErrorModel(ref_score_args...))
+
     sequences, phreds = read_fastq(file)
-    template = sequences[1]
     if args["verbose"] > 0
         println(STDERR, "starting run")
     end
-    return quiver2(template, sequences, phreds,
+    phred_cap = args["phred-cap"]
+    if phred_cap > 0
+        phreds = Vector{Int8}[cap_phreds(p, phred_cap)
+                              for p in phreds]
+    end
+    return quiver2(sequences, phreds,
                    scores;
                    reference=reference,
                    ref_scores=ref_scores,
-                   ref_log_p=log10(args["ref-error-rate"]),
                    ref_indel_penalty=args["ref-indel-penalty"],
                    min_ref_indel_score=args["min-ref-indel-score"],
                    bandwidth=args["bandwidth"],
@@ -252,7 +256,7 @@ function main()
         if typeof(results[i]) == RemoteException
             throw(results[i])
         end
-        consensus, base_probs, ins_probs, info = results[i]
+        consensus, base_probs, ins_probs, _, info = results[i]
         if info["converged"]
             n_converged += 1
             name = basenames[i]
@@ -260,12 +264,12 @@ function main()
                 name = name[plen + 1:end - slen]
             end
             seqname = string(prefix, name)
-            quality = Quiver2.Model.estimate_point_probs(base_probs, ins_probs)
+            quality = estimate_point_probs(base_probs, ins_probs)
             t_phred = p_to_phred(quality)
             record = Seq.FASTQSeqRecord(seqname, consensus, t_phred)
             write(stream, record)
             if length(args["indel-file"]) > 0
-                indel_p = Quiver2.Model.estimate_indel_probs(base_probs, ins_probs)
+                indel_p = estimate_indel_probs(base_probs, ins_probs)
                 max_indel_p = maximum(indel_p)
                 sum_indel_p = sum(indel_p)
                 indel_rate = sum_indel_p / length(indel_p)

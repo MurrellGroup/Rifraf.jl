@@ -1,6 +1,6 @@
 module Util
 
-export p_to_phred, phred_to_log_p, phred_to_p, normalize
+export p_to_phred, phred_to_log_p, phred_to_p, normalize, cap_phreds, logsumexp10
 
 MIN_PHRED = 1
 MAX_PHRED = Int('~') - 33
