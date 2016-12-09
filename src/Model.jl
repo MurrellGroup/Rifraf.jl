@@ -818,6 +818,13 @@ end
 
 function initial_state(consensus::String, seqs::Vector{PString},
                        scores::Scores, bandwidth::Int)
+    if length(consensus) == 0
+        # choose highest-quality sequence
+        idx = indmin([Util.logsumexp10(s.log_p)
+                      for s in seqs])
+        consensus = seqs[idx].seq
+    end
+
     As = [forward(consensus, s, scores, bandwidth)
           for s in seqs]
     Bs = [backward(consensus, s, scores, bandwidth)
@@ -1009,10 +1016,10 @@ function posterior_error_probs(tlen::Int,
 end
 
 
-function quiver2(consensus::String,
-                 seqstrings::Vector{String},
+function quiver2(seqstrings::Vector{String},
                  log_ps::Vector{Vector{Float64}},
                  scores::Scores;
+                 consensus::String="",
                  reference::String="",
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
@@ -1261,8 +1268,7 @@ function quiver2(consensus::String,
     return state.consensus, base_probs, ins_probs, post, info
 end
 
-function quiver2(consensus::String,
-                 sequences::Vector{String},
+function quiver2(sequences::Vector{String},
                  phreds::Vector{Vector{Int8}},
                  scores::Scores;
                  kwargs...)
@@ -1270,7 +1276,7 @@ function quiver2(consensus::String,
         error("phred score cannot be negative")
     end
     log_ps = Util.phred_to_log_p(phreds)
-    return quiver2(consensus, sequences, log_ps, scores; kwargs...)
+    return quiver2(sequences, log_ps, scores; kwargs...)
 end
 
 
@@ -1278,17 +1284,18 @@ end
 Alternate quiver2() using BioJulia types.
 
 """
-function quiver2(consensus::DNASequence,
-                 sequences::Vector{DNASequence},
+function quiver2(sequences::Vector{DNASequence},
                  phreds::Vector{Vector{Int8}},
                  scores::Scores;
+                 consensus::DNASequence=DNASequence(""),
                  reference::DNASequence=DNASequence(""),
                  kwargs...)
     new_reference = convert(String, reference)
     new_consensus = convert(String, consensus)
     new_sequences = String[convert(String, s) for s in sequences]
     (result, base_probs, insertion_probs, post,
-     info) = quiver2(new_consensus, new_sequences, phreds, scores;
+     info) = quiver2(new_sequences, phreds, scores;
+                     consensus=new_consensus,
                      reference=new_reference,
                      kwargs...)
     info["consensus_stages"] = DNASequence[DNASequence(s) for s in info["consensus_stages"]]

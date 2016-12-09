@@ -305,20 +305,20 @@ end
 
 function test_quiver2()
     # can't guarantee this test actually passes, since it is random
-    n_seqs = 10
-    len = 90
+    n_seqs = 3
+    len = 30
     ref_error_rate = 0.3
     ref_sample_errors = Model.ErrorModel(8.0, 0.0, 0.0, 1.0, 1.0)
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
 
-    template_error_mean = 0.001
-    template_alpha = 1e-1
+    template_error_mean = 0.0001
+    template_alpha = 1.0
     phred_scale = 3.0
     log_seq_actual_std = 3.0
     log_seq_reported_std = 0.3
 
-    seq_errors = Model.ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
+    seq_errors = Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0)
     seq_scores = Model.Scores(seq_errors)
 
     n = 100
@@ -341,10 +341,9 @@ function test_quiver2()
         if !use_ref
             reference = DNASequence("")
         end
-        initial_template = reads[1]
 
         (result, q1, q2, q3,
-         info) = Model.quiver2(initial_template, reads,
+         info) = Model.quiver2(reads,
                                phreds, seq_scores,
                                reference=reference,
                                ref_scores=ref_scores,
