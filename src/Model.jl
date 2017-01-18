@@ -845,7 +845,7 @@ function recompute!(state::State, seqs::Vector{PString},
                     scores::Scores, reference::PString,
                     ref_scores::Scores, bandwidth_delta::Int,
                     recompute_As::Bool, recompute_Bs::Bool,
-                    verbose::Int)
+                    verbose::Int, use_ref_for_qvs::Bool)
     tolerance = 0
     if recompute_As
         while tolerance < codon_length
@@ -859,9 +859,10 @@ function recompute!(state::State, seqs::Vector{PString},
             end
             tolerance = minimum(band_tolerance(Am)
                                 for Am in state.Amoves)
-            if ((state.stage == frame_correction_stage ||
-                 state.stage == scoring_stage) &&
-                length(reference) > 0)
+            if (((state.stage == frame_correction_stage) ||
+                ((state.stage == scoring_stage) &&
+                 (use_ref_for_qvs))) &&
+                (length(reference) > 0))
                 state.A_t, Amoves_t = forward_moves(state.consensus,
                                                     reference,
                                                     ref_scores,
@@ -879,17 +880,19 @@ function recompute!(state::State, seqs::Vector{PString},
     if recompute_Bs
         state.Bs = [backward(state.consensus, s, scores, state.bandwidth)
                     for s in seqs]
-        if ((state.stage == frame_correction_stage ||
-             state.stage == scoring_stage) &&
-            length(reference) > 0)
+        if (((state.stage == frame_correction_stage) ||
+             ((state.stage == scoring_stage) &&
+              (use_ref_for_qvs))) &&
+            (length(reference) > 0))
             state.B_t = backward(state.consensus, reference,
                                  ref_scores, state.bandwidth)
         end
     end
     state.score = sum(A[end, end] for A in state.As)
-    if ((state.stage == frame_correction_stage ||
-         state.stage == scoring_stage) &&
-        length(reference) > 0)
+    if (((state.stage == frame_correction_stage) ||
+         ((state.stage == scoring_stage) &&
+          (use_ref_for_qvs))) &&
+        (length(reference) > 0))
         state.score += state.A_t[end, end]
     end
 end
@@ -910,7 +913,8 @@ function estimate_probs(state::State,
                         sequences::Vector{PString},
                         scores::Scores,
                         reference::PString,
-                        ref_scores::Scores)
+                        ref_scores::Scores,
+                        use_ref_for_qvs::Bool)
     # `position_scores[i]` gives the following log probabilities
     # for `consensus[i]`: [A, C, G, T, -]
     position_scores = zeros(length(state.consensus), 5) + state.score
@@ -926,7 +930,7 @@ function estimate_probs(state::State,
     nrows = max(maxlen, length(reference)) + 1
     newcols = zeros(Float64, (nrows, 6))
 
-    use_ref = (length(reference) > 0)
+    use_ref = (length(reference) > 0) && use_ref_for_qvs
     # do not want to penalize indels too harshly, otherwise consensus
     # appears too likely.
     # TODO: how to set scores correctly for estimating qvs?
@@ -963,7 +967,6 @@ end
 function estimate_point_probs(position_probs, insertion_probs)
     no_point_error_prob = maximum(position_probs, 2)
     # multiple by 0.5 to avoid double counting.
-    # TODO: is this the right way to do this?
     no_ins_error_prob = 1.0 - 0.5 * sum(insertion_probs, 2)
     result = 1.0 - broadcast(*, no_point_error_prob,
                              no_ins_error_prob[1:end-1],
@@ -1025,6 +1028,7 @@ function quiver2(seqstrings::Vector{String},
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
                  propose_codons::Bool=false,
+                 use_ref_for_qvs::Bool=false,
                  bandwidth::Int=10, bandwidth_delta::Int=5,
                  min_dist::Int=15,
                  batch::Int=10, batch_threshold::Float64=0.05,
@@ -1177,7 +1181,8 @@ function quiver2(seqstrings::Vector{String},
                                                        for c in chosen_cands])
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
-                       bandwidth_delta, true, false, verbose)
+                       bandwidth_delta, true, false, verbose,
+                       use_ref_for_qvs)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
             if length(chosen_cands) > 1 &&
@@ -1207,7 +1212,8 @@ function quiver2(seqstrings::Vector{String},
         end
         recompute!(state, seqs, scores,
                    ref_pstring, ref_scores,
-                   bandwidth_delta, recompute_As, true, verbose)
+                   bandwidth_delta, recompute_As, true, verbose,
+                   use_ref_for_qvs)
         if verbose > 1
             println(STDERR, "  score: $(state.score) ($(state.stage))")
         end
@@ -1231,7 +1237,8 @@ function quiver2(seqstrings::Vector{String},
             seqs = sequences[indices]
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
-                       bandwidth_delta, true, true, verbose)
+                       bandwidth_delta, true, true, verbose,
+                       use_ref_for_qvs)
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
             end
@@ -1258,9 +1265,11 @@ function quiver2(seqstrings::Vector{String},
     # FIXME: recomputing for all sequences is costly, but using batch is less accurate
     recompute!(state, seqs, scores,
                ref_pstring, ref_scores,
-               bandwidth_delta, true, true, verbose)
+               bandwidth_delta, true, true, verbose,
+               use_ref_for_qvs)
     base_probs, ins_probs = estimate_probs(state, seqs, scores,
-                                           ref_pstring, ref_scores)
+                                           ref_pstring, ref_scores,
+                                           use_ref_for_qvs)
 
     post = posterior_error_probs(length(state.consensus),
                                  seqs, state.Amoves)
