@@ -10,7 +10,10 @@ immutable BandedArray{T} <: AbstractArray{T,2}
     v_offset::Int
 
     function BandedArray(data::Array{T, 2}, shape::Tuple{Int, Int}, bandwidth::Int)
-        # TODO: check bandwidth
+        if bandwidth < 1
+            # TODO: make unsigned
+            error("bandwidth must be positive")
+        end
         drows = datarows(shape, bandwidth)
         nrows, ncols = shape
         h_offset = max(ncols - nrows, 0)

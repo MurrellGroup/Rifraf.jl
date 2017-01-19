@@ -33,12 +33,17 @@ export quiver2, ErrorModel, Scores, normalize, estimate_point_probs, estimate_in
 error probabilities.
 
 """
-immutable PString
+type PString
     seq::String
     log_p::Vector{Float64}
     inv_log_p::Vector{Float64}
+    bandwidth::Int
 
-    function PString(seq::String, log_p::Vector{Float64})
+    function PString(seq::String, log_p::Vector{Float64}, bandwidth::Int)
+        if bandwidth < 1
+            error("bandwidth must be positive")
+        end
+
         if length(seq) != length(log_p)
             error("length mismatch")
         end
@@ -52,13 +57,13 @@ immutable PString
             error("a log error probability is > 0")
         end
         inv_log_p = log10(1.0 - exp10(log_p))
-        return new(seq, log_p, inv_log_p)
+        return new(seq, log_p, inv_log_p, bandwidth)
     end
 end
 
-function PString(seq::String, phreds::Vector{Int8})
+function PString(seq::String, phreds::Vector{Int8}, bandwidth::Int)
     log_p = phred_to_log_p(phreds)
-    return PString(seq, log_p)
+    return PString(seq, log_p, bandwidth)
 end
 
 function length(s::PString)
@@ -66,7 +71,7 @@ function length(s::PString)
 end
 
 function reverse(s::PString)
-    return PString(reverse(s.seq), reverse(s.log_p))
+    return PString(reverse(s.seq), reverse(s.log_p), s.bandwidth)
 end
 
 
@@ -136,7 +141,6 @@ type State
     Bs::Vector{BandedArray{Float64}}
     stage::Stage
     converged::Bool
-    bandwidth::Int
 end
 
 @enum DPMove dp_none=0 dp_match=1 dp_ins=2 dp_del=3 dp_codon_ins=4 dp_codon_del=5
@@ -252,13 +256,13 @@ end
 
 """Does backtracing to find best alignment."""
 function forward_moves(t::String, s::PString,
-                       scores::Scores,
-                       bandwidth::Int; trim::Bool=false)
+                       scores::Scores;
+                       trim::Bool=false)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
-    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
-    moves = BandedArray(Int, result.shape, bandwidth)
+    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), s.bandwidth)
+    moves = BandedArray(Int, result.shape, s.bandwidth)
     moves[1, 1] = Int(dp_none)
     nrows, ncols = size(result)
     for j = 1:ncols
@@ -284,9 +288,8 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
 function forward(t::String, s::PString,
-                 scores::Scores,
-                 bandwidth::Int)
-    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), bandwidth)
+                 scores::Scores)
+    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), s.bandwidth)
     nrows, ncols = size(result)
     for j = 1:ncols
         start, stop = row_range(result, j)
@@ -310,10 +313,8 @@ B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
 function backward(t::String, s::PString,
-                  scores::Scores,
-                  bandwidth::Int)
-    result = forward(reverse(t), reverse(s),
-                     scores, bandwidth)
+                  scores::Scores)
+    result = forward(reverse(t), reverse(s), scores)
     return flip(result)
 end
 
@@ -570,7 +571,6 @@ function candstask(stage::Stage,
                    sequences::Vector{PString},
                    Amoves::Vector{BandedArray{Int}},
                    scores::Scores,
-                   bandwidth::Int,
                    propose_codons::Bool)
     len = length(consensus)
     function _it()
@@ -603,8 +603,7 @@ function candstask(stage::Stage,
             end
             # codon insertions
             for proposal in best_codons(consensus, sequences,
-                                        scores, bandwidth,
-                                        Amoves=Amoves)
+                                        scores, Amoves=Amoves)
                 produce(proposal)
             end
         end
@@ -627,8 +626,7 @@ function getcands(state::State,
     newcols = zeros(Float64, (nrows, 6))
 
     for m in candstask(state.stage, state.consensus, sequences,
-                       state.Amoves, scores, state.bandwidth,
-                       propose_codons)
+                       state.Amoves, scores, propose_codons)
         score = score_proposal(m, state, sequences, scores, use_ref,
                                reference, ref_scores, newcols)
         if score > state.score && !isapprox(score, state.score)
@@ -736,17 +734,15 @@ end
 
 function align_moves(t::String, s::PString,
                      scores::Scores,
-                     bandwidth::Int;
                      trim::Bool=false)
-    A, Amoves = forward_moves(t, s, scores, bandwidth, trim=trim)
+    A, Amoves = forward_moves(t, s, scores, trim=trim)
     return backtrace(Amoves)
 end
 
 function align(t::String, s::PString,
                scores::Scores,
-               bandwidth::Int;
                trim::Bool=false)
-    moves = align_moves(t, s, scores, bandwidth, trim=trim)
+    moves = align_moves(t, s, scores, trim=trim)
     return moves_to_alignment_strings(moves, t, s.seq)
 end
 
@@ -754,19 +750,18 @@ function align(t::String, s::String, phreds::Vector{Int8},
                scores::Scores,
                bandwidth::Int;
                trim::Bool=false)
-    moves = align_moves(t, PString(s, phreds), scores, bandwidth, trim=trim)
+    moves = align_moves(t, PString(s, phreds, bandwidth), scores, trim=trim)
     return moves_to_alignment_strings(moves, t, s)
 end
 
 function best_codons(consensus::String,
                      sequences::Vector{PString},
-                     scores::Scores,
-                     bandwidth::Int;
+                     scores::Scores;
                      Amoves::Vector{BandedArray{Int}}=BandedArray{Int}[])
     if length(Amoves) == length(sequences)
         moves = [backtrace(Am) for Am in Amoves]
     else
-        moves = [align_moves(consensus, s, scores, bandwidth)
+        moves = [align_moves(consensus, s, scores)
                  for s in sequences]
     end
     indices = [moves_to_indices(m, length(consensus), length(s.seq))
@@ -803,11 +798,9 @@ end
 
 function has_single_indels(consensus::String,
                            reference::PString,
-                           ref_scores::Scores,
-                           bandwidth::Int)
+                           ref_scores::Scores)
     has_right_length = length(consensus) % codon_length == 0
-    moves = align_moves(consensus, reference,
-                        ref_scores, bandwidth)
+    moves = align_moves(consensus, reference, ref_scores)
     result = dp_ins in moves || dp_del in moves
     if !result && !has_right_length
         error("consensus length is not a multiple of three")
@@ -817,7 +810,7 @@ end
 
 
 function initial_state(consensus::String, seqs::Vector{PString},
-                       scores::Scores, bandwidth::Int)
+                       scores::Scores)
     if length(consensus) == 0
         # choose highest-quality sequence
         idx = indmin([Util.logsumexp10(s.log_p)
@@ -825,9 +818,9 @@ function initial_state(consensus::String, seqs::Vector{PString},
         consensus = seqs[idx].seq
     end
 
-    As = [forward(consensus, s, scores, bandwidth)
+    As = [forward(consensus, s, scores)
           for s in seqs]
-    Bs = [backward(consensus, s, scores, bandwidth)
+    Bs = [backward(consensus, s, scores)
           for s in seqs]
     score = sum(A[end, end] for A in As)
 
@@ -837,7 +830,7 @@ function initial_state(consensus::String, seqs::Vector{PString},
     Amoves = BandedArray{Int}[]
 
     return State(score, consensus, A_t, B_t, As, Amoves,
-                 Bs, initial_stage, false, bandwidth)
+                 Bs, initial_stage, false)
 end
 
 
@@ -846,46 +839,35 @@ function recompute!(state::State, seqs::Vector{PString},
                     ref_scores::Scores, bandwidth_delta::Int,
                     recompute_As::Bool, recompute_Bs::Bool,
                     verbose::Int, use_ref_for_qvs::Bool)
-    tolerance = 0
     if recompute_As
-        while tolerance < codon_length
-            state.As = BandedArray{Float64}[]
-            state.Amoves = BandedArray{Int}[]
-            for s in seqs
-                As, Amoves = forward_moves(state.consensus, s, scores,
-                                           state.bandwidth)
-                push!(state.As, As)
-                push!(state.Amoves, Amoves)
+        state.As = BandedArray{Float64}[]
+        state.Amoves = BandedArray{Int}[]
+        for s in seqs
+            As, Amoves = forward_moves(state.consensus, s, scores)
+            while band_tolerance(Amoves) < codon_length
+                s.bandwidth += bandwidth_delta
             end
-            tolerance = minimum(band_tolerance(Am)
-                                for Am in state.Amoves)
-            if (((state.stage == frame_correction_stage) ||
-                ((state.stage == scoring_stage) &&
-                 (use_ref_for_qvs))) &&
-                (length(reference) > 0))
-                state.A_t, Amoves_t = forward_moves(state.consensus,
-                                                    reference,
-                                                    ref_scores,
-                                                    state.bandwidth)
-                tolerance = min(tolerance, band_tolerance(Amoves_t))
-            end
-            if tolerance < codon_length
-                state.bandwidth += bandwidth_delta
-                if verbose > 1
-                    println("NEW BANDWIDTH: $(state.bandwidth)")
-                end
+            push!(state.As, As)
+            push!(state.Amoves, Amoves)
+        end
+        if (((state.stage == frame_correction_stage) ||
+             ((state.stage == scoring_stage) &&
+              (use_ref_for_qvs))) &&
+              (length(reference) > 0))
+            state.A_t, Amoves_t = forward_moves(state.consensus, reference, ref_scores)
+            while band_tolerance(Amoves_t) < codon_length            
+                reference.bandwidth += bandwidth_delta
+                state.A_t, Amoves_t = forward_moves(state.consensus, references, ref_scores)
             end
         end
     end
     if recompute_Bs
-        state.Bs = [backward(state.consensus, s, scores, state.bandwidth)
-                    for s in seqs]
+        state.Bs = [backward(state.consensus, s, scores) for s in seqs]
         if (((state.stage == frame_correction_stage) ||
              ((state.stage == scoring_stage) &&
               (use_ref_for_qvs))) &&
             (length(reference) > 0))
-            state.B_t = backward(state.consensus, reference,
-                                 ref_scores, state.bandwidth)
+            state.B_t = backward(state.consensus, reference, ref_scores)
         end
     end
     state.score = sum(A[end, end] for A in state.As)
@@ -936,8 +918,7 @@ function estimate_probs(state::State,
     # TODO: how to set scores correctly for estimating qvs?
     qv_ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
     for m in candstask(scoring_stage, state.consensus, sequences,
-                       state.Amoves, scores, state.bandwidth,
-                       false)
+                       state.Amoves, scores, false)
         score = score_proposal(m, state,
                                sequences, scores,
                                use_ref,
@@ -1042,10 +1023,6 @@ function quiver2(seqstrings::Vector{String},
         error("error model cannot allow codon indels")
     end
 
-    if bandwidth < 0
-        error("bandwidth cannot be negative: $bandwidth")
-    end
-
     if length(reference) > 0
         if ref_indel_penalty >= 0.0
             error("ref_indel_penalty must be < 0.0")
@@ -1073,12 +1050,13 @@ function quiver2(seqstrings::Vector{String},
         end
     end
 
-    sequences = PString[PString(s, p) for (s, p) in zip(seqstrings, log_ps)]
+    sequences = PString[PString(s, p, bandwidth)
+                        for (s, p) in zip(seqstrings, log_ps)]
 
     # will need to update reference log_p vector after initial stage
     est_err_rate = 1.0
     ref_log_p_vec = fill(log10(est_err_rate), length(reference))
-    ref_pstring = PString(reference, ref_log_p_vec)
+    ref_pstring = PString(reference, ref_log_p_vec, bandwidth)
 
     if max_iters < 1
         error("invalid max iters: $max_iters")
@@ -1097,7 +1075,7 @@ function quiver2(seqstrings::Vector{String},
     if verbose > 1
         println(STDERR, "computing initial alignments")
     end
-    state = initial_state(consensus, seqs, scores, bandwidth)
+    state = initial_state(consensus, seqs, scores)
     empty_ref = length(reference) == 0
 
     if verbose > 1
@@ -1107,7 +1085,9 @@ function quiver2(seqstrings::Vector{String},
     consensus_lengths = Int[length(consensus)]
     consensus_stages = ["", "", ""]
 
-    stage_iterations = zeros(Int, Int(typemax(Stage)))
+    stage_iterations = zeros(Int, Int(typemax(Stage)) - 1)
+    stage_times = Float64[0, 0, 0]
+    tic()
     for i in 1:max_iters
         stage_iterations[Int(state.stage)] += 1
         old_consensus = state.consensus
@@ -1126,6 +1106,8 @@ function quiver2(seqstrings::Vector{String},
             end
             push!(n_proposals, zeros(Int, Int(typemax(DPMove))))
             consensus_stages[Int(state.stage)] = state.consensus
+            stage_times[Int(state.stage)] = toq()
+            tic()
             if state.stage == initial_stage
                 if empty_ref
                     state.converged = true
@@ -1137,9 +1119,9 @@ function quiver2(seqstrings::Vector{String},
                 est_err_rate = edit_dist / min(length(reference), length(state.consensus))
                 est_err_rate = max(est_err_rate, 1e-10)
                 ref_log_p_vec = fill(log10(est_err_rate), length(reference))
-                ref_pstring = PString(reference, ref_log_p_vec)
+                ref_pstring = PString(reference, ref_log_p_vec, bandwidth)
             elseif state.stage == frame_correction_stage
-                if !has_single_indels(state.consensus, ref_pstring, ref_scores, bandwidth)
+                if !has_single_indels(state.consensus, ref_pstring, ref_scores)
                     consensus_ref = state.consensus
                     state.stage = refinement_stage
                 elseif (ref_scores.insertion == min_ref_indel_score ||
@@ -1258,8 +1240,8 @@ function quiver2(seqstrings::Vector{String},
                 "consensus_stages" => consensus_stages,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
-                "bandwidth" => state.bandwidth,
                 "est_ref_err_rate" => est_err_rate,
+                "stage_times" => stage_times,
                 )
 
     # FIXME: recomputing for all sequences is costly, but using batch is less accurate
