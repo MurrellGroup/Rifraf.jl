@@ -733,14 +733,14 @@ function moves_to_indices(moves::Vector{DPMove},
 end
 
 function align_moves(t::String, s::PString,
-                     scores::Scores,
+                     scores::Scores;
                      trim::Bool=false)
     A, Amoves = forward_moves(t, s, scores, trim=trim)
     return backtrace(Amoves)
 end
 
 function align(t::String, s::PString,
-               scores::Scores,
+               scores::Scores;
                trim::Bool=false)
     moves = align_moves(t, s, scores, trim=trim)
     return moves_to_alignment_strings(moves, t, s.seq)
@@ -836,7 +836,7 @@ end
 
 function recompute!(state::State, seqs::Vector{PString},
                     scores::Scores, reference::PString,
-                    ref_scores::Scores, bandwidth_delta::Int,
+                    ref_scores::Scores, bandwidth_mult::Int,
                     recompute_As::Bool, recompute_Bs::Bool,
                     verbose::Int, use_ref_for_qvs::Bool)
     if recompute_As
@@ -845,7 +845,8 @@ function recompute!(state::State, seqs::Vector{PString},
         for s in seqs
             As, Amoves = forward_moves(state.consensus, s, scores)
             while band_tolerance(Amoves) < codon_length
-                s.bandwidth += bandwidth_delta
+                s.bandwidth *= bandwidth_mult
+                As, Amoves = forward_moves(state.consensus, s, scores)
             end
             push!(state.As, As)
             push!(state.Amoves, Amoves)
@@ -856,8 +857,8 @@ function recompute!(state::State, seqs::Vector{PString},
               (length(reference) > 0))
             state.A_t, Amoves_t = forward_moves(state.consensus, reference, ref_scores)
             while band_tolerance(Amoves_t) < codon_length            
-                reference.bandwidth += bandwidth_delta
-                state.A_t, Amoves_t = forward_moves(state.consensus, references, ref_scores)
+                reference.bandwidth *= bandwidth_mult
+                state.A_t, Amoves_t = forward_moves(state.consensus, reference, ref_scores)
             end
         end
     end
@@ -1010,7 +1011,7 @@ function quiver2(seqstrings::Vector{String},
                  min_ref_indel_score::Float64=-15.0,
                  propose_codons::Bool=false,
                  use_ref_for_qvs::Bool=false,
-                 bandwidth::Int=10, bandwidth_delta::Int=5,
+                 bandwidth::Int=10, bandwidth_mult::Int=2,
                  min_dist::Int=15,
                  batch::Int=10, batch_threshold::Float64=0.05,
                  max_iters::Int=100, verbose::Int=0)
@@ -1163,7 +1164,7 @@ function quiver2(seqstrings::Vector{String},
                                                        for c in chosen_cands])
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
-                       bandwidth_delta, true, false, verbose,
+                       bandwidth_mult, true, false, verbose,
                        use_ref_for_qvs)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
@@ -1194,7 +1195,7 @@ function quiver2(seqstrings::Vector{String},
         end
         recompute!(state, seqs, scores,
                    ref_pstring, ref_scores,
-                   bandwidth_delta, recompute_As, true, verbose,
+                   bandwidth_mult, recompute_As, true, verbose,
                    use_ref_for_qvs)
         if verbose > 1
             println(STDERR, "  score: $(state.score) ($(state.stage))")
@@ -1219,7 +1220,7 @@ function quiver2(seqstrings::Vector{String},
             seqs = sequences[indices]
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
-                       bandwidth_delta, true, true, verbose,
+                       bandwidth_mult, true, true, verbose,
                        use_ref_for_qvs)
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
@@ -1247,7 +1248,7 @@ function quiver2(seqstrings::Vector{String},
     # FIXME: recomputing for all sequences is costly, but using batch is less accurate
     recompute!(state, seqs, scores,
                ref_pstring, ref_scores,
-               bandwidth_delta, true, true, verbose,
+               bandwidth_mult, true, true, verbose,
                use_ref_for_qvs)
     base_probs, ins_probs = estimate_probs(state, seqs, scores,
                                            ref_pstring, ref_scores,
