@@ -612,12 +612,12 @@ function candstask(stage::Stage,
 end
 
 
-function getcands(state::State,
-                  sequences::Vector{PString},
-                  scores::Scores,
-                  reference::PString,
-                  ref_scores::Scores,
-                  propose_codons::Bool)
+function get_candidate_proposals(state::State,
+                                 sequences::Vector{PString},
+                                 scores::Scores,
+                                 reference::PString,
+                                 ref_scores::Scores,
+                                 propose_codons::Bool)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
 
@@ -1098,8 +1098,8 @@ function quiver2(seqstrings::Vector{String},
         end
 
         penalties_increased = false
-        candidates = getcands(state, seqs, scores, ref_pstring,
-                              ref_scores, propose_codons)
+        candidates = get_candidate_proposals(state, seqs, scores, ref_pstring,
+                                             ref_scores, propose_codons)
         recompute_As = true
         if length(candidates) == 0
             if verbose > 1
