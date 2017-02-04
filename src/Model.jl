@@ -640,10 +640,14 @@ end
 function alignment_proposals(state::State,
                              sequences::Vector{PString})
     function _it()
+        all_proposals = Set{Proposal}()
         for (Amoves, seq) in zip(state.Amoves, sequences)
             moves = backtrace(Amoves)
             for proposal in moves_to_proposals(moves, state.consensus, seq)
-                produce(proposal)
+                if !in(proposal, all_proposals)
+                    push!(all_proposals, proposal)
+                    produce(proposal)
+                end
             end
         end
     end
