@@ -566,19 +566,22 @@ function score_proposal(m::Proposal,
 end
 
 
-function candstask(stage::Stage,
-                   consensus::String,
-                   sequences::Vector{PString},
-                   Amoves::Vector{BandedArray{Int}},
-                   scores::Scores,
-                   propose_codons::Bool)
+function all_proposals(stage::Stage,
+                       consensus::String,
+                       sequences::Vector{PString},
+                       Amoves::Vector{BandedArray{Int}},
+                       scores::Scores,
+                       indel_correction_only::Bool,
+                       propose_codons::Bool)
     len = length(consensus)
     function _it()
-        # substitutions
-        for j in 1:len
-            for base in "ACGT"
-                if consensus[j] != base
-                    produce(Substitution(j, base))
+        if stage != frame_correction_stage || !indel_correction_only
+            # substitutions
+            for j in 1:len
+                for base in "ACGT"
+                    if consensus[j] != base
+                        produce(Substitution(j, base))
+                    end
                 end
             end
         end
@@ -612,11 +615,49 @@ function candstask(stage::Stage,
 end
 
 
+function moves_to_proposals(moves::Vector{DPMove},
+                            consensus::String, seq::PString)
+    proposals = Proposal[]
+    i, j = (0, 0)
+    for move in moves
+        (ii, jj) = offsets[Int(move)]
+        i -= ii
+        j -= jj
+        if move == dp_match
+            if seq.seq[i] != consensus[j]
+                push!(proposals, Substitution(j, seq.seq[i]))
+            end
+        elseif move == dp_ins
+            push!(proposals, Insertion(j, seq.seq[i]))
+        elseif move == dp_del
+            push!(proposals, Deletion(j))
+        end
+    end
+    return proposals
+end
+
+
+function alignment_proposals(state::State,
+                             sequences::Vector{PString})
+    function _it()
+        for (Amoves, seq) in zip(state.Amoves, sequences)
+            moves = backtrace(Amoves)
+            for proposal in moves_to_proposals(moves, state.consensus, seq)
+                produce(proposal)
+            end
+        end
+    end
+    return Task(_it)
+end
+
+
 function get_candidate_proposals(state::State,
                                  sequences::Vector{PString},
                                  scores::Scores,
                                  reference::PString,
                                  ref_scores::Scores,
+                                 fast_proposals::Bool,
+                                 indel_correction_only::Bool,
                                  propose_codons::Bool)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
@@ -625,12 +666,19 @@ function get_candidate_proposals(state::State,
     nrows = max(maxlen, length(reference)) + 1
     newcols = zeros(Float64, (nrows, 6))
 
-    for m in candstask(state.stage, state.consensus, sequences,
-                       state.Amoves, scores, propose_codons)
-        score = score_proposal(m, state, sequences, scores, use_ref,
+    proposals = all_proposals(state.stage, state.consensus, sequences,
+                              state.Amoves, scores,
+                              indel_correction_only,
+                              propose_codons)
+    if state.stage == initial_stage && fast_proposals
+        proposals = alignment_proposals(state, sequences)
+    end
+
+    for p in proposals
+        score = score_proposal(p, state, sequences, scores, use_ref,
                                reference, ref_scores, newcols)
         if score > state.score && !isapprox(score, state.score)
-            push!(candidates, CandProposal(m, score))
+            push!(candidates, CandProposal(p, score))
         end
     end
     return candidates
@@ -809,8 +857,7 @@ function has_single_indels(consensus::String,
 end
 
 
-function initial_state(consensus::String, seqs::Vector{PString},
-                       scores::Scores)
+function initial_state(consensus::String, seqs::Vector{PString})
     if length(consensus) == 0
         # choose highest-quality sequence
         idx = indmin([Util.logsumexp10(s.log_p)
@@ -818,18 +865,14 @@ function initial_state(consensus::String, seqs::Vector{PString},
         consensus = seqs[idx].seq
     end
 
-    As = [forward(consensus, s, scores)
-          for s in seqs]
-    Bs = [backward(consensus, s, scores)
-          for s in seqs]
-    score = sum(A[end, end] for A in As)
-
     A_t = BandedArray(Float64, (1, 1), 1)
     B_t = BandedArray(Float64, (1, 1), 1)
 
+    As = BandedArray{Float64}[]
+    Bs = BandedArray{Float64}[]
     Amoves = BandedArray{Int}[]
 
-    return State(score, consensus, A_t, B_t, As, Amoves,
+    return State(0.0, consensus, A_t, B_t, As, Amoves,
                  Bs, initial_stage, false)
 end
 
@@ -918,8 +961,8 @@ function estimate_probs(state::State,
     # appears too likely.
     # TODO: how to set scores correctly for estimating qvs?
     qv_ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
-    for m in candstask(scoring_stage, state.consensus, sequences,
-                       state.Amoves, scores, false)
+    for m in all_proposals(scoring_stage, state.consensus, sequences,
+                           state.Amoves, scores, false, false)
         score = score_proposal(m, state,
                                sequences, scores,
                                use_ref,
@@ -1009,6 +1052,8 @@ function quiver2(seqstrings::Vector{String},
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
+                 fast_proposals::Bool=true,
+                 indel_correction_only::Bool=true,
                  propose_codons::Bool=false,
                  use_ref_for_qvs::Bool=false,
                  bandwidth::Int=10, bandwidth_mult::Int=2,
@@ -1076,7 +1121,11 @@ function quiver2(seqstrings::Vector{String},
     if verbose > 1
         println(STDERR, "computing initial alignments")
     end
-    state = initial_state(consensus, seqs, scores)
+    state = initial_state(consensus, seqs)
+    recompute!(state, seqs, scores,
+               ref_pstring, ref_scores,
+               bandwidth_mult, true, true, verbose,
+               use_ref_for_qvs)
     empty_ref = length(reference) == 0
 
     if verbose > 1
@@ -1099,7 +1148,10 @@ function quiver2(seqstrings::Vector{String},
 
         penalties_increased = false
         candidates = get_candidate_proposals(state, seqs, scores, ref_pstring,
-                                             ref_scores, propose_codons)
+                                             ref_scores,
+                                             fast_proposals,
+                                             indel_correction_only,
+                                             propose_codons)
         recompute_As = true
         if length(candidates) == 0
             if verbose > 1
