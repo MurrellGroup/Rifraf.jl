@@ -374,10 +374,15 @@ function test_base_probs()
                           [-9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0]]
     bandwidth = 5
+    mult = 2
+    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
+    ref_scores = Model.Scores(ref_errors)
+
     pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
                                   for (s, p) in zip(seqs, lps)]
     rseq = Quiver2.Model.PString("", Float64[], bandwidth)
-    state = Quiver2.Model.initial_state(template, pseqs, scores)
+    state = Quiver2.Model.initial_state(template, pseqs)
+    Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     base, ins = Quiver2.Model.estimate_probs(state, pseqs, scores,
                                              rseq, scores, false)
     @test base[1, 2] > 0.9
@@ -393,13 +398,18 @@ function test_ins_probs()
             "CGTAT",
             "CGTAT"]
     bandwidth = 5
+    mult = 2
+    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
+    ref_scores = Model.Scores(ref_errors)
+
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
                                   for (s, p) in zip(seqs, lps)]
     rseq = Quiver2.Model.PString("", Float64[], bandwidth)
-    state = Quiver2.Model.initial_state(template, pseqs, scores)
+    state = Quiver2.Model.initial_state(template, pseqs)
+    Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     base, ins = Quiver2.Model.estimate_probs(state, pseqs, scores,
                                              rseq, scores, false)
     @test maximum(ins[1, :]) < 1e-9
@@ -412,13 +422,18 @@ function test_indel_probs()
             "CGTAT",
             "CGTAT"]
     bandwidth = 5
+    mult = 2
+    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
+    ref_scores = Model.Scores(ref_errors)
+
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
                                   for (s, p) in zip(seqs, lps)]
     rseq = Quiver2.Model.PString("", Float64[], bandwidth)
-    state = Quiver2.Model.initial_state(template, pseqs, scores)
+    state = Quiver2.Model.initial_state(template, pseqs)
+    Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     base, ins = Quiver2.Model.estimate_probs(state, pseqs, scores,
                                              rseq, scores, false)
     probs = Quiver2.Model.estimate_indel_probs(base, ins)
