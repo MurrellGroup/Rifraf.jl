@@ -618,43 +618,51 @@ end
 function moves_to_proposals(moves::Vector{DPMove},
                             consensus::String, seq::PString)
     proposals = Proposal[]
+    scores = Float64[]
     i, j = (0, 0)
     for move in moves
         (ii, jj) = offsets[Int(move)]
         i -= ii
         j -= jj
+
+        inv_log_p = seq.inv_log_p[max(i, 1)]
+        next_inv_log_p = seq.inv_log_p[min(i + 1, length(seq))]
+        inv_del_log_p = min(inv_log_p, next_inv_log_p)
+
         if move == dp_match
             if seq.seq[i] != consensus[j]
                 push!(proposals, Substitution(j, seq.seq[i]))
+                push!(scores, inv_log_p)
             end
         elseif move == dp_ins
             push!(proposals, Insertion(j, seq.seq[i]))
+            push!(scores, inv_log_p)
         elseif move == dp_del
             push!(proposals, Deletion(j))
+            push!(scores, inv_del_log_p)
         end
     end
-    return proposals
+    return proposals, scores
 end
 
 
 function alignment_proposals(state::State,
                              sequences::Vector{PString},
                              subs_only::Bool)
-    function _it()
-        all_proposals = Set{Proposal}()
-        for (Amoves, seq) in zip(state.Amoves, sequences)
-            moves = backtrace(Amoves)
-            for proposal in moves_to_proposals(moves, state.consensus, seq)
-                if !subs_only || typeof(proposal) == Substitution
-                    if !in(proposal, all_proposals)
-                        push!(all_proposals, proposal)
-                        produce(proposal)
-                    end
+    proposal_dict = Dict{Proposal, Float64}()
+    for (Amoves, seq) in zip(state.Amoves, sequences)
+        moves = backtrace(Amoves)
+        (proposals, scores) = moves_to_proposals(moves, state.consensus, seq)
+        for (proposal, score) in zip(proposals, scores)
+            if !subs_only || typeof(proposal) == Substitution
+                if !haskey(proposal_dict, proposal)
+                    proposal_dict[proposal] = 0.0
                 end
+                proposal_dict[proposal] += score
             end
         end
     end
-    return Task(_it)
+    return collect(keys(proposal_dict))
 end
 
 
@@ -908,7 +916,7 @@ function recompute!(state::State, seqs::Vector{PString},
               (use_ref_for_qvs))) &&
               (length(reference) > 0))
             state.A_t, Amoves_t = forward_moves(state.consensus, reference, ref_scores)
-            while band_tolerance(Amoves_t) < codon_length            
+            while band_tolerance(Amoves_t) < codon_length
                 reference.bandwidth *= bandwidth_mult
                 state.A_t, Amoves_t = forward_moves(state.consensus, reference, ref_scores)
             end
