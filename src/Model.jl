@@ -145,11 +145,11 @@ end
 
 @enum DPMove dp_none=0 dp_match=1 dp_ins=2 dp_del=3 dp_codon_ins=4 dp_codon_del=5
 
-const offsets = ([-1, -1],  # sub
-                 [-1, 0],   # insertion
-                 [0, -1],   # deletion
-                 [-3, 0],   # codon insertion
-                 [0, -3])   # codon deletion
+const offsets = ([1, 1],  # sub
+                 [1, 0],   # insertion
+                 [0, 1],   # deletion
+                 [3, 0],   # codon insertion
+                 [0, 3])   # codon deletion
 
 const bases = "ACGT-"
 const baseints = Dict('A' => 1,
@@ -196,8 +196,8 @@ function update_helper(newcols::Array{Float64, 2},
                        move::DPMove, move_score::Float64,
                        final_score::Float64, final_move::DPMove)
     offset = offsets[Int(move)]
-    prev_i = i + offset[1]
-    prev_j = j + offset[2]
+    prev_i = i - offset[1]
+    prev_j = j - offset[2]
 
     rangecol = min(prev_j, size(A)[2])
     if inband(A, prev_i, rangecol)
@@ -623,8 +623,8 @@ function moves_to_proposals(moves::Vector{DPMove},
     i, j = (0, 0)
     for move in moves
         (ii, jj) = offsets[Int(move)]
-        i -= ii
-        j -= jj
+        i += ii
+        j += jj
 
         score = seq.crrct_log_p[max(i, 1)]
         next_score = seq.crrct_log_p[min(i + 1, length(seq))]
@@ -711,8 +711,8 @@ function backtrace(moves::BandedArray{Int})
         m = moves[i, j]
         push!(taken_moves, DPMove(m))
         ii, jj = offsets[m]
-        i += ii
-        j += jj
+        i -= ii
+        j -= jj
     end
     return reverse(taken_moves)
 end
@@ -731,8 +731,8 @@ function band_tolerance(Amoves::BandedArray{Int})
         end
         m = Amoves[i, j]
         ii, jj = offsets[m]
-        i += ii
-        j += jj
+        i -= ii
+        j -= jj
     end
     start, stop = row_range(Amoves, j)
     if start > 1
@@ -751,8 +751,8 @@ function moves_to_alignment_strings(moves::Vector{DPMove},
     i, j = (0, 0)
     for move in moves
         (ii, jj) = offsets[Int(move)]
-        i -= ii
-        j -= jj
+        i += ii
+        j += jj
         if move == dp_match
             push!(aligned_t, t[j])
             push!(aligned_s, s[i])
@@ -789,8 +789,8 @@ function moves_to_indices(moves::Vector{DPMove},
             last_j = j
         end
         (ii, jj) = offsets[Int(move)]
-        i -= ii
-        j -= jj
+        i += ii
+        j += jj
     end
     if j > last_j
         result[j] = i
@@ -1046,8 +1046,8 @@ function posterior_error_probs(tlen::Int,
         i, j = (1, 1)
         for move in moves
             (ii, jj) = offsets[Int(move)]
-            i -= ii
-            j -= jj
+            i += ii
+            j += jj
             s_i = i - 1
             t_j = j - 1
             if move == dp_match
