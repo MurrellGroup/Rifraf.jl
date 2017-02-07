@@ -18,31 +18,6 @@ function inv_log10(logp::Float64)
 end
 
 
-function test_get_sub_consensus()
-    seq = "ACGT"
-    codon = ('A', 'A', 'A')
-    proposal = Proposals.CodonInsertion(0, codon)
-    next_posn = 1
-    n_after = 3
-    expected = "AAAACG"
-    result = Quiver2.Model.get_sub_consensus(proposal, seq, next_posn, n_after)
-    @test expected == result
-
-    proposal = Proposals.CodonInsertion(3, codon)
-    next_posn = 4
-    n_after = 1
-    expected = "AAAT"
-    result = Quiver2.Model.get_sub_consensus(proposal, seq, next_posn, n_after)
-    @test expected == result
-
-    proposal = Proposals.CodonInsertion(4, codon)
-    next_posn = 5
-    n_after = 0
-    expected = "AAA"
-    result = Quiver2.Model.get_sub_consensus(proposal, seq, next_posn, n_after)
-    @test expected == result
-end
-
 function test_cols(A, B, codon_moves)
     expected = A[end, end]
     @test_approx_eq A[end, end] B[1, 1]
@@ -250,30 +225,11 @@ function test_random_insertions()
     end
 end
 
-function test_random_codon_insertions()
-    for i = 1:1000
-        template_len = rand(30:50)
-        pos = rand(0:template_len)
-        proposal = Proposals.CodonInsertion(pos, random_codon())
-        test_random_proposal(proposal, template_len)
-    end
-end
-
 function test_random_deletions()
     for i = 1:1000
         template_len = rand(30:50)
         pos = rand(1:template_len)
         proposal = Proposals.Deletion(pos)
-        test_random_proposal(proposal, template_len)
-    end
-end
-
-
-function test_random_codon_deletions()
-    for i = 1:1000
-        template_len = rand(30:50)
-        pos = rand(1:(template_len - 2))
-        proposal = Proposals.CodonDeletion(pos)
         test_random_proposal(proposal, template_len)
     end
 end
@@ -466,27 +422,9 @@ function test_align_2()
     @test t[end-1:end] == "TT"
 end
 
-function test_best_codons()
-    template = "AAAGGG"
-    sequences = ["AAATCCGGG"
-                 "AAACTCGGG"
-                 "AAACCTGGG"]
-    log_ps = Vector{Float64}[fill(log10(0.1), length(s))
-                             for s in sequences]
-    bandwidth = 10
-    pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
-                                  for (s, p) in zip(sequences, log_ps)]
-    codons = Quiver2.Model.best_codons(template, pseqs, scores)
-    expected = "AAACCCGGG"
-    for j in 1:length(codons)
-        @test string(codons[j].bases...) == expected[j:j+2]
-    end
-end
-
 
 srand(1234)
 
-test_get_sub_consensus()
 test_perfect_forward()
 test_imperfect_backward()
 test_imperfect_forward()
@@ -498,9 +436,7 @@ test_deletion_agreement()
 test_deletion_agreement2()
 test_random_substitutions()
 test_random_insertions()
-test_random_codon_insertions()
 test_random_deletions()
-test_random_codon_deletions()
 test_no_single_indels()
 test_quiver2()
 test_base_probs()
@@ -508,4 +444,3 @@ test_ins_probs()
 test_indel_probs()
 test_align()
 test_align_2()
-test_best_codons()

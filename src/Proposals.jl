@@ -1,52 +1,29 @@
 module Proposals
 
-export Proposal, Substitution, Insertion, CodonInsertion,
-       Deletion, CodonDeletion, CandProposal,
-       are_unambiguous, base_shift, affected_positions, apply_proposals,
+export Proposal, Substitution, Insertion,
+       Deletion, CandProposal,
+       are_unambiguous, base_shift, apply_proposals,
        AmbiguousProposalsError
 
 abstract Proposal
-abstract SingleProposal <: Proposal
-abstract CodonProposal <: Proposal
 
-type Substitution <: SingleProposal
+type Substitution <: Proposal
     pos::Int
     base::Char
 end
 
-type Insertion <: SingleProposal
+type Insertion <: Proposal
     pos::Int  # insert after this position
     base::Char
 end
 
-type CodonInsertion <: CodonProposal
-    pos::Int  # insert after this position
-    bases::Tuple{Char,Char,Char}
-end
-
-type Deletion <: SingleProposal
+type Deletion <: Proposal
     pos::Int
-end
-
-type CodonDeletion <: CodonProposal
-    pos::Int  # position of the first base to delete
 end
 
 type CandProposal
     proposal::Proposal
     score::Float64
-end
-
-function affected_positions(m::SingleProposal)
-    return [m.pos]
-end
-
-function affected_positions(m::CodonInsertion)
-    return [m.pos]
-end
-
-function affected_positions(m::CodonDeletion)
-    return [m.pos, m.pos + 1, m.pos + 2]
 end
 
 """
@@ -62,10 +39,10 @@ function are_unambiguous(ms::Vector{Proposal})
     for i in 1:length(ms)
         m = ms[i]
         t = typeof(m)
-        if t == Insertion || t == CodonInsertion
-            append!(ins_positions, affected_positions(m))
+        if t == Insertion
+            push!(ins_positions, m.pos)
         else
-            append!(other_positions, affected_positions(m))
+            push!(other_positions, m.pos)
         end
     end
     ins_good = length(Set(ins_positions)) == length(ins_positions)
@@ -88,30 +65,14 @@ function update_template(template::String,
 end
 
 function update_template(template::String,
-                         proposal::CodonInsertion)
-    return string(template[1:(proposal.pos)],
-                  join(proposal.bases),
-                  template[(proposal.pos+1):end])
-end
-
-function update_template(template::String,
                          proposal::Deletion)
     return string(template[1:(proposal.pos - 1)],
                   template[(proposal.pos + 1):end])
 end
 
-function update_template(template::String,
-                         proposal::CodonDeletion)
-    return string(template[1:(proposal.pos - 1)],
-                  template[(proposal.pos + 3):end])
-end
-
 base_shift_dict = Dict(Insertion => 1,
-                       CodonInsertion => 3,
                        Deletion => -1,
-                       CodonDeletion => -3,
                        Substitution => 0)
-
 """
 How many bases to shift proposals after this one.
 """

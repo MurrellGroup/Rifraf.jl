@@ -145,11 +145,14 @@ end
 
 @enum DPMove dp_none=0 dp_match=1 dp_ins=2 dp_del=3 dp_codon_ins=4 dp_codon_del=5
 
+
+# all offsets are relative to the consensus.
+# so an insertion is a base NOT in the consensus.
 const offsets = ([1, 1],  # sub
-                 [1, 0],   # insertion
-                 [0, 1],   # deletion
-                 [3, 0],   # codon insertion
-                 [0, 3])   # codon deletion
+                 [1, 0],  # insertion
+                 [0, 1],  # deletion
+                 [3, 0],  # codon insertion
+                 [0, 3])  # codon deletion
 
 const bases = "ACGT-"
 const baseints = Dict('A' => 1,
@@ -354,8 +357,6 @@ function get_sub_consensus(proposal::Proposal, seq::String,
     suffix = seq[next_posn:stop]
     if t in (Substitution, Insertion)
         prefix = string(proposal.base)
-    elseif t == CodonInsertion
-        prefix = string(proposal.bases...)
     end
     return string(prefix, suffix)
 end
@@ -372,55 +373,42 @@ function seq_score_deletion(A::BandedArray{Float64}, B::BandedArray{Float64},
 end
 
 
-const n_proposal_bases = Dict(Substitution => 1,
-                              Insertion => 1,
-                              Deletion => 0,
-                              CodonInsertion => 3,
-                              CodonDeletion => 0)
-
 const boffsets = Dict(Substitution => 2,
                       Insertion => 1,
-                      Deletion => 2,
-                      CodonInsertion => 1,
-                      CodonDeletion => 4)
+                      Deletion => 2)
 
 function score_nocodon(proposal::Proposal,
                        A::BandedArray{Float64}, B::BandedArray{Float64},
                        pseq::PString,
                        scores::Scores,
                        newcols::Array{Float64, 2})
-    target_col = proposal.pos + 1
     t = typeof(proposal)
-    if t in (Deletion, CodonDeletion)
+    if t == Deletion
         # nothing to recompute
-        n_to_del = t == Deletion ? 1 : 3
         acol = proposal.pos
-        bcol = proposal.pos + n_to_del
+        bcol = proposal.pos + 1
         return seq_score_deletion(A, B, acol, bcol)
     end
     # need to compute new columns
-    n_new = (t == CodonInsertion? 3 : 1)
     nrows, ncols = size(A)
 
     # last valid A column
     acol = proposal.pos + (t == Substitution ? 0 : 1)
-    # new bases
-    sub_consensus = t == CodonInsertion ? string(proposal.bases...) : string(proposal.base)
-    for j in 1:n_new
-        amin, amax = row_range(A, min(acol + j, ncols))
-        for i in amin:amax
-            seq_base = i > 1 ? pseq.seq[i-1] : 'X'
-            x = update(A, i, acol + j,
-                       seq_base, sub_consensus[j],
-                       pseq, scores;
-                       newcols=newcols, acol=acol)
-            newcols[i, j] = x[1]
-        end
+    new_acol = acol + 1
+    # new base
+    amin, amax = row_range(A, min(new_acol, ncols))
+    for i in amin:amax
+        seq_base = i > 1 ? pseq.seq[i-1] : 'X'
+        x = update(A, i, new_acol,
+                   seq_base, proposal.base,
+                   pseq, scores;
+                   newcols=newcols, acol=acol)
+        newcols[i, 1] = x[1]
     end
 
     # add up results
-    imin, imax = row_range(A, min(acol + n_new, ncols))
-    Acol = view(newcols, imin:imax, n_new)
+    imin, imax = row_range(A, min(new_acol, ncols))
+    Acol = view(newcols, imin:imax, 1)
 
     bj = proposal.pos + 1
     Bcol = sparsecol(B, bj)
@@ -449,7 +437,7 @@ function seq_score_proposal(proposal::Proposal,
     end
     t = typeof(proposal)
     # last valid column of A
-    acol_offset = t in (Insertion, CodonInsertion) ? 0 : -1
+    acol_offset = t == Insertion ? 0 : -1
     acol = proposal.pos + acol_offset + 1
 
     # first column of B to use
@@ -457,7 +445,7 @@ function seq_score_proposal(proposal::Proposal,
     # last column of B to use
     last_bcol = first_bcol + codon_length - 1
 
-    if t in (Deletion, CodonDeletion)
+    if t == Deletion
         n_del = (t == Deletion ? 1 : codon_length)
         if acol == (size(A)[2] - n_del)
             # suffix deletions do not need recomputation
@@ -466,7 +454,7 @@ function seq_score_proposal(proposal::Proposal,
     end
 
     # number of bases changed/inserted
-    n_bases = n_proposal_bases[t]
+    n_bases = (t == Deletion ? 0 : 1)
     # number of columns after recomputed columns to also recompute.
     n_after = codon_length
 
@@ -474,7 +462,7 @@ function seq_score_proposal(proposal::Proposal,
     # rest of A
     nrows, ncols = size(A)
     just_a = last_bcol >= ncols
-    next_posn = proposal.pos + (t == CodonDeletion ? 3 : 1)
+    next_posn = proposal.pos + 1
     if just_a
         # go to end of consensus
         n_after = length(consensus) - next_posn + 1
@@ -572,8 +560,7 @@ function all_proposals(stage::Stage,
                        sequences::Vector{PString},
                        Amoves::Vector{BandedArray{Int}},
                        scores::Scores,
-                       indel_correction_only::Bool,
-                       propose_codons::Bool)
+                       indel_correction_only::Bool)
     len = length(consensus)
     function _it()
         if stage != frame_correction_stage || !indel_correction_only
@@ -598,17 +585,6 @@ function all_proposals(stage::Stage,
                     produce(Insertion(j, base))
                 end
                 produce(Deletion(j))
-            end
-        end
-        if propose_codons && stage == frame_correction_stage
-            # codon deletions
-            for j in 1:(len-2)
-                produce(CodonDeletion(j))
-            end
-            # codon insertions
-            for proposal in best_codons(consensus, sequences,
-                                        scores, Amoves=Amoves)
-                produce(proposal)
             end
         end
     end
@@ -674,19 +650,17 @@ function get_candidate_proposals(state::State,
                                  reference::PString,
                                  ref_scores::Scores,
                                  fast_proposals::Bool,
-                                 indel_correction_only::Bool,
-                                 propose_codons::Bool)
+                                 indel_correction_only::Bool)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
 
     maxlen = maximum(length(s) for s in sequences)
     nrows = max(maxlen, length(reference)) + 1
-    newcols = zeros(Float64, (nrows, 6))
+    newcols = zeros(Float64, (nrows, codon_length + 1))
 
     proposals = all_proposals(state.stage, state.consensus, sequences,
                               state.Amoves, scores,
-                              indel_correction_only,
-                              propose_codons)
+                              indel_correction_only)
     if (state.stage == initial_stage ||
         state.stage == refinement_stage) && fast_proposals
         subs_only = state.stage == refinement_stage
@@ -821,42 +795,6 @@ function align(t::String, s::String, phreds::Vector{Int8},
     return moves_to_alignment_strings(moves, t, s)
 end
 
-function best_codons(consensus::String,
-                     sequences::Vector{PString},
-                     scores::Scores;
-                     Amoves::Vector{BandedArray{Int}}=BandedArray{Int}[])
-    if length(Amoves) == length(sequences)
-        moves = [backtrace(Am) for Am in Amoves]
-    else
-        moves = [align_moves(consensus, s, scores)
-                 for s in sequences]
-    end
-    indices = [moves_to_indices(m, length(consensus), length(s.seq))
-               for (m, s) in zip(moves, sequences)]
-
-    results = []
-    for j in 1:(length(consensus) + 1)
-        cands = map(_ -> Dict{Char, Float64}('A' => 0.0,
-                                             'C' => 0.0,
-                                             'G' => 0.0,
-                                             'T' => 0.0), 1:3)
-        for (seq, index) in zip(sequences, indices)
-            i = index[j]
-            seq_i = i - 1
-            if seq_i < length(seq.seq) - 2
-                for ii in 1:3
-                    cands[ii][seq.seq[seq_i + ii]] += seq.error_log_p[seq_i + ii]
-                end
-            end
-        end
-        if maximum(minimum(values(c)) for c in cands) == 0.0
-            break
-        end
-        codon = [base_consensus(c) for c in cands]
-        push!(results, CodonInsertion(j - 1, tuple(codon...)))
-    end
-    return results
-end
 
 function base_consensus(d::Dict{Char, Float64})
     return minimum((v, k) for (k, v) in d)[2]
@@ -973,7 +911,7 @@ function estimate_probs(state::State,
 
     maxlen = maximum(length(s) for s in sequences)
     nrows = max(maxlen, length(reference)) + 1
-    newcols = zeros(Float64, (nrows, 6))
+    newcols = zeros(Float64, (nrows, codon_length + 1))
 
     use_ref = (length(reference) > 0) && use_ref_for_qvs
     # do not want to penalize indels too harshly, otherwise consensus
@@ -981,7 +919,7 @@ function estimate_probs(state::State,
     # TODO: how to set scores correctly for estimating qvs?
     qv_ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
     for m in all_proposals(scoring_stage, state.consensus, sequences,
-                           state.Amoves, scores, false, false)
+                           state.Amoves, scores, false)
         score = score_proposal(m, state,
                                sequences, scores,
                                use_ref,
@@ -1073,7 +1011,6 @@ function quiver2(seqstrings::Vector{String},
                  min_ref_indel_score::Float64=-15.0,
                  fast_proposals::Bool=true,
                  indel_correction_only::Bool=true,
-                 propose_codons::Bool=false,
                  use_ref_for_qvs::Bool=false,
                  bandwidth::Int=10, bandwidth_mult::Int=2,
                  min_dist::Int=15,
@@ -1169,8 +1106,7 @@ function quiver2(seqstrings::Vector{String},
         candidates = get_candidate_proposals(state, seqs, scores, ref_pstring,
                                              ref_scores,
                                              fast_proposals,
-                                             indel_correction_only,
-                                             propose_codons)
+                                             indel_correction_only)
         recompute_As = true
         if length(candidates) == 0
             if verbose > 1
@@ -1255,7 +1191,7 @@ function quiver2(seqstrings::Vector{String},
             end
             proposal_counts = [length(filter(c -> (typeof(c.proposal) == t),
                                              chosen_cands))
-                               for t in [Substitution, Insertion, Deletion, CodonInsertion, CodonDeletion]]
+                               for t in [Substitution, Insertion, Deletion]]
             push!(n_proposals, proposal_counts)
         end
         push!(consensus_lengths, length(state.consensus))
