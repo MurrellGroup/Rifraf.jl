@@ -35,35 +35,35 @@ error probabilities.
 """
 type PString
     seq::String
-    log_p::Vector{Float64}
-    inv_log_p::Vector{Float64}
+    error_log_p::Vector{Float64}
+    crrct_log_p::Vector{Float64}
     bandwidth::Int
 
-    function PString(seq::String, log_p::Vector{Float64}, bandwidth::Int)
+    function PString(seq::String, error_log_p::Vector{Float64}, bandwidth::Int)
         if bandwidth < 1
             error("bandwidth must be positive")
         end
 
-        if length(seq) != length(log_p)
+        if length(seq) != length(error_log_p)
             error("length mismatch")
         end
         if length(seq) == 0
             return new(seq, Float64[], Float64[])
         end
-        if minimum(log_p) == -Inf
+        if minimum(error_log_p) == -Inf
             error("a log error probability is negative infinity")
         end
-        if maximum(log_p) > 0.0
+        if maximum(error_log_p) > 0.0
             error("a log error probability is > 0")
         end
-        inv_log_p = log10(1.0 - exp10(log_p))
-        return new(seq, log_p, inv_log_p, bandwidth)
+        crrct_log_p = log10(1.0 - exp10(error_log_p))
+        return new(seq, error_log_p, crrct_log_p, bandwidth)
     end
 end
 
 function PString(seq::String, phreds::Vector{Int8}, bandwidth::Int)
-    log_p = phred_to_log_p(phreds)
-    return PString(seq, log_p, bandwidth)
+    error_log_p = phred_to_log_p(phreds)
+    return PString(seq, error_log_p, bandwidth)
 end
 
 function length(s::PString)
@@ -71,7 +71,7 @@ function length(s::PString)
 end
 
 function reverse(s::PString)
-    return PString(reverse(s.seq), reverse(s.log_p), s.bandwidth)
+    return PString(reverse(s.seq), reverse(s.error_log_p), s.bandwidth)
 end
 
 
@@ -164,28 +164,28 @@ const empty_array = Array(Float64, (0, 0))
 function move_scores(t_base::Char,
                      s_base::Char,
                      seq_i::Int,
-                     log_p::Vector{Float64},
-                     inv_log_p::Vector{Float64},
+                     error_log_p::Vector{Float64},
+                     crrct_log_p::Vector{Float64},
                      scores::Scores)
     cur_i = max(seq_i, 1)
-    cur_log_p = log_p[cur_i]
-    next_log_p = log_p[min(seq_i + 1, length(log_p))]
-    match_score = s_base == t_base ? inv_log_p[cur_i] : cur_log_p + scores.mismatch
+    cur_log_p = error_log_p[cur_i]
+    next_log_p = error_log_p[min(seq_i + 1, length(error_log_p))]
+    match_score = s_base == t_base ? crrct_log_p[cur_i] : cur_log_p + scores.mismatch
     ins_score = cur_log_p + scores.insertion
     del_score = max(cur_log_p, next_log_p) + scores.deletion
     return match_score, ins_score, del_score
 end
 
 function codon_move_scores(seq_i::Int,
-                           log_p::Vector{Float64},
+                           error_log_p::Vector{Float64},
                            scores::Scores)
     # we're moving INTO seq_i. so need previous three
     start = max(1, seq_i-2)
-    stop = min(seq_i, length(log_p))
-    max_p = start <= stop ? maximum(log_p[start:stop]) : -Inf
+    stop = min(seq_i, length(error_log_p))
+    max_p = start <= stop ? maximum(error_log_p[start:stop]) : -Inf
     codon_ins_score =  max_p + scores.codon_insertion
-    cur_log_p = log_p[max(seq_i, 1)]
-    next_log_p = log_p[min(seq_i + 1, length(log_p))]
+    cur_log_p = error_log_p[max(seq_i, 1)]
+    next_log_p = error_log_p[min(seq_i + 1, length(error_log_p))]
     codon_del_score = max(cur_log_p, next_log_p) + scores.codon_deletion
     return codon_ins_score, codon_del_score
 end
@@ -223,7 +223,8 @@ function update(A::BandedArray{Float64},
                 acol=-1, trim=false)
     result = (-Inf, dp_none)
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1,
-                                                    pseq.log_p, pseq.inv_log_p,
+                                                    pseq.error_log_p,
+                                                    pseq.crrct_log_p,
                                                     scores)
     # allow terminal insertions for free
     if trim && (j == 1)
@@ -235,7 +236,7 @@ function update(A::BandedArray{Float64},
     result = update_helper(newcols, A, i, j, acol, dp_match, match_score, result...)
     result = update_helper(newcols, A, i, j, acol, dp_ins, ins_score, result...)
     result = update_helper(newcols, A, i, j, acol, dp_del, del_score, result...)
-    codon_ins_score, codon_del_score = codon_move_scores(i-1, pseq.log_p, scores)
+    codon_ins_score, codon_del_score = codon_move_scores(i-1, pseq.error_log_p, scores)
     if scores.codon_insertion > -Inf && i > codon_length
         result = update_helper(newcols, A, i, j, acol, dp_codon_ins,
                                codon_ins_score, result...)
@@ -625,21 +626,21 @@ function moves_to_proposals(moves::Vector{DPMove},
         i -= ii
         j -= jj
 
-        inv_log_p = seq.inv_log_p[max(i, 1)]
-        next_inv_log_p = seq.inv_log_p[min(i + 1, length(seq))]
-        inv_del_log_p = min(inv_log_p, next_inv_log_p)
+        score = seq.crrct_log_p[max(i, 1)]
+        next_score = seq.crrct_log_p[min(i + 1, length(seq))]
+        del_score = min(score, next_score)
 
         if move == dp_match
             if seq.seq[i] != consensus[j]
                 push!(proposals, Substitution(j, seq.seq[i]))
-                push!(scores, inv_log_p)
+                push!(scores, score)
             end
         elseif move == dp_ins
             push!(proposals, Insertion(j, seq.seq[i]))
-            push!(scores, inv_log_p)
+            push!(scores, score)
         elseif move == dp_del
             push!(proposals, Deletion(j))
-            push!(scores, inv_del_log_p)
+            push!(scores, del_score)
         end
     end
     return proposals, scores
@@ -649,6 +650,7 @@ end
 function alignment_proposals(state::State,
                              sequences::Vector{PString},
                              subs_only::Bool)
+    # TODO: use scores
     proposal_dict = Dict{Proposal, Float64}()
     for (Amoves, seq) in zip(state.Amoves, sequences)
         moves = backtrace(Amoves)
@@ -843,7 +845,7 @@ function best_codons(consensus::String,
             seq_i = i - 1
             if seq_i < length(seq.seq) - 2
                 for ii in 1:3
-                    cands[ii][seq.seq[seq_i + ii]] += seq.log_p[seq_i + ii]
+                    cands[ii][seq.seq[seq_i + ii]] += seq.error_log_p[seq_i + ii]
                 end
             end
         end
@@ -877,7 +879,7 @@ end
 function initial_state(consensus::String, seqs::Vector{PString})
     if length(consensus) == 0
         # choose highest-quality sequence
-        idx = indmin([Util.logsumexp10(s.log_p)
+        idx = indmin([Util.logsumexp10(s.error_log_p)
                       for s in seqs])
         consensus = seqs[idx].seq
     end
@@ -1050,8 +1052,8 @@ function posterior_error_probs(tlen::Int,
             t_j = j - 1
             if move == dp_match
                 probs[t_j, 1:4] += base_distribution(s.seq[s_i],
-                                                     s.log_p[s_i],
-                                                     s.inv_log_p[s_i])
+                                                     s.error_log_p[s_i],
+                                                     s.crrct_log_p[s_i])
             end
         end
     end
@@ -1062,7 +1064,7 @@ end
 
 
 function quiver2(seqstrings::Vector{String},
-                 log_ps::Vector{Vector{Float64}},
+                 error_log_ps::Vector{Vector{Float64}},
                  scores::Scores;
                  consensus::String="",
                  reference::String="",
@@ -1114,12 +1116,12 @@ function quiver2(seqstrings::Vector{String},
     end
 
     sequences = PString[PString(s, p, bandwidth)
-                        for (s, p) in zip(seqstrings, log_ps)]
+                        for (s, p) in zip(seqstrings, error_log_ps)]
 
-    # will need to update reference log_p vector after initial stage
-    est_err_rate = 1.0
-    ref_log_p_vec = fill(log10(est_err_rate), length(reference))
-    ref_pstring = PString(reference, ref_log_p_vec, bandwidth)
+    # will need to update after initial stage
+    ref_error_rate = 1.0
+    ref_error_log_p = fill(log10(ref_error_rate), length(reference))
+    ref_pstring = PString(reference, ref_error_log_p, bandwidth)
 
     if max_iters < 1
         error("invalid max iters: $max_iters")
@@ -1186,10 +1188,10 @@ function quiver2(seqstrings::Vector{String},
                 state.stage = frame_correction_stage
                 # estimate reference error rate
                 edit_dist = levenshtein(reference, state.consensus)
-                est_err_rate = edit_dist / min(length(reference), length(state.consensus))
-                est_err_rate = max(est_err_rate, 1e-10)
-                ref_log_p_vec = fill(log10(est_err_rate), length(reference))
-                ref_pstring = PString(reference, ref_log_p_vec, bandwidth)
+                ref_error_rate = edit_dist / min(length(reference), length(state.consensus))
+                ref_error_rate = max(ref_error_rate, 1e-10)
+                ref_error_log_p = fill(log10(ref_error_rate), length(reference))
+                ref_pstring = PString(reference, ref_error_log_p, bandwidth)
             elseif state.stage == frame_correction_stage
                 if !has_single_indels(state.consensus, ref_pstring, ref_scores)
                     consensus_ref = state.consensus
@@ -1310,7 +1312,7 @@ function quiver2(seqstrings::Vector{String},
                 "consensus_stages" => consensus_stages,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
-                "est_ref_err_rate" => est_err_rate,
+                "ref_error_rate" => ref_error_rate,
                 "stage_times" => stage_times,
                 )
 
@@ -1336,8 +1338,8 @@ function quiver2(sequences::Vector{String},
     if any(minimum(p) < 0 for p in phreds)
         error("phred score cannot be negative")
     end
-    log_ps = Util.phred_to_log_p(phreds)
-    return quiver2(sequences, log_ps, scores; kwargs...)
+    error_log_ps = Util.phred_to_log_p(phreds)
+    return quiver2(sequences, error_log_ps, scores; kwargs...)
 end
 
 
