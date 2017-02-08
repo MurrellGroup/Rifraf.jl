@@ -7,21 +7,33 @@ export Proposal, Substitution, Insertion,
 
 abstract Proposal
 
-type Substitution <: Proposal
+immutable Substitution <: Proposal
     pos::Int
     base::Char
 end
 
-type Insertion <: Proposal
+immutable Insertion <: Proposal
     pos::Int  # insert after this position
     base::Char
 end
 
-type Deletion <: Proposal
+immutable Deletion <: Proposal
     pos::Int
 end
 
-type CandProposal
+function update_pos(p::Substitution, pos)
+    return Substitution(pos, p.base)
+end
+
+function update_pos(p::Insertion, pos)
+    return Insertion(pos, p.base)
+end
+
+function update_pos(p::Deletion, pos)
+    return Deletion(pos)
+end
+
+immutable CandProposal
     proposal::Proposal
     score::Float64
 end
@@ -81,7 +93,7 @@ function base_shift(m::Proposal)
 end
 
 
-type AmbiguousProposalsError <: Exception end
+immutable AmbiguousProposalsError <: Exception end
 
 
 function apply_proposals(template::String,
@@ -97,7 +109,7 @@ function apply_proposals(template::String,
         for i in 1:length(remaining)
             m2 = remaining[i]
             if m2.pos >= m.pos
-                m2.pos += shift
+                remaining[i] = update_pos(m2, m2.pos + shift)
             end
         end
     end

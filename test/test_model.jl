@@ -256,6 +256,68 @@ function test_no_single_indels()
                                            local_scores)
 end
 
+function _test_alignment_proposals(template, seqs, lps, expected)
+    bandwidth = 5
+    rseq = Quiver2.Model.PString("", Float64[], bandwidth)
+    mult = 2
+    errors = Model.ErrorModel(1.0, 4.0, 5.0, 0.0, 0.0)
+    scores = Model.Scores(errors)
+    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
+    ref_scores = Model.Scores(ref_errors)
+
+    do_subs = true
+    do_indels = true
+
+    if length(lps) != length(seqs)
+        lps =  Vector{Float64}[fill(-9.0, length(s)) for s in seqs]
+    end
+
+    pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+                                  for (s, p) in zip(seqs, lps)]
+    state = Quiver2.Model.initial_state(template, pseqs)
+    Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
+    proposals, deltas = Quiver2.Model.alignment_proposals(state, pseqs, scores, do_subs, do_indels)
+    @test length(symdiff(Set(proposals), Set(expected))) == 0
+end
+
+
+function test_alignment_proposals()
+    template = "ACGAG"
+    seqs = ["CGTAC",
+            "CGAC",
+            "CGTAG"]
+    expected = [Proposals.Deletion(1),
+                Proposals.Insertion(3, 'T'),
+                Proposals.Substitution(5, 'C')]
+    _test_alignment_proposals(template, seqs, [], expected)
+
+    template = "AA"
+    seqs = ["AAG",
+            "AA",
+            "AAG"]
+    expected = [Proposals.Insertion(2, 'G')]
+    _test_alignment_proposals(template, seqs, [], expected)
+
+    template = "AA"
+    seqs = ["GAA",
+            "AA",
+            "GAA"]
+    expected = [Proposals.Insertion(0, 'G')]
+    _test_alignment_proposals(template, seqs, [], expected)
+
+    # test that highly confident base overwhelms others
+    template = "AA"
+    seqs = ["GAA",
+            "AA",
+            "AA"]
+    lps = Vector{Float64}[[-10.0, -5.0, -5.0],
+                          [-3.0, -5.0],
+                          [-3.0, -50]]
+    expected = [Proposals.Insertion(0, 'G')]
+    _test_alignment_proposals(template, seqs, lps, expected)
+
+end
+
 function test_quiver2()
     # can't guarantee this test actually passes, since it is random
     n_seqs = 3
@@ -280,7 +342,17 @@ function test_quiver2()
     n_out_frame = 0
 
     for i in 1:n
-        use_ref = rand([true, false])
+        # use_ref = rand([true, false])
+        # fast_proposals = rand([true, false])
+        # trust_proposals = rand([true, false])
+        # fix_indels_stat = rand([true, false])
+        # indel_correction_only = rand([true, false])
+        use_ref = true
+        fast_proposals = true
+        trust_proposals = true
+        fix_indels_stat = true
+        indel_correction_only = true
+
         (reference, template, template_error, reads, actual, phreds, sbools,
          tbools) = sample(n_seqs, len,
                           ref_error_rate,
@@ -295,13 +367,16 @@ function test_quiver2()
             reference = DNASequence("")
         end
 
-        (result, q1, q2, q3,
-         info) = Model.quiver2(reads,
-                               phreds, seq_scores,
-                               reference=reference,
-                               ref_scores=ref_scores,
-                               bandwidth=10, min_dist=9, batch=5,
-                               max_iters=100)
+        (result, info) = Model.quiver2(reads,
+                                       phreds, seq_scores;
+                                       reference=reference,
+                                       ref_scores=ref_scores,
+                                       fast_proposals=fast_proposals,
+                                       trust_proposals=trust_proposals,
+                                       fix_indels_stat=fix_indels_stat,
+                                       indel_correction_only=indel_correction_only,
+                                       bandwidth=10, min_dist=9, batch=5,
+                                       max_iters=100)
         if length(result) % 3 != 0
             n_out_frame += 1
         end
@@ -339,12 +414,11 @@ function test_base_probs()
     rseq = Quiver2.Model.PString("", Float64[], bandwidth)
     state = Quiver2.Model.initial_state(template, pseqs)
     Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
-    base, ins = Quiver2.Model.estimate_probs(state, pseqs, scores,
-                                             rseq, scores, false)
-    @test base[1, 2] > 0.9
-    del_probs = base[:, end]
-    @test del_probs[1] < 1e-9
-    @test del_probs[3] > 0.9
+    probs = Quiver2.Model.estimate_probs(state, pseqs, scores,
+                                         rseq, scores, false)
+    @test probs.sub[1, 2] > 0.9
+    @test probs.del[1] < 1e-9
+    @test probs.del[3] > 0.9
 end
 
 
@@ -366,37 +440,10 @@ function test_ins_probs()
     rseq = Quiver2.Model.PString("", Float64[], bandwidth)
     state = Quiver2.Model.initial_state(template, pseqs)
     Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
-    base, ins = Quiver2.Model.estimate_probs(state, pseqs, scores,
-                                             rseq, scores, false)
-    @test maximum(ins[1, :]) < 1e-9
-    @test ins[3, 4] > 0.9
-end
-
-function test_indel_probs()
-    template = "CGAT"
-    seqs = ["CGTAT",
-            "CGTAT",
-            "CGTAT"]
-    bandwidth = 5
-    mult = 2
-    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
-    ref_scores = Model.Scores(ref_errors)
-
-    lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
-                          [-9.0, -9.0, -9.0, -9.0, -9.0],
-                          [-9.0, -9.0, -9.0, -9.0, -9.0]]
-    pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
-                                  for (s, p) in zip(seqs, lps)]
-    rseq = Quiver2.Model.PString("", Float64[], bandwidth)
-    state = Quiver2.Model.initial_state(template, pseqs)
-    Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
-    base, ins = Quiver2.Model.estimate_probs(state, pseqs, scores,
-                                             rseq, scores, false)
-    probs = Quiver2.Model.estimate_indel_probs(base, ins)
-    @test probs[1] == probs[4]
-    @test probs[1] < 0.5
-    @test probs[2] == probs[3]
-    @test probs[2] > 0.5
+    probs = Quiver2.Model.estimate_probs(state, pseqs, scores,
+                                         rseq, scores, false)
+    @test maximum(probs.ins[1, :]) < 1e-9
+    @test probs.ins[3, 4] > 0.9
 end
 
 function test_align()
@@ -438,9 +485,9 @@ test_random_substitutions()
 test_random_insertions()
 test_random_deletions()
 test_no_single_indels()
+test_alignment_proposals()
 test_quiver2()
 test_base_probs()
 test_ins_probs()
-test_indel_probs()
 test_align()
 test_align_2()

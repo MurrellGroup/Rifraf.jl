@@ -1,5 +1,3 @@
-# TODO: try not scoring proposals at all. just accept model surgery deltas.
-
 module Model
 
 using Bio.Seq
@@ -632,6 +630,7 @@ function moves_to_proposals(moves::Vector{DPMove},
 end
 
 
+# FIXME: modularize this function and test each part
 function alignment_proposals(state::State,
                              sequences::Vector{PString},
                              scores::Scores,
@@ -640,7 +639,6 @@ function alignment_proposals(state::State,
     sub_deltas = zeros(Float64, (length(state.consensus), 4))
     del_deltas = zeros(Float64, (length(state.consensus), 1))
     ins_deltas = zeros(Float64, (length(state.consensus) + 1, 4))
-    # TODO: use scores
     for (Amoves, seq) in zip(state.Amoves, sequences)
         moves = backtrace(Amoves)
         seq_idx = 0
@@ -656,12 +654,16 @@ function alignment_proposals(state::State,
                                               'T' => del_score,
                                               )
 
-        for (move_idx, move) in enumerate(moves)
+        for (aln_idx, move) in enumerate(moves)
+            cbase = '-'
+            sbase = '-'
             if move in (dp_match, dp_ins)
                 seq_idx += 1
+                sbase = seq.seq[seq_idx]
             end
             if move in (dp_match, dp_del)
                 cons_idx += 1
+                cbase = state.consensus[cons_idx]
             end
 
             match_score = -Inf
@@ -672,16 +674,15 @@ function alignment_proposals(state::State,
             end
             mismatch_score = error_score + scores.mismatch
             insertion_score = error_score + scores.insertion
+            deletion_score = max(seq.error_log_p[max(seq_idx, 1)],
+                                 seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
 
-            if move != dp_ins && length(insertion_bases) > 0
-                # reached the end of a series of insertions.
-                # handle them now.
-                ins_idx = cons_idx - 1
-
+            if move != dp_ins
+                # try insertions before this position.
                 for (base, delta) in insertion_bases
                     ins_deltas[cons_idx, baseints[base]] += delta
                 end
-
+                
                 # reset insertion bases
                 # add new insertion bases for after this position
                 # inserting a base would cause a deletion relative
@@ -694,51 +695,60 @@ function alignment_proposals(state::State,
                 insertion_bases['T'] = del_score
             end
 
-            if move == dp_match
+            if move == dp_ins
+                # consider insertion proposals.
+                # push all insertion proposals to the end
+                for (baseint, new_base) in enumerate(bases)
+                    # try all insertions, converting dp_ins to (mis)match
+                    sbase = seq.seq[seq_idx]
+                    new_score = (sbase == new_base) ? match_score : mismatch_score
+                    insertion_bases[new_base] = max(insertion_bases[new_base],
+                                                    new_score - insertion_score)
+                end
+            elseif move == dp_match
                 # consider all substitution proposals
-                for (baseint, base) in enumerate(bases)
-                    cbase = state.consensus[cons_idx]
-                    if cbase == base
-                        # do not consider substitution of same base
+                for (baseint, new_base) in enumerate(bases)
+                    if new_base == cbase
                         continue
                     end
-                    sbase = seq.seq[seq_idx]
-                    if sbase == cbase
+                    if sbase == new_base
+                        # proposal would help
+                        sub_deltas[cons_idx, baseint] += (match_score - mismatch_score)
+                    elseif sbase == cbase
                         # proposal would hurt
                         sub_deltas[cons_idx, baseint] += (mismatch_score - match_score)
                     else
-                        # proposal would help
-                        sub_deltas[cons_idx, baseint] += (match_score - mismatch_score)
+                        # proposal would still be a mismatch. do nothing.
                     end
                 end
-                # consider deletion proposal
-                # deleting this base in the consensus would cause
-                # an insertion relative to the consensus
-                del_deltas[cons_idx] -= insertion_score
+                # consider deleting the consensus base.
+                # This would convert (mis)match to insertion
+                del_deltas[cons_idx] += (insertion_score - (sbase == cbase ? match_score : mismatch_score))
             elseif move == dp_del
-                # substitution proposals are undefined
+                # no reason to consider substitutions. delta = 0.
                 # consider deletion proposal. would convert deletion
                 # to no-op.
-                del_deltas[cons_idx] -= (error_score + scores.deletion)
-            elseif move == dp_ins
-                # consider insertion proposals.
-                # push all insertion proposals to the end
-                base = seq.seq[seq_idx]
-                score_delta = match_score - (error_score + scores.insertion)
-                insertion_bases[base] = max(insertion_bases[base],
-                                            score_delta)
+                del_deltas[cons_idx] += (0.0 - deletion_score)
             end
+        end
+        # insertions at the end
+        # consider insertion proposals.
+        # push all insertion proposals to the end
+        for (base, delta) in insertion_bases
+            ins_deltas[end, baseints[base]] += delta
         end
     end
     # TODO: push insertions and deletions to the end of consensus repeats
 
     # only return proposals with positive deltas
     result = Proposal[]
+    deltas = Float64[]
     nrows, ncols = size(sub_deltas)
     if do_subs
         for i in 1:nrows, j in 1:ncols
             if sub_deltas[i, j] > 0
                 push!(result, Substitution(i, bases[j]))
+                push!(deltas, sub_deltas[i, j])
             end
         end
     end
@@ -746,15 +756,17 @@ function alignment_proposals(state::State,
         for i in 1:nrows
             if del_deltas[i] > 0
                 push!(result, Deletion(i))
+                push!(deltas, del_deltas[i])
             end
         end
         for i in 1:(nrows+1), j in 1:ncols
-            if ins_deltas[i] > 0
+            if ins_deltas[i, j] > 0
                 push!(result, Insertion(i - 1, bases[j]))
+                push!(deltas, ins_deltas[i, j])
             end
         end
     end
-    return result
+    return result, deltas
 end
 
 function get_candidate_proposals(state::State,
@@ -763,6 +775,7 @@ function get_candidate_proposals(state::State,
                                  reference::PString,
                                  ref_scores::Scores,
                                  fast_proposals::Bool,
+                                 trust_proposals::Bool,
                                  indel_correction_only::Bool)
     candidates = CandProposal[]
     use_ref = (state.stage == frame_correction_stage)
@@ -781,15 +794,19 @@ function get_candidate_proposals(state::State,
         if state.stage == frame_correction_stage && indel_correction_only
             do_subs = false
         end
-        proposals = alignment_proposals(state, sequences, scores, do_subs, do_indels)
+        proposals, deltas = alignment_proposals(state, sequences, scores, do_subs, do_indels)
+        if trust_proposals
+            for (p, d) in zip(proposals, deltas)
+                push!(candidates, CandProposal(p, state.score + d))
+            end
+            return candidates
+        end
     end
 
     for p in proposals
         score = score_proposal(p, state, sequences, scores, use_ref,
                                reference, ref_scores, newcols)
-        if score > state.score && !isapprox(score, state.score)
-            push!(candidates, CandProposal(p, score))
-        end
+        push!(candidates, CandProposal(p, score))
     end
     return candidates
 end
@@ -1162,6 +1179,7 @@ function quiver2(seqstrings::Vector{String},
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
                  fast_proposals::Bool=true,
+                 trust_proposals::Bool=true,
                  fix_indels_stat::Bool=true,
                  indel_correction_only::Bool=true,
                  use_ref_for_qvs::Bool=false,
@@ -1259,6 +1277,7 @@ function quiver2(seqstrings::Vector{String},
         candidates = get_candidate_proposals(state, seqs, scores, ref_pstring,
                                              ref_scores,
                                              fast_proposals,
+                                             trust_proposals,
                                              indel_correction_only)
         recompute_As = true
         if length(candidates) == 0
@@ -1334,7 +1353,7 @@ function quiver2(seqstrings::Vector{String},
                                                        for c in chosen_cands])
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
-                       bandwidth_mult, true, false, verbose,
+                       bandwidth_mult, true, true, verbose,
                        use_ref_for_qvs)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
