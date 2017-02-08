@@ -1,3 +1,5 @@
+# TODO: try not scoring proposals at all. just accept model surgery deltas.
+
 module Model
 
 using Bio.Seq
@@ -36,7 +38,7 @@ error probabilities.
 type PString
     seq::String
     error_log_p::Vector{Float64}
-    crrct_log_p::Vector{Float64}
+    match_log_p::Vector{Float64}
     bandwidth::Int
 
     function PString(seq::String, error_log_p::Vector{Float64}, bandwidth::Int)
@@ -56,8 +58,8 @@ type PString
         if maximum(error_log_p) > 0.0
             error("a log error probability is > 0")
         end
-        crrct_log_p = log10(1.0 - exp10(error_log_p))
-        return new(seq, error_log_p, crrct_log_p, bandwidth)
+        match_log_p = log10(1.0 - exp10(error_log_p))
+        return new(seq, error_log_p, match_log_p, bandwidth)
     end
 end
 
@@ -125,6 +127,13 @@ function Scores(errors::ErrorModel;
 end
 
 
+immutable EstErrorProbs
+    sub::Array{Float64, 2}
+    del::Array{Float64, 1}
+    ins::Array{Float64, 2}
+end
+
+
 # default to invalid scores, to force user to set them
 const default_ref_scores = Scores(0.0, 0.0, 0.0, 0.0, 0.0)
 
@@ -154,12 +163,12 @@ const offsets = ([1, 1],  # sub
                  [3, 0],  # codon insertion
                  [0, 3])  # codon deletion
 
-const bases = "ACGT-"
+const bases = "ACGT"
+const bases_set = Set{Char}(bases)
 const baseints = Dict('A' => 1,
                       'C' => 2,
                       'G' => 3,
                       'T' => 4,
-                      '-' => 5,
                       )
 
 const empty_array = Array(Float64, (0, 0))
@@ -168,12 +177,12 @@ function move_scores(t_base::Char,
                      s_base::Char,
                      seq_i::Int,
                      error_log_p::Vector{Float64},
-                     crrct_log_p::Vector{Float64},
+                     match_log_p::Vector{Float64},
                      scores::Scores)
     cur_i = max(seq_i, 1)
     cur_log_p = error_log_p[cur_i]
     next_log_p = error_log_p[min(seq_i + 1, length(error_log_p))]
-    match_score = s_base == t_base ? crrct_log_p[cur_i] : cur_log_p + scores.mismatch
+    match_score = s_base == t_base ? match_log_p[cur_i] : cur_log_p + scores.mismatch
     ins_score = cur_log_p + scores.insertion
     del_score = max(cur_log_p, next_log_p) + scores.deletion
     return match_score, ins_score, del_score
@@ -227,7 +236,7 @@ function update(A::BandedArray{Float64},
     result = (-Inf, dp_none)
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1,
                                                     pseq.error_log_p,
-                                                    pseq.crrct_log_p,
+                                                    pseq.match_log_p,
                                                     scores)
     # allow terminal insertions for free
     if trim && (j == 1)
@@ -522,12 +531,12 @@ end
 
 function choose_candidates(candidates::Vector{CandProposal}, min_dist::Int)
     final_cands = CandProposal[]
-    posns = Set()
+    posns = Set{Int}()
     for c in sort(candidates, by=(c) -> c.score, rev=true)
         if any(Bool[(abs(c.proposal.pos - p) < min_dist) for p in posns])
             continue
         end
-        union!(posns, affected_positions(c.proposal))
+        push!(posns, c.proposal.pos)
         push!(final_cands, c)
     end
     return final_cands
@@ -602,8 +611,8 @@ function moves_to_proposals(moves::Vector{DPMove},
         i += ii
         j += jj
 
-        score = seq.crrct_log_p[max(i, 1)]
-        next_score = seq.crrct_log_p[min(i + 1, length(seq))]
+        score = seq.match_log_p[max(i, 1)]
+        next_score = seq.match_log_p[min(i + 1, length(seq))]
         del_score = min(score, next_score)
 
         if move == dp_match
@@ -625,24 +634,128 @@ end
 
 function alignment_proposals(state::State,
                              sequences::Vector{PString},
-                             subs_only::Bool)
+                             scores::Scores,
+                             do_subs::Bool,
+                             do_indels::Bool)
+    sub_deltas = zeros(Float64, (length(state.consensus), 4))
+    del_deltas = zeros(Float64, (length(state.consensus), 1))
+    ins_deltas = zeros(Float64, (length(state.consensus) + 1, 4))
     # TODO: use scores
-    proposal_dict = Dict{Proposal, Float64}()
     for (Amoves, seq) in zip(state.Amoves, sequences)
         moves = backtrace(Amoves)
-        (proposals, scores) = moves_to_proposals(moves, state.consensus, seq)
-        for (proposal, score) in zip(proposals, scores)
-            if !subs_only || typeof(proposal) == Substitution
-                if !haskey(proposal_dict, proposal)
-                    proposal_dict[proposal] = 0.0
+        seq_idx = 0
+        cons_idx = 0
+
+        # map each base to its maximum delta
+        # start with deletion scores for each
+        del_score = seq.error_log_p[1] + scores.deletion
+        insertion_bases = Dict{Char, Float64}(
+                                              'A' => del_score,
+                                              'C' => del_score,
+                                              'G' => del_score,
+                                              'T' => del_score,
+                                              )
+
+        for (move_idx, move) in enumerate(moves)
+            if move in (dp_match, dp_ins)
+                seq_idx += 1
+            end
+            if move in (dp_match, dp_del)
+                cons_idx += 1
+            end
+
+            match_score = -Inf
+            error_score = Inf
+            if seq_idx > 0
+                match_score = seq.match_log_p[seq_idx]
+                error_score = seq.error_log_p[seq_idx]
+            end
+            mismatch_score = error_score + scores.mismatch
+            insertion_score = error_score + scores.insertion
+
+            if move != dp_ins && length(insertion_bases) > 0
+                # reached the end of a series of insertions.
+                # handle them now.
+                ins_idx = cons_idx - 1
+
+                for (base, delta) in insertion_bases
+                    ins_deltas[cons_idx, baseints[base]] += delta
                 end
-                proposal_dict[proposal] += score
+
+                # reset insertion bases
+                # add new insertion bases for after this position
+                # inserting a base would cause a deletion relative
+                # to the consensus
+                del_score = max(seq.error_log_p[max(seq_idx, 1)],
+                                seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
+                insertion_bases['A'] = del_score
+                insertion_bases['C'] = del_score
+                insertion_bases['G'] = del_score
+                insertion_bases['T'] = del_score
+            end
+
+            if move == dp_match
+                # consider all substitution proposals
+                for (baseint, base) in enumerate(bases)
+                    cbase = state.consensus[cons_idx]
+                    if cbase == base
+                        # do not consider substitution of same base
+                        continue
+                    end
+                    sbase = seq.seq[seq_idx]
+                    if sbase == cbase
+                        # proposal would hurt
+                        sub_deltas[cons_idx, baseint] += (mismatch_score - match_score)
+                    else
+                        # proposal would help
+                        sub_deltas[cons_idx, baseint] += (match_score - mismatch_score)
+                    end
+                end
+                # consider deletion proposal
+                # deleting this base in the consensus would cause
+                # an insertion relative to the consensus
+                del_deltas[cons_idx] -= insertion_score
+            elseif move == dp_del
+                # substitution proposals are undefined
+                # consider deletion proposal. would convert deletion
+                # to no-op.
+                del_deltas[cons_idx] -= (error_score + scores.deletion)
+            elseif move == dp_ins
+                # consider insertion proposals.
+                # push all insertion proposals to the end
+                base = seq.seq[seq_idx]
+                score_delta = match_score - (error_score + scores.insertion)
+                insertion_bases[base] = max(insertion_bases[base],
+                                            score_delta)
             end
         end
     end
-    return collect(keys(proposal_dict))
-end
+    # TODO: push insertions and deletions to the end of consensus repeats
 
+    # only return proposals with positive deltas
+    result = Proposal[]
+    nrows, ncols = size(sub_deltas)
+    if do_subs
+        for i in 1:nrows, j in 1:ncols
+            if sub_deltas[i, j] > 0
+                push!(result, Substitution(i, bases[j]))
+            end
+        end
+    end
+    if do_indels
+        for i in 1:nrows
+            if del_deltas[i] > 0
+                push!(result, Deletion(i))
+            end
+        end
+        for i in 1:(nrows+1), j in 1:ncols
+            if ins_deltas[i] > 0
+                push!(result, Insertion(i - 1, bases[j]))
+            end
+        end
+    end
+    return result
+end
 
 function get_candidate_proposals(state::State,
                                  sequences::Vector{PString},
@@ -663,8 +776,12 @@ function get_candidate_proposals(state::State,
                               indel_correction_only)
     if (state.stage == initial_stage ||
         state.stage == refinement_stage) && fast_proposals
-        subs_only = state.stage == refinement_stage
-        proposals = alignment_proposals(state, sequences, subs_only)
+        do_indels = state.stage in (initial_stage, frame_correction_stage)
+        do_subs = true
+        if state.stage == frame_correction_stage && indel_correction_only
+            do_subs = false
+        end
+        proposals = alignment_proposals(state, sequences, scores, do_subs, do_indels)
     end
 
     for p in proposals
@@ -814,6 +931,33 @@ function has_single_indels(consensus::String,
 end
 
 
+function single_indel_proposals(consensus::String,
+                                reference::PString,
+                                ref_scores::Scores)
+    moves = align_moves(consensus, reference, ref_scores)
+    results = Proposal[]
+    cons_idx = 0
+    ref_idx = 0
+    for move in moves
+        if move == dp_match
+            cons_idx += 1
+            ref_idx += 1
+        elseif move == dp_ins
+            ref_idx += 1
+            push!(results, Insertion(cons_idx, reference.seq[ref_idx]))
+        elseif move == dp_del
+            cons_idx += 1
+            push!(results, Deletion(cons_idx))
+        elseif move == dp_codon_ins
+            ref_idx += 3
+        elseif move == dp_codon_del
+            cons_idx += 3
+        end
+    end
+    return results
+end
+
+
 function initial_state(consensus::String, seqs::Vector{PString})
     if length(consensus) == 0
         # choose highest-quality sequence
@@ -882,13 +1026,19 @@ end
 
 
 """convert per-proposal log differences to a per-base error rate"""
-function normalize_log_differences(position_scores, insertion_scores, state_score)
+function normalize_log_differences(sub_scores,
+                                   del_scores,
+                                   ins_scores,
+                                   state_score)
     # per-base insertion score is mean of neighboring insertions
-    position_exp = exp10(position_scores)
-    position_probs = broadcast(/, position_exp, sum(position_exp, 2))
-    ins_exp = exp10(insertion_scores)
+    pos_scores = hcat(sub_scores, del_scores)
+    pos_exp = exp10(pos_scores)
+    pos_probs = broadcast(/, pos_exp, sum(pos_exp, 2))
+    ins_exp = exp10(ins_scores)
     ins_probs = broadcast(/, ins_exp, exp10(state_score) + sum(ins_exp, 2))
-    return position_probs, ins_probs
+    sub_probs = pos_probs[:, 1:4]
+    del_probs = pos_probs[:, 5]
+    return EstErrorProbs(sub_probs, del_probs, ins_probs)
 end
 
 
@@ -898,12 +1048,13 @@ function estimate_probs(state::State,
                         reference::PString,
                         ref_scores::Scores,
                         use_ref_for_qvs::Bool)
-    # `position_scores[i]` gives the following log probabilities
+    # `sub_scores[i]` gives the following log probabilities
     # for `consensus[i]`: [A, C, G, T, -]
-    position_scores = zeros(length(state.consensus), 5) + state.score
-    # `insertion_scores[i]` gives the following log probabilities for an
+    sub_scores = zeros(length(state.consensus), 4) + state.score
+    del_scores = zeros(length(state.consensus)) + state.score
+    # `ins_scores[i]` gives the following log probabilities for an
     # insertion before `consensus[i]` of [A, C, G, T]
-    insertion_scores = zeros(length(state.consensus) + 1, 4)
+    ins_scores = zeros(length(state.consensus) + 1, 4)
 
     # TODO: should we modify penalties before using reference?
     # - do not penalize mismatches
@@ -926,45 +1077,46 @@ function estimate_probs(state::State,
                                reference, qv_ref_scores,
                                newcols)
         if typeof(m) == Substitution
-            position_scores[m.pos, baseints[m.base]] = score
+            sub_scores[m.pos, baseints[m.base]] = score
         elseif typeof(m) == Deletion
-            position_scores[m.pos, baseints['-']] = score
+            del_scores[m.pos] = score
         elseif typeof(m) == Insertion
-            insertion_scores[m.pos + 1, baseints[m.base]] = score
+            ins_scores[m.pos + 1, baseints[m.base]] = score
         end
     end
-    max_score = max(maximum(position_scores), maximum(insertion_scores))
-    position_scores -= max_score
-    insertion_scores -= max_score
-    if maximum(position_scores) > 0.0
-        error("position scores cannot be positive")
+    max_score = maximum([maximum(sub_scores),
+                         maximum(del_scores),
+                         maximum(ins_scores)])
+    sub_scores -= max_score
+    del_scores -= max_score
+    ins_scores -= max_score
+    if maximum(sub_scores) > 0.0
+        error("sub scores cannot be positive")
     end
-    if maximum(insertion_scores) > 0.0
+    if maximum(del_scores) > 0.0
+        error("deletion scores cannot be positive")
+    end
+    if maximum(ins_scores) > 0.0
         error("insertion scores cannot be positive")
     end
-    return normalize_log_differences(position_scores, insertion_scores, state.score - max_score)
+    return normalize_log_differences(sub_scores,
+                                     del_scores,
+                                     ins_scores,
+                                     state.score - max_score)
 end
 
 
-function estimate_point_probs(position_probs, insertion_probs)
-    no_point_error_prob = maximum(position_probs, 2)
+function estimate_point_probs(probs::EstErrorProbs)
+    pos_probs = hcat(probs.sub, probs.del)
+    no_point_error_prob = maximum(pos_probs, 2)
     # multiple by 0.5 to avoid double counting.
-    no_ins_error_prob = 1.0 - 0.5 * sum(insertion_probs, 2)
+    no_ins_error_prob = 1.0 - 0.5 * sum(probs.ins, 2)
     result = 1.0 - broadcast(*, no_point_error_prob,
                              no_ins_error_prob[1:end-1],
                              no_ins_error_prob[2:end])
     return reshape(result, length(result))
 end
 
-
-function estimate_indel_probs(position_probs, insertion_probs)
-    no_del_prob = 1.0 - position_probs[:, end]
-    no_ins_error_prob = 1.0 - 0.5 * sum(insertion_probs, 2)
-    result = 1.0 - broadcast(*, no_del_prob,
-                             no_ins_error_prob[1:end-1],
-                             no_ins_error_prob[2:end])
-    return reshape(result, length(result))
-end
 
 function base_distribution(base::Char, lp, ilp)
     result = fill(lp - log10(3), 4)
@@ -991,7 +1143,7 @@ function posterior_error_probs(tlen::Int,
             if move == dp_match
                 probs[t_j, 1:4] += base_distribution(s.seq[s_i],
                                                      s.error_log_p[s_i],
-                                                     s.crrct_log_p[s_i])
+                                                     s.match_log_p[s_i])
             end
         end
     end
@@ -1010,6 +1162,7 @@ function quiver2(seqstrings::Vector{String},
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
                  fast_proposals::Bool=true,
+                 fix_indels_stat::Bool=true,
                  indel_correction_only::Bool=true,
                  use_ref_for_qvs::Bool=false,
                  bandwidth::Int=10, bandwidth_mult::Int=2,
@@ -1112,7 +1265,7 @@ function quiver2(seqstrings::Vector{String},
             if verbose > 1
                 println(STDERR, "  no candidates found")
             end
-            push!(n_proposals, zeros(Int, Int(typemax(DPMove))))
+            push!(n_proposals, zeros(Int, 3))
             consensus_stages[Int(state.stage)] = state.consensus
             stage_times[Int(state.stage)] = toq()
             tic()
@@ -1128,6 +1281,13 @@ function quiver2(seqstrings::Vector{String},
                 ref_error_rate = max(ref_error_rate, 1e-10)
                 ref_error_log_p = fill(log10(ref_error_rate), length(reference))
                 ref_pstring = PString(reference, ref_error_log_p, bandwidth)
+
+                # fix distant single indels right away
+                if fix_indels_stat
+                    indel_proposals = single_indel_proposals(state.consensus, ref_pstring, ref_scores)
+                    state.consensus = apply_proposals(state.consensus, indel_proposals)
+                    state.stage = refinement_stage
+                end
             elseif state.stage == frame_correction_stage
                 if !has_single_indels(state.consensus, ref_pstring, ref_scores)
                     consensus_ref = state.consensus
@@ -1166,6 +1326,9 @@ function quiver2(seqstrings::Vector{String},
             if verbose > 1
                 println(STDERR, "  filtered to $(length(chosen_cands)) candidates")
             end
+            if verbose > 2
+                println(STDERR, chosen_cands)
+            end
             state.consensus = apply_proposals(old_consensus,
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
@@ -1188,6 +1351,9 @@ function quiver2(seqstrings::Vector{String},
             else
                 # no need to recompute unless batch changes
                 recompute_As = false
+            end
+            if verbose > 2
+                println(STDERR, chosen_cands)
             end
             proposal_counts = [length(filter(c -> (typeof(c.proposal) == t),
                                              chosen_cands))
@@ -1251,20 +1417,15 @@ function quiver2(seqstrings::Vector{String},
                 "ref_error_rate" => ref_error_rate,
                 "stage_times" => stage_times,
                 )
-
-    # FIXME: recomputing for all sequences is costly, but using batch is less accurate
-    recompute!(state, seqs, scores,
-               ref_pstring, ref_scores,
+    # FIXME: recomputing for all sequences is costly, but using batch
+    # is less accurate
+    recompute!(state, seqs, scores, ref_pstring, ref_scores,
                bandwidth_mult, true, true, verbose,
                use_ref_for_qvs)
-    base_probs, ins_probs = estimate_probs(state, seqs, scores,
-                                           ref_pstring, ref_scores,
-                                           use_ref_for_qvs)
-
-    post = posterior_error_probs(length(state.consensus),
-                                 seqs, state.Amoves)
-
-    return state.consensus, base_probs, ins_probs, post, info
+    info["error_probs"] = estimate_probs(state, seqs, scores,
+                                         ref_pstring, ref_scores,
+                                         use_ref_for_qvs)
+    return state.consensus, info
 end
 
 function quiver2(sequences::Vector{String},
@@ -1292,13 +1453,12 @@ function quiver2(sequences::Vector{DNASequence},
     new_reference = convert(String, reference)
     new_consensus = convert(String, consensus)
     new_sequences = String[convert(String, s) for s in sequences]
-    (result, base_probs, insertion_probs, post,
-     info) = quiver2(new_sequences, phreds, scores;
-                     consensus=new_consensus,
-                     reference=new_reference,
-                     kwargs...)
+    (result, info) = quiver2(new_sequences, phreds, scores;
+                             consensus=new_consensus,
+                             reference=new_reference,
+                             kwargs...)
     info["consensus_stages"] = DNASequence[DNASequence(s) for s in info["consensus_stages"]]
-    return (DNASequence(result), base_probs, insertion_probs, post, info)
+    return DNASequence(result), info
 end
 
 end
