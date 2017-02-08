@@ -835,7 +835,9 @@ function get_candidate_proposals(state::State,
     for p in proposals
         score = score_proposal(p, state, sequences, scores, use_ref,
                                reference, ref_scores, newcols)
-        push!(candidates, CandProposal(p, score))
+        if score > state.score
+            push!(candidates, CandProposal(p, score))
+        end
     end
     return candidates
 end
