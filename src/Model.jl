@@ -602,7 +602,6 @@ end
 function moves_to_proposals(moves::Vector{DPMove},
                             consensus::String, seq::PString)
     proposals = Proposal[]
-    scores = Float64[]
     i, j = (0, 0)
     for move in moves
         (ii, jj) = offsets[Int(move)]
@@ -616,17 +615,14 @@ function moves_to_proposals(moves::Vector{DPMove},
         if move == dp_match
             if seq.seq[i] != consensus[j]
                 push!(proposals, Substitution(j, seq.seq[i]))
-                push!(scores, score)
             end
         elseif move == dp_ins
             push!(proposals, Insertion(j, seq.seq[i]))
-            push!(scores, score)
         elseif move == dp_del
             push!(proposals, Deletion(j))
-            push!(scores, del_score)
         end
     end
-    return proposals, scores
+    return proposals
 end
 
 """Only get proposals that appear in at least one alignment"""
@@ -634,17 +630,16 @@ function alignment_proposals(state::State,
                              sequences::Vector{PString},
                              do_subs::Bool,
                              do_indels::Bool)
-    proposals = Set{Proposal}
+    result = Set{Proposal}()
     for (Amoves, seq) in zip(state.Amoves, sequences)
         moves = backtrace(Amoves)
-        (proposals, scores) = moves_to_proposals(moves, state.consensus, seq)
-        for (proposal, score) in zip(proposals, scores)
+        for proposal in moves_to_proposals(moves, state.consensus, seq)
             if (typeof(proposal) == Substitution && do_subs) || do_indels
-                push!(proposals, proposal)
+                push!(result, proposal)
             end
         end
     end
-    return collect(proposals)
+    return collect(result)
 end
 
 
@@ -1373,7 +1368,7 @@ function quiver2(seqstrings::Vector{String},
             end
         else
             if verbose > 1
-                println(STDERR, "  found $(length(candidates)) candidate")
+                println(STDERR, "  found $(length(candidates)) candidates")
             end
             chosen_cands = choose_candidates(candidates, min_dist)
             if verbose > 1
@@ -1385,7 +1380,8 @@ function quiver2(seqstrings::Vector{String},
             state.consensus = apply_proposals(old_consensus,
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
-            recompute_Bs = !(do_surgery_proposals && trust_proposals)
+            recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
+                            state.stage == frame_correction_stage && !fix_indels_stat)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
                        bandwidth_mult, true, recompute_Bs, verbose,
@@ -1420,7 +1416,8 @@ function quiver2(seqstrings::Vector{String},
             seqs = sequences[indices]
             recompute_As = true
         end
-        recompute_Bs = !(do_surgery_proposals && trust_proposals)
+        recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
+                state.stage == frame_correction_stage && !fix_indels_stat)
         recompute!(state, seqs, scores,
                    ref_pstring, ref_scores,
                    bandwidth_mult, recompute_As, recompute_Bs, verbose,
@@ -1443,7 +1440,8 @@ function quiver2(seqstrings::Vector{String},
             batch = min(batch + base_batch, length(sequences))
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
-            recompute_Bs = !(do_surgery_proposals && trust_proposals)
+            recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
+                            state.stage == frame_correction_stage && !fix_indels_stat)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
                        bandwidth_mult, true, recompute_Bs, verbose,
