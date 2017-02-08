@@ -256,7 +256,7 @@ function test_no_single_indels()
                                            local_scores)
 end
 
-function _test_alignment_proposals(template, seqs, lps, expected)
+function _test_surgery_proposals(template, seqs, lps, expected)
     bandwidth = 5
     rseq = Quiver2.Model.PString("", Float64[], bandwidth)
     mult = 2
@@ -276,12 +276,12 @@ function _test_alignment_proposals(template, seqs, lps, expected)
                                   for (s, p) in zip(seqs, lps)]
     state = Quiver2.Model.initial_state(template, pseqs)
     Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
-    proposals, deltas = Quiver2.Model.alignment_proposals(state, pseqs, scores, do_subs, do_indels)
+    proposals, deltas = Quiver2.Model.surgery_proposals(state, pseqs, scores, do_subs, do_indels)
     @test length(symdiff(Set(proposals), Set(expected))) == 0
 end
 
 
-function test_alignment_proposals()
+function test_surgery_proposals()
     template = "ACGAG"
     seqs = ["CGTAC",
             "CGAC",
@@ -289,21 +289,21 @@ function test_alignment_proposals()
     expected = [Proposals.Deletion(1),
                 Proposals.Insertion(3, 'T'),
                 Proposals.Substitution(5, 'C')]
-    _test_alignment_proposals(template, seqs, [], expected)
+    _test_surgery_proposals(template, seqs, [], expected)
 
     template = "AA"
     seqs = ["AAG",
             "AA",
             "AAG"]
     expected = [Proposals.Insertion(2, 'G')]
-    _test_alignment_proposals(template, seqs, [], expected)
+    _test_surgery_proposals(template, seqs, [], expected)
 
     template = "AA"
     seqs = ["GAA",
             "AA",
             "GAA"]
     expected = [Proposals.Insertion(0, 'G')]
-    _test_alignment_proposals(template, seqs, [], expected)
+    _test_surgery_proposals(template, seqs, [], expected)
 
     # test that highly confident base overwhelms others
     template = "AA"
@@ -314,7 +314,7 @@ function test_alignment_proposals()
                           [-3.0, -5.0],
                           [-3.0, -50]]
     expected = [Proposals.Insertion(0, 'G')]
-    _test_alignment_proposals(template, seqs, lps, expected)
+    _test_surgery_proposals(template, seqs, lps, expected)
 
 end
 
@@ -343,7 +343,8 @@ function test_quiver2()
 
     for i in 1:n
         use_ref = rand([true, false])
-        fast_proposals = rand([true, false])
+        do_alignment_proposals = rand([true, false])
+        do_surgery_proposals = rand([true, false])
         trust_proposals = rand([true, false])
         fix_indels_stat = rand([true, false])
         indel_correction_only = rand([true, false])
@@ -366,7 +367,8 @@ function test_quiver2()
                                        phreds, seq_scores;
                                        reference=reference,
                                        ref_scores=ref_scores,
-                                       fast_proposals=fast_proposals,
+                                       do_alignment_proposals=do_alignment_proposals,
+                                       do_surgery_proposals=do_surgery_proposals,
                                        trust_proposals=trust_proposals,
                                        fix_indels_stat=fix_indels_stat,
                                        indel_correction_only=indel_correction_only,
@@ -480,7 +482,7 @@ test_random_substitutions()
 test_random_insertions()
 test_random_deletions()
 test_no_single_indels()
-test_alignment_proposals()
+test_surgery_proposals()
 test_quiver2()
 test_base_probs()
 test_ins_probs()

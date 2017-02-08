@@ -629,13 +629,32 @@ function moves_to_proposals(moves::Vector{DPMove},
     return proposals, scores
 end
 
-
-# FIXME: modularize this function and test each part
+"""Only get proposals that appear in at least one alignment"""
 function alignment_proposals(state::State,
                              sequences::Vector{PString},
-                             scores::Scores,
                              do_subs::Bool,
                              do_indels::Bool)
+    proposals = Set{Proposal}
+    for (Amoves, seq) in zip(state.Amoves, sequences)
+        moves = backtrace(Amoves)
+        (proposals, scores) = moves_to_proposals(moves, state.consensus, seq)
+        for (proposal, score) in zip(proposals, scores)
+            if (typeof(proposal) == Substitution && do_subs) || do_indels
+                push!(proposals, proposal)
+            end
+        end
+    end
+    return collect(proposals)
+end
+
+
+"""Use model surgery heuristic to get proposals with positive score deltas."""
+function surgery_proposals(state::State,
+                           sequences::Vector{PString},
+                           scores::Scores,
+                           do_subs::Bool,
+                           do_indels::Bool)
+    # FIXME: modularize this function and test each part
     sub_deltas = zeros(Float64, (length(state.consensus), 4))
     del_deltas = zeros(Float64, (length(state.consensus), 1))
     ins_deltas = zeros(Float64, (length(state.consensus) + 1, 4))
@@ -774,7 +793,8 @@ function get_candidate_proposals(state::State,
                                  scores::Scores,
                                  reference::PString,
                                  ref_scores::Scores,
-                                 fast_proposals::Bool,
+                                 do_alignment_proposals::Bool,
+                                 do_surgery_proposals::Bool,
                                  trust_proposals::Bool,
                                  indel_correction_only::Bool)
     candidates = CandProposal[]
@@ -788,19 +808,28 @@ function get_candidate_proposals(state::State,
                               state.Amoves, scores,
                               indel_correction_only)
     if (state.stage == initial_stage ||
-        state.stage == refinement_stage) && fast_proposals
+        state.stage == refinement_stage) && do_surgery_proposals
         do_indels = state.stage in (initial_stage, frame_correction_stage)
         do_subs = true
         if state.stage == frame_correction_stage && indel_correction_only
+            # FIXME: this never happens
             do_subs = false
         end
-        proposals, deltas = alignment_proposals(state, sequences, scores, do_subs, do_indels)
+        proposals, deltas = surgery_proposals(state, sequences, scores, do_subs, do_indels)
         if trust_proposals
             for (p, d) in zip(proposals, deltas)
                 push!(candidates, CandProposal(p, state.score + d))
             end
             return candidates
         end
+    elseif (state.stage == initial_stage ||
+        state.stage == refinement_stage) && do_alignment_proposals
+        do_indels = state.stage in (initial_stage, frame_correction_stage)
+        do_subs = true
+        if state.stage == frame_correction_stage && indel_correction_only
+            do_subs = false
+        end
+        proposals = alignment_proposals(state, sequences, do_subs, do_indels)
     end
 
     for p in proposals
@@ -1178,7 +1207,8 @@ function quiver2(seqstrings::Vector{String},
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
-                 fast_proposals::Bool=true,
+                 do_alignment_proposals::Bool=true,
+                 do_surgery_proposals::Bool=true,
                  trust_proposals::Bool=true,
                  fix_indels_stat::Bool=true,
                  indel_correction_only::Bool=true,
@@ -1249,7 +1279,7 @@ function quiver2(seqstrings::Vector{String},
         println(STDERR, "computing initial alignments")
     end
     state = initial_state(consensus, seqs)
-    recompute_Bs = !(fast_proposals && trust_proposals)
+    recompute_Bs = !(do_surgery_proposals && trust_proposals)
     recompute!(state, seqs, scores,
                ref_pstring, ref_scores,
                bandwidth_mult, true, recompute_Bs, verbose,
@@ -1277,7 +1307,8 @@ function quiver2(seqstrings::Vector{String},
         penalties_increased = false
         candidates = get_candidate_proposals(state, seqs, scores, ref_pstring,
                                              ref_scores,
-                                             fast_proposals,
+                                             do_alignment_proposals,
+                                             do_surgery_proposals,
                                              trust_proposals,
                                              indel_correction_only)
         recompute_As = true
@@ -1352,7 +1383,7 @@ function quiver2(seqstrings::Vector{String},
             state.consensus = apply_proposals(old_consensus,
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
-            recompute_Bs = !(fast_proposals && trust_proposals)
+            recompute_Bs = !(do_surgery_proposals && trust_proposals)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
                        bandwidth_mult, true, recompute_Bs, verbose,
@@ -1387,7 +1418,7 @@ function quiver2(seqstrings::Vector{String},
             seqs = sequences[indices]
             recompute_As = true
         end
-        recompute_Bs = !(fast_proposals && trust_proposals)
+        recompute_Bs = !(do_surgery_proposals && trust_proposals)
         recompute!(state, seqs, scores,
                    ref_pstring, ref_scores,
                    bandwidth_mult, recompute_As, recompute_Bs, verbose,
@@ -1400,9 +1431,6 @@ function quiver2(seqstrings::Vector{String},
             !penalties_increased &&
             batch == length(sequences))
             if verbose > 1
-                # caused by bandwidth being too small.
-                # this should not usually happen, because bandwidth
-                # should be increased before this.
                 println(STDERR, "  WARNING: not using batches, but score decreased.")
             end
         end
@@ -1413,7 +1441,7 @@ function quiver2(seqstrings::Vector{String},
             batch = min(batch + base_batch, length(sequences))
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
-            recompute_Bs = !(fast_proposals && trust_proposals)
+            recompute_Bs = !(do_surgery_proposals && trust_proposals)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
                        bandwidth_mult, true, recompute_Bs, verbose,
