@@ -342,16 +342,11 @@ function test_quiver2()
     n_out_frame = 0
 
     for i in 1:n
-        # use_ref = rand([true, false])
-        # fast_proposals = rand([true, false])
-        # trust_proposals = rand([true, false])
-        # fix_indels_stat = rand([true, false])
-        # indel_correction_only = rand([true, false])
-        use_ref = true
-        fast_proposals = true
-        trust_proposals = true
-        fix_indels_stat = true
-        indel_correction_only = true
+        use_ref = rand([true, false])
+        fast_proposals = rand([true, false])
+        trust_proposals = rand([true, false])
+        fix_indels_stat = rand([true, false])
+        indel_correction_only = rand([true, false])
 
         (reference, template, template_error, reads, actual, phreds, sbools,
          tbools) = sample(n_seqs, len,

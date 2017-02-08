@@ -1249,9 +1249,10 @@ function quiver2(seqstrings::Vector{String},
         println(STDERR, "computing initial alignments")
     end
     state = initial_state(consensus, seqs)
+    recompute_Bs = !(fast_proposals && trust_proposals)
     recompute!(state, seqs, scores,
                ref_pstring, ref_scores,
-               bandwidth_mult, true, true, verbose,
+               bandwidth_mult, true, recompute_Bs, verbose,
                use_ref_for_qvs)
     empty_ref = length(reference) == 0
 
@@ -1351,9 +1352,10 @@ function quiver2(seqstrings::Vector{String},
             state.consensus = apply_proposals(old_consensus,
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
+            recompute_Bs = !(fast_proposals && trust_proposals)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
-                       bandwidth_mult, true, true, verbose,
+                       bandwidth_mult, true, recompute_Bs, verbose,
                        use_ref_for_qvs)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
@@ -1385,9 +1387,10 @@ function quiver2(seqstrings::Vector{String},
             seqs = sequences[indices]
             recompute_As = true
         end
+        recompute_Bs = !(fast_proposals && trust_proposals)
         recompute!(state, seqs, scores,
                    ref_pstring, ref_scores,
-                   bandwidth_mult, recompute_As, true, verbose,
+                   bandwidth_mult, recompute_As, recompute_Bs, verbose,
                    use_ref_for_qvs)
         if verbose > 1
             println(STDERR, "  score: $(state.score) ($(state.stage))")
@@ -1410,9 +1413,10 @@ function quiver2(seqstrings::Vector{String},
             batch = min(batch + base_batch, length(sequences))
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
+            recompute_Bs = !(fast_proposals && trust_proposals)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
-                       bandwidth_mult, true, true, verbose,
+                       bandwidth_mult, true, recompute_Bs, verbose,
                        use_ref_for_qvs)
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
