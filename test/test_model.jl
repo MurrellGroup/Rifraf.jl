@@ -256,6 +256,20 @@ function test_no_single_indels()
                                            local_scores)
 end
 
+
+function test_single_indel_proposals()
+    ref_errors = Quiver2.Model.ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0);
+    ref_scores = Quiver2.Model.Scores(ref_errors);
+
+    ref = "CGGCGATTT"
+    consensus_errors = Float64[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
+    consensus = Quiver2.Model.PString("CTGCCGA", consensus_errors, 10)
+
+    proposals = Quiver2.Model.single_indel_proposals(ref, consensus, ref_scores)
+    expected = [Quiver2.Proposals.Deletion(4)]
+    @test expected == proposals
+end
+
 function _test_fast_proposals(template, seqs, lps, expected;
                               do_alignment::Bool=true,
                               do_surgery::Bool=true)
@@ -340,11 +354,18 @@ function test_fast_proposals()
     template = "CCC"
     seqs = ["CC"]
     expected = [Proposals.Deletion(3)]
+    _test_fast_proposals(template, seqs, [], expected,
+                         do_alignment=false, do_surgery=true)
+
+    # test that insertions get pushed to end
+    template = "TT"
+    seqs = ["TTT",
+            "CTT"]
+    expected = [Proposals.Insertion(0, 'C'),
+                Proposals.Insertion(2, 'T')]
     _test_fast_proposals(template, seqs, lps, expected,
                          do_alignment=false, do_surgery=true)
 
-
-    # test that insertions get pushed
 end
 
 function test_quiver2()
@@ -511,9 +532,10 @@ test_random_substitutions()
 test_random_insertions()
 test_random_deletions()
 test_no_single_indels()
+test_single_indel_proposals()
 test_fast_proposals()
-test_quiver2()
 test_base_probs()
 test_ins_probs()
 test_align()
 test_align_2()
+test_quiver2()

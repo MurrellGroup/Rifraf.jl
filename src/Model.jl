@@ -177,11 +177,23 @@ function move_scores(t_base::Char,
                      seq_i::Int,
                      error_log_p::Vector{Float64},
                      match_log_p::Vector{Float64},
-                     scores::Scores)
+                     scores::Scores;
+                     match_mult::Float64=0.0)
     cur_i = max(seq_i, 1)
     cur_log_p = error_log_p[cur_i]
     next_log_p = error_log_p[min(seq_i + 1, length(error_log_p))]
-    match_score = s_base == t_base ? match_log_p[cur_i] : cur_log_p + scores.mismatch
+
+    match_score = 0.0
+    if s_base == t_base
+        match_score = match_log_p[cur_i]
+    else
+        # match_mult makes mismatches slightly better, proportional
+        # to that base's qv score.
+        # this is to break the symmetry of insertions and mismatches, and
+        # encourage insertions of low-quality bases.
+        # TODO: think of a less-hacky solution
+        match_score = cur_log_p + scores.mismatch - cur_log_p * match_mult
+    end
     ins_score = cur_log_p + scores.insertion
     del_score = max(cur_log_p, next_log_p) + scores.deletion
     return match_score, ins_score, del_score
@@ -231,12 +243,16 @@ function update(A::BandedArray{Float64},
                 pseq::PString,
                 scores::Scores;
                 newcols::Array{Float64, 2}=empty_array,
-                acol=-1, trim=false)
+                acol=-1, trim=false,
+                skew_matches=false)
     result = (-Inf, dp_none)
+    # TODO: this cannot make mismatches preferable to codon indels
+    match_mult = skew_matches ? 0.1 : 0.0
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1,
                                                     pseq.error_log_p,
                                                     pseq.match_log_p,
-                                                    scores)
+                                                    scores;
+                                                    match_mult=match_mult)
     # allow terminal insertions for free
     if trim && (j == 1)
         ins_score = 0.0
@@ -248,6 +264,7 @@ function update(A::BandedArray{Float64},
     result = update_helper(newcols, A, i, j, acol, dp_ins, ins_score, result...)
     result = update_helper(newcols, A, i, j, acol, dp_del, del_score, result...)
     codon_ins_score, codon_del_score = codon_move_scores(i-1, pseq.error_log_p, scores)
+
     if scores.codon_insertion > -Inf && i > codon_length
         result = update_helper(newcols, A, i, j, acol, dp_codon_ins,
                                codon_ins_score, result...)
@@ -269,7 +286,8 @@ end
 """Does backtracing to find best alignment."""
 function forward_moves(t::String, s::PString,
                        scores::Scores;
-                       trim::Bool=false)
+                       trim::Bool=false,
+                       skew_matches::Bool=false)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
@@ -286,7 +304,8 @@ function forward_moves(t::String, s::PString,
             sbase = i > 1 ? s.seq[i-1] : 'X'
             tbase = j > 1 ? t[j-1] : 'X'
             x = update(result, i, j, sbase, tbase,
-                       s, scores, trim=trim)
+                       s, scores; trim=trim,
+                       skew_matches=skew_matches)
             result[i, j] = x[1]
             moves[i, j] = x[2]
         end
@@ -654,9 +673,6 @@ function surgery_proposals(state::State,
     sub_deltas = zeros(Float64, (length(state.consensus), 4))
     del_deltas = zeros(Float64, (length(state.consensus)))
     ins_deltas = zeros(Float64, (length(state.consensus) + 1, 4))
-    # FIXME: push insertions and deletions to the end, on the fly
-    # insertions that match consensus should *keep* getting pushed
-    # deletions in a poly-base run should also get pushed
     for (Amoves, seq) in zip(state.Amoves, sequences)
         moves = backtrace(Amoves)
         seq_idx = 0
@@ -665,6 +681,10 @@ function surgery_proposals(state::State,
         # map each base to its maximum delta
         # start with deletion scores for each
         del_score = seq.error_log_p[1] + scores.deletion
+
+        # push insertions and deletions to the end, on the fly
+        # insertions that match consensus should *keep* getting pushed
+        # deletions in a poly-base run should also get pushed
         insertion_bases = Dict{Char, Float64}(
                                               'A' => del_score,
                                               'C' => del_score,
@@ -707,21 +727,18 @@ function surgery_proposals(state::State,
                 pushed_del_score = -Inf
             end
             if move != dp_ins
-                # try insertions before this position.
-                for (base, delta) in insertion_bases
-                    ins_deltas[cons_idx, baseints[base]] += delta
-                end
-                
-                # reset insertion bases
-                # add new insertion bases for after this position
-                # inserting a base would cause a deletion relative
-                # to the consensus
                 del_score = max(seq.error_log_p[max(seq_idx, 1)],
                                 seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
-                insertion_bases['A'] = del_score
-                insertion_bases['C'] = del_score
-                insertion_bases['G'] = del_score
-                insertion_bases['T'] = del_score
+
+                # handle insertions before this position.
+                for (base, delta) in insertion_bases
+                    # if current base equals attempted insertion,
+                    # keep pushing it
+                    if cbase != base
+                        ins_deltas[cons_idx, baseints[base]] += delta
+                        insertion_bases[base] = del_score
+                    end
+                end
             end
 
             if move == dp_ins
@@ -772,8 +789,6 @@ function surgery_proposals(state::State,
         end
 
         # handle insertions at the end
-        # consider insertion proposals.
-        # push all insertion proposals to the end
         for (base, delta) in insertion_bases
             ins_deltas[end, baseints[base]] += delta
         end
@@ -960,23 +975,29 @@ end
 
 function align_moves(t::String, s::PString,
                      scores::Scores;
-                     trim::Bool=false)
-    A, Amoves = forward_moves(t, s, scores, trim=trim)
+                     trim::Bool=false,
+                     skew_matches::Bool=false)
+    A, Amoves = forward_moves(t, s, scores;
+                              trim=trim, skew_matches=skew_matches)
     return backtrace(Amoves)
 end
 
 function align(t::String, s::PString,
                scores::Scores;
-               trim::Bool=false)
-    moves = align_moves(t, s, scores, trim=trim)
+               trim::Bool=false,
+               skew_matches::Bool=false)
+    moves = align_moves(t, s, scores, trim=trim,
+                        skew_matches=skew_matches)
     return moves_to_alignment_strings(moves, t, s.seq)
 end
 
 function align(t::String, s::String, phreds::Vector{Int8},
                scores::Scores,
                bandwidth::Int;
-               trim::Bool=false)
-    moves = align_moves(t, PString(s, phreds, bandwidth), scores, trim=trim)
+               trim::Bool=false,
+               skew_matches::Bool=false)
+    moves = align_moves(t, PString(s, phreds, bandwidth), scores,
+                        trim=trim, skew_matches=skew_matches)
     return moves_to_alignment_strings(moves, t, s)
 end
 
@@ -1002,8 +1023,8 @@ end
 function single_indel_proposals(reference::String,
                                 consensus::PString,
                                 ref_scores::Scores)
-    moves = align_moves(reference, consensus, ref_scores)
-
+    moves = align_moves(reference, consensus, ref_scores;
+                        skew_matches=true)
     results = Proposal[]
     cons_idx = 0
     ref_idx = 0
@@ -1197,7 +1218,7 @@ end
 function posterior_error_probs(tlen::Int,
                                seqs::Vector{PString},
                                Amoves::Vector{BandedArray{Int}})
-    # TODO: incorporate scores
+    # FIXME: incorporate scores
     probs = zeros(tlen, 4)
     for (s, Am) in zip(seqs, Amoves)
         moves = backtrace(Am)
