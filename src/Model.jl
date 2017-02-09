@@ -1,3 +1,11 @@
+# TODO: add more stages:
+# model surgery
+# alignment-informed quiver
+# fix indels via alignment
+# frame correction quiver
+# refinement
+# scoring
+
 module Model
 
 using Bio.Seq
@@ -1288,6 +1296,10 @@ function quiver2(seqstrings::Vector{String},
     if verbose > 1
         println(STDERR, "initial score: $(state.score)")
     end
+    if verbose > 2
+        println(STDERR, "  consensus: $(state.consensus)")
+    end
+
     n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(consensus)]
     consensus_stages = ["", "", ""]
@@ -1327,16 +1339,26 @@ function quiver2(seqstrings::Vector{String},
                 state.stage = frame_correction_stage
                 # estimate reference error rate
                 edit_dist = levenshtein(reference, state.consensus)
-                ref_error_rate = edit_dist / min(length(reference), length(state.consensus))
-                ref_error_rate = max(ref_error_rate, 1e-10)
+                ref_error_rate = edit_dist / max(length(reference), length(state.consensus))
+                # needs to be < 0.5, otherwise matches aren't rewarded at all
+                ref_error_rate = min(max(ref_error_rate, 1e-10), 0.5)
                 ref_error_log_p = fill(log10(ref_error_rate), length(reference))
                 ref_pstring = PString(reference, ref_error_log_p, bandwidth)
 
                 # fix distant single indels right away
                 if fix_indels_stat
                     indel_proposals = single_indel_proposals(state.consensus, ref_pstring, ref_scores)
+                    if verbose > 1
+                        println(STDERR, "  fixing $(length(indel_proposals)) single indels")
+                    end
+                    if verbose > 2
+                        println(STDERR, indel_proposals)
+                    end
                     state.consensus = apply_proposals(state.consensus, indel_proposals)
                     if skip_frame_correction
+                        if verbose > 1
+                            println(STDERR, "  skipping straight to refinement stage")
+                        end
                         state.stage = refinement_stage
                     end
                 end
@@ -1428,6 +1450,9 @@ function quiver2(seqstrings::Vector{String},
                    use_ref_for_qvs)
         if verbose > 1
             println(STDERR, "  score: $(state.score) ($(state.stage))")
+        end
+        if verbose > 2
+            println(STDERR, "  consensus: $(state.consensus)")
         end
         if (state.score < old_score &&
             stage_iterations[Int(state.stage)] > 0 &&
