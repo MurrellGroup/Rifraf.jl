@@ -256,7 +256,9 @@ function test_no_single_indels()
                                            local_scores)
 end
 
-function _test_fast_proposals(template, seqs, lps, expected)
+function _test_fast_proposals(template, seqs, lps, expected;
+                              do_alignment::Bool=true,
+                              do_surgery::Bool=true)
     bandwidth = 5
     rseq = Quiver2.Model.PString("", Float64[], bandwidth)
     mult = 2
@@ -276,12 +278,16 @@ function _test_fast_proposals(template, seqs, lps, expected)
                                   for (s, p) in zip(seqs, lps)]
     state = Quiver2.Model.initial_state(template, pseqs)
     Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
-    proposals, deltas = Quiver2.Model.surgery_proposals(state, pseqs, scores, do_subs, do_indels)
-    @test length(symdiff(Set(proposals), Set(expected))) == 0
 
-    proposals = Quiver2.Model.alignment_proposals(state, pseqs, do_subs, do_indels)
-    @test length(symdiff(Set(proposals), Set(expected))) == 0
+    if do_surgery
+        proposals, deltas = Quiver2.Model.surgery_proposals(state, pseqs, scores, do_subs, do_indels)
+        @test length(symdiff(Set(proposals), Set(expected))) == 0
+    end
 
+    if do_alignment
+        proposals = Quiver2.Model.alignment_proposals(state, pseqs, do_subs, do_indels)
+        @test length(symdiff(Set(proposals), Set(expected))) == 0
+    end
 end
 
 
@@ -319,6 +325,26 @@ function test_fast_proposals()
                           [-3.0, -50]]
     expected = [Proposals.Insertion(0, 'G')]
     _test_fast_proposals(template, seqs, lps, expected)
+
+    # test that deletions get pushed
+    template = "CCGTAAAC"
+    seqs = ["CGTAAAC", "CCGTAAAC", "CGTAAAC"]
+    lps = Vector{Float64}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
+                          [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
+                          [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
+    expected = [Proposals.Deletion(2)]
+    _test_fast_proposals(template, seqs, lps, expected,
+                         do_alignment=false, do_surgery=true)
+
+    # test that deletions get pushed to end
+    template = "CCC"
+    seqs = ["CC"]
+    expected = [Proposals.Deletion(3)]
+    _test_fast_proposals(template, seqs, lps, expected,
+                         do_alignment=false, do_surgery=true)
+
+
+    # test that insertions get pushed
 end
 
 function test_quiver2()

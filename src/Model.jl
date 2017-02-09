@@ -1,11 +1,3 @@
-# TODO: add more stages:
-# model surgery
-# alignment-informed quiver
-# fix indels via alignment
-# frame correction quiver
-# refinement
-# scoring
-
 module Model
 
 using Bio.Seq
@@ -680,6 +672,9 @@ function surgery_proposals(state::State,
                                               'T' => del_score,
                                               )
 
+        del_base = '-'
+        pushed_del_score = -Inf
+
         for (aln_idx, move) in enumerate(moves)
             cbase = '-'
             sbase = '-'
@@ -703,6 +698,12 @@ function surgery_proposals(state::State,
             deletion_score = max(seq.error_log_p[max(seq_idx, 1)],
                                  seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
 
+            # handle pushed deletions
+            if del_base != '-' && del_base != cbase
+                del_deltas[cons_idx - 1] += pushed_del_score
+                del_base = '-'
+                pushed_del_score = -Inf
+            end
             if move != dp_ins
                 # try insertions before this position.
                 for (base, delta) in insertion_bases
@@ -749,22 +750,30 @@ function surgery_proposals(state::State,
                 end
                 # consider deleting the consensus base.
                 # This would convert (mis)match to insertion
-                del_deltas[cons_idx] += (insertion_score - (sbase == cbase ? match_score : mismatch_score))
+                del_base = cbase
+                pushed_del_score = max(pushed_del_score,
+                                       insertion_score - (sbase == cbase ? match_score : mismatch_score))
             elseif move == dp_del
                 # no reason to consider substitutions. delta = 0.
                 # consider deletion proposal. would convert deletion
                 # to no-op.
-                del_deltas[cons_idx] += (0.0 - deletion_score)
+                del_base = cbase
+                pushed_del_score = max(pushed_del_score,
+                                       0 - deletion_score)
             end
         end
-        # insertions at the end
+        # handle deletion at end
+        if del_base != '-'
+            del_deltas[end] += pushed_del_score
+        end
+
+        # handle insertions at the end
         # consider insertion proposals.
         # push all insertion proposals to the end
         for (base, delta) in insertion_bases
             ins_deltas[end, baseints[base]] += delta
         end
     end
-    # TODO: push insertions and deletions to the end of consensus repeats
 
     # only return proposals with positive deltas
     result = Proposal[]
