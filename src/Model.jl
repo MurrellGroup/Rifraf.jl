@@ -662,6 +662,9 @@ function surgery_proposals(state::State,
     sub_deltas = zeros(Float64, (length(state.consensus), 4))
     del_deltas = zeros(Float64, (length(state.consensus), 1))
     ins_deltas = zeros(Float64, (length(state.consensus) + 1, 4))
+    # FIXME: push insertions and deletions to the end, on the fly
+    # insertions that match consensus should *keep* getting pushed
+    # deletions in a poly-base run should also get pushed
     for (Amoves, seq) in zip(state.Amoves, sequences)
         moves = backtrace(Amoves)
         seq_idx = 0
@@ -1401,7 +1404,7 @@ function quiver2(seqstrings::Vector{String},
                 println(STDERR, "  filtered to $(length(chosen_cands)) candidates")
             end
             if verbose > 2
-                println(STDERR, chosen_cands)
+                println(STDERR, "  $(chosen_cands)")
             end
             state.consensus = apply_proposals(old_consensus,
                                               Proposal[c.proposal
@@ -1421,15 +1424,15 @@ function quiver2(seqstrings::Vector{String},
                     println(STDERR, "  rejecting multiple candidates in favor of best")
                 end
                 chosen_cands = CandProposal[chosen_cands[1]]
+                if verbose > 2
+                    println(STDERR, "  $(chosen_cands)")
+                end
                 state.consensus = apply_proposals(old_consensus,
                                                   Proposal[c.proposal
                                                            for c in chosen_cands])
             else
                 # no need to recompute unless batch changes
                 recompute_As = false
-            end
-            if verbose > 2
-                println(STDERR, chosen_cands)
             end
             proposal_counts = [length(filter(c -> (typeof(c.proposal) == t),
                                              chosen_cands))
