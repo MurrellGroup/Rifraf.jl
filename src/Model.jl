@@ -1324,7 +1324,7 @@ function quiver2(seqstrings::Vector{String},
         old_consensus = state.consensus
         old_score = state.score
         if verbose > 1
-            println(STDERR, "iteration $i : $(state.stage)")
+            println(STDERR, "iteration $i : $(state.stage). score: $(state.score)")
         end
 
         penalties_increased = false
