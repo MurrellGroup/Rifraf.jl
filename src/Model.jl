@@ -652,7 +652,7 @@ function surgery_proposals(state::State,
                            do_indels::Bool)
     # FIXME: modularize this function and test each part
     sub_deltas = zeros(Float64, (length(state.consensus), 4))
-    del_deltas = zeros(Float64, (length(state.consensus), 1))
+    del_deltas = zeros(Float64, (length(state.consensus)))
     ins_deltas = zeros(Float64, (length(state.consensus) + 1, 4))
     # FIXME: push insertions and deletions to the end, on the fly
     # insertions that match consensus should *keep* getting pushed
@@ -673,6 +673,7 @@ function surgery_proposals(state::State,
                                               )
 
         del_base = '-'
+        del_idx = 0
         pushed_del_score = -Inf
 
         for (aln_idx, move) in enumerate(moves)
@@ -700,8 +701,9 @@ function surgery_proposals(state::State,
 
             # handle pushed deletions
             if del_base != '-' && del_base != cbase
-                del_deltas[cons_idx - 1] += pushed_del_score
+                del_deltas[del_idx] += pushed_del_score
                 del_base = '-'
+                del_idx = 0
                 pushed_del_score = -Inf
             end
             if move != dp_ins
@@ -751,6 +753,7 @@ function surgery_proposals(state::State,
                 # consider deleting the consensus base.
                 # This would convert (mis)match to insertion
                 del_base = cbase
+                del_idx = cons_idx
                 pushed_del_score = max(pushed_del_score,
                                        insertion_score - (sbase == cbase ? match_score : mismatch_score))
             elseif move == dp_del
@@ -758,6 +761,7 @@ function surgery_proposals(state::State,
                 # consider deletion proposal. would convert deletion
                 # to no-op.
                 del_base = cbase
+                del_idx = cons_idx
                 pushed_del_score = max(pushed_del_score,
                                        0 - deletion_score)
             end
