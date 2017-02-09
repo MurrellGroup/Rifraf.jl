@@ -995,10 +995,11 @@ function has_single_indels(consensus::String,
 end
 
 
-function single_indel_proposals(consensus::String,
-                                reference::PString,
+function single_indel_proposals(reference::String,
+                                consensus::PString,
                                 ref_scores::Scores)
-    moves = align_moves(consensus, reference, ref_scores)
+    moves = align_moves(reference, consensus, ref_scores)
+
     results = Proposal[]
     cons_idx = 0
     ref_idx = 0
@@ -1007,15 +1008,15 @@ function single_indel_proposals(consensus::String,
             cons_idx += 1
             ref_idx += 1
         elseif move == dp_ins
-            ref_idx += 1
-            push!(results, Insertion(cons_idx, reference.seq[ref_idx]))
-        elseif move == dp_del
             cons_idx += 1
             push!(results, Deletion(cons_idx))
+        elseif move == dp_del
+            ref_idx += 1
+            push!(results, Insertion(cons_idx, reference[ref_idx]))
         elseif move == dp_codon_ins
-            ref_idx += 3
-        elseif move == dp_codon_del
             cons_idx += 3
+        elseif move == dp_codon_del
+            ref_idx += 3
         end
     end
     return results
@@ -1213,7 +1214,7 @@ function posterior_error_probs(tlen::Int,
     end
     probs = exp10(probs)
     probs = 1.0 - maximum(probs ./ sum(probs, 2), 2)
-    return probs
+    return vec(probs)
 end
 
 
@@ -1349,17 +1350,15 @@ function quiver2(seqstrings::Vector{String},
                     break
                 end
                 state.stage = frame_correction_stage
-                # estimate reference error rate
-                edit_dist = levenshtein(reference, state.consensus)
-                ref_error_rate = edit_dist / max(length(reference), length(state.consensus))
-                # needs to be < 0.5, otherwise matches aren't rewarded at all
-                ref_error_rate = min(max(ref_error_rate, 1e-10), 0.5)
-                ref_error_log_p = fill(log10(ref_error_rate), length(reference))
-                ref_pstring = PString(reference, ref_error_log_p, bandwidth)
 
                 # fix distant single indels right away
                 if fix_indels_stat
-                    indel_proposals = single_indel_proposals(state.consensus, ref_pstring, ref_scores)
+                    cons_errors = posterior_error_probs(length(state.consensus),
+                                                      seqs, state.Amoves)
+                    # ensure none are 0.0
+                    cons_errors = [max(p, 1e-10) for p in cons_errors]
+                    cons_pstring = PString(state.consensus, log10(cons_errors), bandwidth)
+                    indel_proposals = single_indel_proposals(reference, cons_pstring, ref_scores)
                     if verbose > 1
                         println(STDERR, "  fixing $(length(indel_proposals)) single indels")
                     end
@@ -1373,6 +1372,16 @@ function quiver2(seqstrings::Vector{String},
                         end
                         state.stage = refinement_stage
                     end
+                end
+                if state.stage == frame_correction_stage
+                    # estimate reference error rate
+                    # TODO: use consensus estimated error rate here too
+                    edit_dist = levenshtein(reference, state.consensus)
+                    ref_error_rate = edit_dist / max(length(reference), length(state.consensus))
+                    # needs to be < 0.5, otherwise matches aren't rewarded at all
+                    ref_error_rate = min(max(ref_error_rate, 1e-10), 0.5)
+                    ref_error_log_p = fill(log10(ref_error_rate), length(reference))
+                    ref_pstring = PString(reference, ref_error_log_p, bandwidth)
                 end
             elseif state.stage == frame_correction_stage
                 if !has_single_indels(state.consensus, ref_pstring, ref_scores)
