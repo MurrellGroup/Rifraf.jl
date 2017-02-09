@@ -192,7 +192,10 @@ function move_scores(t_base::Char,
         # this is to break the symmetry of insertions and mismatches, and
         # encourage insertions of low-quality bases.
         # TODO: think of a less-hacky solution
-        match_score = cur_log_p + scores.mismatch - cur_log_p * match_mult
+        match_score = cur_log_p + scores.mismatch
+        if match_mult > 0.0
+            match_score -= cur_log_p * match_mult
+        end
     end
     ins_score = cur_log_p + scores.insertion
     del_score = max(cur_log_p, next_log_p) + scores.deletion
