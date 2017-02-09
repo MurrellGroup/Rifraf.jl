@@ -54,7 +54,8 @@ type PString
             error("a log error probability is negative infinity")
         end
         if maximum(error_log_p) > 0.0
-            error("a log error probability is > 0")
+            bad_value = maximum(error_log_p)
+            error("a log error probability is > 0: $bad_value")
         end
         match_log_p = log10(1.0 - exp10(error_log_p))
         return new(seq, error_log_p, match_log_p, bandwidth)
@@ -1208,6 +1209,7 @@ function quiver2(seqstrings::Vector{String},
                  do_surgery_proposals::Bool=true,
                  trust_proposals::Bool=true,
                  fix_indels_stat::Bool=true,
+                 skip_frame_correction::Bool=true,
                  indel_correction_only::Bool=true,
                  use_ref_for_qvs::Bool=false,
                  bandwidth::Int=10, bandwidth_mult::Int=2,
@@ -1334,7 +1336,9 @@ function quiver2(seqstrings::Vector{String},
                 if fix_indels_stat
                     indel_proposals = single_indel_proposals(state.consensus, ref_pstring, ref_scores)
                     state.consensus = apply_proposals(state.consensus, indel_proposals)
-                    state.stage = refinement_stage
+                    if skip_frame_correction
+                        state.stage = refinement_stage
+                    end
                 end
             elseif state.stage == frame_correction_stage
                 if !has_single_indels(state.consensus, ref_pstring, ref_scores)
@@ -1381,7 +1385,7 @@ function quiver2(seqstrings::Vector{String},
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
             recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
-                            state.stage == frame_correction_stage && !fix_indels_stat)
+                            state.stage == frame_correction_stage)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
                        bandwidth_mult, true, recompute_Bs, verbose,
@@ -1417,7 +1421,7 @@ function quiver2(seqstrings::Vector{String},
             recompute_As = true
         end
         recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
-                state.stage == frame_correction_stage && !fix_indels_stat)
+                        state.stage == frame_correction_stage)
         recompute!(state, seqs, scores,
                    ref_pstring, ref_scores,
                    bandwidth_mult, recompute_As, recompute_Bs, verbose,
@@ -1441,7 +1445,7 @@ function quiver2(seqstrings::Vector{String},
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
             recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
-                            state.stage == frame_correction_stage && !fix_indels_stat)
+                            state.stage == frame_correction_stage)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
                        bandwidth_mult, true, recompute_Bs, verbose,
