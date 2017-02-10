@@ -299,13 +299,13 @@ end
         mult = 2
         errors = Model.ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0)
         scores = Model.Scores(errors)
-        ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
+        ref_errors = Model.ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
         ref_scores = Model.Scores(ref_errors)
 
         do_subs = true
         do_indels = true
 
-        if length(lps) != length(seqs)
+        if length(lps) == 0
             lps =  Vector{Float64}[fill(-9.0, length(s)) for s in seqs]
         end
 
@@ -314,13 +314,12 @@ end
         state = Quiver2.Model.initial_state(template, pseqs)
         Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
 
-        if do_surgery
-            proposals, deltas = Quiver2.Model.surgery_proposals(state, pseqs, scores, do_subs, do_indels)
-            @test length(symdiff(Set(proposals), Set(expected))) == 0
-        end
-
         if do_alignment
             proposals = Quiver2.Model.alignment_proposals(state, pseqs, do_subs, do_indels)
+            @test length(symdiff(Set(proposals), Set(expected))) == 0
+        end
+        if do_surgery
+            proposals, deltas = Quiver2.Model.surgery_proposals(state, pseqs, scores, do_subs, do_indels)
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
     end
@@ -391,6 +390,21 @@ end
                     Proposals.Insertion(2, 'T')]
         _test_fast_proposals(template, seqs, [], expected,
                              do_alignment=false, do_surgery=true)
+    end
+
+    @testset "test fast proposals converged" begin
+        template = "GTTCGGCTC"
+        seqs = ["GTTCGGCTTC",
+                "GTTCGGCTC",
+                "GTTCCTG"]
+        phreds = Vector{Int8}[[28,16,13,21,15,13,13,12,20,16],
+                              [21,16,9,17,6,15,6,16,12],
+                              [26,14,5,24,8,12,7]]
+        lps = map(Quiver2.Util.phred_to_log_p, phreds)
+        expected = []
+        _test_fast_proposals(template, seqs, lps, expected,
+                             do_alignment=false, do_surgery=true)
+
     end
 end
 
