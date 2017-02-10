@@ -1222,6 +1222,7 @@ function posterior_error_probs(tlen::Int,
                                seqs::Vector{PString},
                                Amoves::Vector{BandedArray{Int}})
     # FIXME: incorporate scores
+    # FIXME: account for indels
     probs = zeros(tlen, 4)
     for (s, Am) in zip(seqs, Amoves)
         moves = backtrace(Am)

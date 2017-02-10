@@ -493,6 +493,33 @@ function test_ins_probs()
     @test probs.ins[3, 4] > 0.9
 end
 
+function test_posterior_probs()
+    consensus = "ACGT"
+    seqs = ["ACGT",
+            "CGT",
+            "CCGT"]
+    bandwidth = 5
+    mult = 2
+    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
+    ref_scores = Model.Scores(ref_errors)
+
+    ps = [[0.1, 0.1, 0.1, 0.1],
+          [0.2, 0.1, 0.1],
+          [0.2, 0.1, 0.1, 0.1]]
+    lps = map(log10, ps)
+    pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+                                  for (s, p) in zip(seqs, lps)]
+    rseq = Quiver2.Model.PString("", Float64[], bandwidth)
+    state = Quiver2.Model.initial_state(consensus, pseqs)
+    Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
+
+    result = Quiver2.Model.posterior_error_probs(length(consensus),
+                                                 pseqs, state.Amoves)
+    indices = sortperm(result)
+    expected = [4, 3, 2, 1]
+    @test indices == expected
+end
+
 function test_align()
     template = "ATAA"
     seq = "AAA"
@@ -536,6 +563,7 @@ test_single_indel_proposals()
 test_fast_proposals()
 test_base_probs()
 test_ins_probs()
+test_posterior_probs()
 test_align()
 test_align_2()
 test_quiver2()
