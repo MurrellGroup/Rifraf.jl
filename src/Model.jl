@@ -683,16 +683,16 @@ function surgery_proposals(state::State,
 
         # map each base to its maximum delta
         # start with deletion scores for each
-        del_score = seq.error_log_p[1] + scores.deletion
+        deletion_score = seq.error_log_p[1] + scores.deletion
 
         # push insertions and deletions to the end, on the fly
         # insertions that match consensus should *keep* getting pushed
         # deletions in a poly-base run should also get pushed
         insertion_bases = Dict{Char, Float64}(
-                                              'A' => del_score,
-                                              'C' => del_score,
-                                              'G' => del_score,
-                                              'T' => del_score,
+                                              'A' => deletion_score,
+                                              'C' => deletion_score,
+                                              'G' => deletion_score,
+                                              'T' => deletion_score,
                                               )
 
         del_base = '-'
@@ -730,16 +730,13 @@ function surgery_proposals(state::State,
                 pushed_del_score = -Inf
             end
             if move != dp_ins
-                del_score = max(seq.error_log_p[max(seq_idx, 1)],
-                                seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
-
                 # handle insertions before this position.
                 for (base, delta) in insertion_bases
                     # if current base equals attempted insertion,
                     # keep pushing it
                     if cbase != base
                         ins_deltas[cons_idx, baseints[base]] += delta
-                        insertion_bases[base] = del_score
+                        insertion_bases[base] = deletion_score
                     end
                 end
             end
