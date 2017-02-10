@@ -51,6 +51,8 @@ function sparsecol(A::BandedArray, j::Int)
     return view(A.data, start:stop, j)
 end
 
+
+"""The row in `data` which contains element [i, j]"""
 # TODO: bounds checks
 data_row(A::BandedArray, i::Int, j::Int) = (i - j) + A.h_offset + A.bandwidth + 1
 

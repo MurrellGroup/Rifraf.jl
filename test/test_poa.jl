@@ -6,7 +6,7 @@ using Base.Test
 
 srand(1)
 
-function test_poa()
+@testset "test_poa" begin
     n_seqs=10
     ref_len=27
     ref_error_rate = 0.03
@@ -17,7 +17,7 @@ function test_poa()
 
     ref_errors = ErrorModel(1.0, 0.0, 0.0, 1.0, 1.0)
     errors = ErrorModel(3.0, 1.0, 1.0, 0.0, 0.0)
-    scores = Quiver2.modified_emissions(Scores(errors))
+    scores = Scores(errors)
 
     (ref, template, template_error_p,
      seqs, actual, phreds) = sample(n_seqs, ref_len,
@@ -33,5 +33,3 @@ function test_poa()
     c = consensus(g)
     @test c == convert(String, template)
 end
-
-test_poa()

@@ -12,15 +12,19 @@ using Base.Test
 const errors = Model.normalize(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
 const scores = Model.Scores(errors)
 
+srand(1234)
+
 
 function inv_log10(logp::Float64)
     log10(1.0 - exp10(logp))
 end
 
 
-function test_cols(A, B, codon_moves)
+function check_all_cols(A, B, codon_moves)
     expected = A[end, end]
-    @test_approx_eq A[end, end] B[1, 1]
+    if !(A[end, end] ≈ B[1, 1])
+        return false
+    end
     ncols = size(A)[2]
     # if codon_moves is true, we cannot expect every column to contain
     # the correct score
@@ -30,219 +34,231 @@ function test_cols(A, B, codon_moves)
             Acol = sparsecol(A, j)
             Bcol = sparsecol(B, j)
             score = maximum(Acol + Bcol)
-            @test_approx_eq expected score
+            if !(expected ≈ score)
+                return false
+            end
         end
     end
-    @test_approx_eq A[end, end] B[1, 1]
+    return A[end, end] ≈ B[1, 1]
 end
 
-function test_perfect_forward()
-    bandwidth = 1
-    template = "AA"
-    seq = "AA"
-    lp = -3.0
-    match = inv_log10(lp)
-    log_p = fill(lp, length(seq))
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    A = Model.forward(template, pseq, scores)
-    # transpose because of column-major order
-    expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
-                                  [lp + scores.insertion, match, match + lp + scores.deletion];
-                                  [0.0, match + lp + scores.insertion, 2 * match]],
-                                 (3, 3)))
-    @test full(A) == expected
-end
 
-function test_imperfect_backward()
-    bandwidth = 1
-    template = "AA"
-    seq = "AT"
-    lp = -3.0
-    match = inv_log10(lp)
-    log_p = fill(lp, length(seq))
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    B = Model.backward(template, pseq, scores)
-    expected = transpose(reshape([[lp + scores.mismatch + match, lp + scores.insertion + match, 0.0];
-                                  [2*lp + scores.deletion + scores.mismatch, lp + scores.mismatch, lp + scores.insertion];
-                                  [0.0, lp + scores.deletion, 0.0]],
-                                 (3, 3)))
-    @test full(B) == expected
-end
 
-function test_imperfect_forward()
-    bandwidth = 1
-    template = "AA"
-    seq = "AT"
-    lp = -3.0
-    match = inv_log10(lp)
-    log_p = fill(lp, length(seq))
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    A = Model.forward(template, pseq, scores)
-    B = Model.backward(template, pseq, scores)
-    test_cols(A, B, false)
-    expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
-                                  [lp + scores.insertion, match, match + lp + scores.deletion];
-                                  [0.0, match + lp + scores.insertion, match + lp + scores.mismatch]],
-                                 (3, 3)))
-
-    @test full(A) == expected
-end
-
-function test_equal_ranges()
+@testset "equal_ranges" begin
     @test Model.equal_ranges((3, 5), (4, 6)) == ((2, 3), (1, 2))
     @test Model.equal_ranges((1, 5), (1, 2)) == ((1, 2), (1, 2))
     @test Model.equal_ranges((1, 5), (4, 5)) == ((4, 5), (1, 2))
 end
 
-function test_forward_backward_agreement()
-    template = "TG"
-    seq = "GTCG"
-    log_p = [-1.2, -0.8, -0.7, -1.0]
-    bandwidth = 5
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    local_scores = Model.Scores(Model.ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
-    A = Model.forward(template, pseq, local_scores)
-    B = Model.backward(template, pseq, local_scores)
-    test_cols(A, B, true)
-end
 
-function test_forward_backward_agreement_2()
-    template = "GCACGGTC"
-    seq = "GACAC"
-    log_p = [-1.1, -1.1, -0.4, -1.0, -0.7]
-    bandwidth = 5
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    local_scores = Model.Scores(Model.ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
-    A = Model.forward(template, pseq, local_scores)
-    B = Model.backward(template, pseq, local_scores)
-    test_cols(A, B, true)
-end
-
-function test_insertion_agreement()
-    template = "AA"
-    seq = "ATA"
-    bandwidth = 10
-    log_p = [-5.0, -1.0, -6.0]
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    A = Model.forward(template, pseq, scores)
-    B = Model.backward(template, pseq, scores)
-    score = (inv_log10(log_p[1]) +
-             log_p[2] + scores.insertion +
-             inv_log10(log_p[3]))
-    @test_approx_eq A[end, end] score
-    test_cols(A, B, false)
-end
-
-function test_deletion_agreement()
-    template = "GATAG"
-    seq = "GAAG"
-    bandwidth = 10
-    log_p = [-5.0, -2.0, -1.0, -6.0]
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    A = Model.forward(template, pseq, scores)
-    B = Model.backward(template, pseq, scores)
-    score = (inv_log10(log_p[1]) +
-             inv_log10(log_p[2]) +
-             maximum(log_p[2:3]) + scores.deletion +
-             inv_log10(log_p[3]) +
-             inv_log10(log_p[4]))
-    @test_approx_eq A[end, end] score
-    test_cols(A, B, false)
-end
-
-function test_deletion_agreement2()
-    template = "ATA"
-    seq = "AA"
-    bandwidth = 10
-    log_p = [-2.0, -3.0]
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    A = Model.forward(template, pseq, scores)
-    B = Model.backward(template, pseq, scores)
-    score = (inv_log10(log_p[1]) +
-             maximum(log_p[1:2]) + scores.deletion +
-             inv_log10(log_p[2]))
-    @test_approx_eq A[end, end] score
-    test_cols(A, B, false)
-end
-
-function test_random_proposal(proposal, template_len)
-    template_seq = random_seq(template_len)
-    template = convert(String, template_seq)
-
-    template_error_p = Float64[0.1 for i=1:length(template)]
-    codon_moves = rand([true, false])
-    if codon_moves
-        local_errors = Model.ErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
-    else
-        local_errors = Model.ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
+@testset "test forward and backward" begin
+    @testset "perfect_forward" begin
+        bandwidth = 1
+        template = "AA"
+        seq = "AA"
+        lp = -3.0
+        match = inv_log10(lp)
+        log_p = fill(lp, length(seq))
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        A = Model.forward(template, pseq, scores)
+        # transpose because of column-major order
+        expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
+                                      [lp + scores.insertion, match, match + lp + scores.deletion];
+                                      [0.0, match + lp + scores.insertion, 2 * match]],
+                                     (3, 3)))
+        @test full(A) == expected
     end
-    local_scores = Model.Scores(local_errors)
-    phred_scale = 3.0
-    log_actual_error_std = 0.5
-    log_reported_error_std = 0.5
 
-    (bioseq, actual, phreds, sbools,
-     tbools) = sample_from_template(template_seq,
-                                    template_error_p,
-                                    errors,
-                                    phred_scale,
-                                    log_actual_error_std,
-                                    log_reported_error_std)
-    log_p = Float64[Float64(q) / (-10.0) for q in phreds]
-    seq = convert(String, bioseq)
-    bandwidth = max(5 * abs(length(template) - length(seq)), 30)
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-
-    new_template = Proposals.update_template(template, proposal)
-    Anew = Model.forward(new_template, pseq, local_scores)
-    Bnew = Model.backward(new_template, pseq, local_scores)
-    test_cols(Anew, Bnew, codon_moves)
-
-    A = Model.forward(template, pseq, local_scores)
-    B = Model.backward(template, pseq, local_scores)
-    test_cols(A, B, codon_moves)
-    newcols = zeros(Float64, size(A)[1], 6)
-    score = Model.seq_score_proposal(proposal, A, B, template, pseq,
-                                     local_scores, newcols)
-    @test_approx_eq_eps score Anew[end, end] 0.1
-end
-
-function test_random_substitutions()
-    for i = 1:1000
-        template_len = rand(30:50)
-        pos = rand(1:template_len)
-        proposal = Proposals.Substitution(pos, rbase())
-        test_random_proposal(proposal, template_len)
+    @testset "imperfect_backward" begin
+        bandwidth = 1
+        template = "AA"
+        seq = "AT"
+        lp = -3.0
+        match = inv_log10(lp)
+        log_p = fill(lp, length(seq))
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        B = Model.backward(template, pseq, scores)
+        expected = transpose(reshape([[lp + scores.mismatch + match,
+                                       lp + scores.insertion + match, 0.0];
+                                      [2*lp + scores.deletion + scores.mismatch,
+                                       lp + scores.mismatch,
+                                       lp + scores.insertion];
+                                      [0.0, lp + scores.deletion, 0.0]],
+                                     (3, 3)))
+        @test full(B) == expected
     end
-end
 
-function test_random_insertions()
-    for i = 1:1000
-        template_len = rand(30:50)
-        pos = rand(0:template_len)
-        proposal = Proposals.Insertion(pos, rbase())
-        test_random_proposal(proposal, template_len)
+    @testset "imperfect_forward" begin
+        bandwidth = 1
+        template = "AA"
+        seq = "AT"
+        lp = -3.0
+        match = inv_log10(lp)
+        log_p = fill(lp, length(seq))
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        A = Model.forward(template, pseq, scores)
+        B = Model.backward(template, pseq, scores)
+        check_all_cols(A, B, false)
+        expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
+                                      [lp + scores.insertion, match, match + lp + scores.deletion];
+                                      [0.0, match + lp + scores.insertion, match + lp + scores.mismatch]],
+                                     (3, 3)))
+
+        @test full(A) == expected
     end
-end
 
-function test_random_deletions()
-    for i = 1:1000
-        template_len = rand(30:50)
-        pos = rand(1:template_len)
-        proposal = Proposals.Deletion(pos)
-        test_random_proposal(proposal, template_len)
+    @testset "forward/backward agreement" begin
+        @testset "forward/backward agreement 1" begin
+            template = "TG"
+            seq = "GTCG"
+            log_p = [-1.2, -0.8, -0.7, -1.0]
+            bandwidth = 5
+            pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+            local_scores = Model.Scores(Model.ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
+            A = Model.forward(template, pseq, local_scores)
+            B = Model.backward(template, pseq, local_scores)
+            check_all_cols(A, B, true)
+        end
+
+        @testset "forward/backward agreement" begin
+            template = "GCACGGTC"
+            seq = "GACAC"
+            log_p = [-1.1, -1.1, -0.4, -1.0, -0.7]
+            bandwidth = 5
+            pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+            local_scores = Model.Scores(Model.ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
+            A = Model.forward(template, pseq, local_scores)
+            B = Model.backward(template, pseq, local_scores)
+            check_all_cols(A, B, true)
+        end
+    end
+
+    @testset "insertion_agreement" begin
+        template = "AA"
+        seq = "ATA"
+        bandwidth = 10
+        log_p = [-5.0, -1.0, -6.0]
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        A = Model.forward(template, pseq, scores)
+        B = Model.backward(template, pseq, scores)
+        score = (inv_log10(log_p[1]) +
+                 log_p[2] + scores.insertion +
+                 inv_log10(log_p[3]))
+        @test A[end, end] ≈ score
+        check_all_cols(A, B, false)
+    end
+
+    @testset "deletion agreement" begin
+        template = "GATAG"
+        seq = "GAAG"
+        bandwidth = 10
+        log_p = [-5.0, -2.0, -1.0, -6.0]
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        A = Model.forward(template, pseq, scores)
+        B = Model.backward(template, pseq, scores)
+        score = (inv_log10(log_p[1]) +
+                 inv_log10(log_p[2]) +
+                 maximum(log_p[2:3]) + scores.deletion +
+                 inv_log10(log_p[3]) +
+                 inv_log10(log_p[4]))
+        @test A[end, end] ≈ score
+        check_all_cols(A, B, false)
+    end
+
+    @testset "deletion agreement 2" begin
+        template = "ATA"
+        seq = "AA"
+        bandwidth = 10
+        log_p = [-2.0, -3.0]
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        A = Model.forward(template, pseq, scores)
+        B = Model.backward(template, pseq, scores)
+        score = (inv_log10(log_p[1]) +
+                 maximum(log_p[1:2]) + scores.deletion +
+                 inv_log10(log_p[2]))
+        @test A[end, end] ≈ score
+        check_all_cols(A, B, false)
     end
 end
 
+@testset "scoring proposals" begin
+    function test_random_proposal(proposal, template_len)
+        template_seq = random_seq(template_len)
+        template = convert(String, template_seq)
 
-function test_no_single_indels()
+        template_error_p = Float64[0.1 for i=1:length(template)]
+        codon_moves = rand([true, false])
+        if codon_moves
+            local_errors = Model.ErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
+        else
+            local_errors = Model.ErrorModel(2.0, 4.0, 4.0, 0.0, 0.0)
+        end
+        local_scores = Model.Scores(local_errors)
+        phred_scale = 3.0
+        log_actual_error_std = 0.5
+        log_reported_error_std = 0.5
+
+        (bioseq, actual, phreds, sbools,
+         tbools) = sample_from_template(template_seq,
+                                        template_error_p,
+                                        errors,
+                                        phred_scale,
+                                        log_actual_error_std,
+                                        log_reported_error_std)
+        log_p = Float64[Float64(q) / (-10.0) for q in phreds]
+        seq = convert(String, bioseq)
+        bandwidth = max(5 * abs(length(template) - length(seq)), 30)
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+
+        new_template = Proposals.update_template(template, proposal)
+        Anew = Model.forward(new_template, pseq, local_scores)
+        Bnew = Model.backward(new_template, pseq, local_scores)
+        check_all_cols(Anew, Bnew, codon_moves)
+
+        A = Model.forward(template, pseq, local_scores)
+        B = Model.backward(template, pseq, local_scores)
+        check_all_cols(A, B, codon_moves)
+        newcols = zeros(Float64, size(A)[1], 6)
+        score = Model.seq_score_proposal(proposal, A, B, template, pseq,
+                                         local_scores, newcols)
+        @test_approx_eq_eps score Anew[end, end] 0.1
+    end
+
+    @testset "random_substitutions" begin
+        for i = 1:1000
+            template_len = rand(30:50)
+            pos = rand(1:template_len)
+            proposal = Proposals.Substitution(pos, rbase())
+            test_random_proposal(proposal, template_len)
+        end
+    end
+
+    @testset "random_insertions" begin
+        for i = 1:1000
+            template_len = rand(30:50)
+            pos = rand(0:template_len)
+            proposal = Proposals.Insertion(pos, rbase())
+            test_random_proposal(proposal, template_len)
+        end
+    end
+
+    @testset "random_deletions" begin
+        for i = 1:1000
+            template_len = rand(30:50)
+            pos = rand(1:template_len)
+            proposal = Proposals.Deletion(pos)
+            test_random_proposal(proposal, template_len)
+        end
+    end
+end
+
+@testset "no single indels" begin
     reference = "AAAGGGTTT"
     ref_log_p = fill(log10(0.01), length(reference))
     bandwidth = 6
     rseq = Quiver2.Model.PString(reference, ref_log_p, bandwidth)
     local_errors = Model.normalize(Model.ErrorModel(2.0, 0.5, 0.5, 1.0, 1.0))
     local_scores = Model.Scores(local_errors)
-
 
     template = "AAACCCGGGTTT"
     @test !Quiver2.Model.has_single_indels(template, rseq, local_scores)
@@ -257,7 +273,7 @@ function test_no_single_indels()
 end
 
 
-function test_single_indel_proposals()
+@testset "single_indel_proposals" begin
     ref_errors = Quiver2.Model.ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0);
     ref_scores = Quiver2.Model.Scores(ref_errors);
 
@@ -270,105 +286,190 @@ function test_single_indel_proposals()
     @test expected == proposals
 end
 
-function _test_fast_proposals(template, seqs, lps, expected;
-                              do_alignment::Bool=true,
-                              do_surgery::Bool=true)
-    bandwidth = 5
-    rseq = Quiver2.Model.PString("", Float64[], bandwidth)
-    mult = 2
-    errors = Model.ErrorModel(1.0, 4.0, 5.0, 0.0, 0.0)
-    scores = Model.Scores(errors)
-    ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
-    ref_scores = Model.Scores(ref_errors)
 
-    do_subs = true
-    do_indels = true
+@testset "fast proposals" begin
+    function _test_fast_proposals(template, seqs, lps, expected;
+                                  do_alignment::Bool=true,
+                                  do_surgery::Bool=true)
+        bandwidth = 5
+        rseq = Quiver2.Model.PString("", Float64[], bandwidth)
+        mult = 2
+        errors = Model.ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0)
+        scores = Model.Scores(errors)
+        ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
+        ref_scores = Model.Scores(ref_errors)
 
-    if length(lps) != length(seqs)
-        lps =  Vector{Float64}[fill(-9.0, length(s)) for s in seqs]
+        do_subs = true
+        do_indels = true
+
+        if length(lps) != length(seqs)
+            lps =  Vector{Float64}[fill(-9.0, length(s)) for s in seqs]
+        end
+
+        pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+                                      for (s, p) in zip(seqs, lps)]
+        state = Quiver2.Model.initial_state(template, pseqs)
+        Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
+
+        if do_surgery
+            proposals, deltas = Quiver2.Model.surgery_proposals(state, pseqs, scores, do_subs, do_indels)
+            @test length(symdiff(Set(proposals), Set(expected))) == 0
+        end
+
+        if do_alignment
+            proposals = Quiver2.Model.alignment_proposals(state, pseqs, do_subs, do_indels)
+            @test length(symdiff(Set(proposals), Set(expected))) == 0
+        end
     end
 
-    pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
-                                  for (s, p) in zip(seqs, lps)]
-    state = Quiver2.Model.initial_state(template, pseqs)
-    Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
+    @testset "fast proposals 1" begin
+        template = "ACGAG"
+        seqs = ["CGTAC",
+                "CGAC",
+                "CGTAG"]
+        expected = [Proposals.Deletion(1),
+                    Proposals.Insertion(3, 'T'),
+                    Proposals.Substitution(5, 'C')]
+        _test_fast_proposals(template, seqs, [], expected)
 
-    if do_surgery
-        proposals, deltas = Quiver2.Model.surgery_proposals(state, pseqs, scores, do_subs, do_indels)
-        @test length(symdiff(Set(proposals), Set(expected))) == 0
+        template = "AA"
+        seqs = ["AAG",
+                "AA",
+                "AAG"]
+        expected = [Proposals.Insertion(2, 'G')]
+        _test_fast_proposals(template, seqs, [], expected)
     end
 
-    if do_alignment
-        proposals = Quiver2.Model.alignment_proposals(state, pseqs, do_subs, do_indels)
-        @test length(symdiff(Set(proposals), Set(expected))) == 0
+    @testset "fast proposals 2" begin
+        template = "AA"
+        seqs = ["GAA",
+                "AA",
+                "GAA"]
+        expected = [Proposals.Insertion(0, 'G')]
+        _test_fast_proposals(template, seqs, [], expected)
+    end
+
+    @testset "fast proposals - highly confident base" begin
+        template = "AA"
+        seqs = ["GAA",
+                "AA",
+                "AA"]
+        lps = Vector{Float64}[[-10.0, -5.0, -5.0],
+                              [-3.0, -5.0],
+                              [-3.0, -50]]
+        expected = [Proposals.Insertion(0, 'G')]
+        _test_fast_proposals(template, seqs, lps, expected)
+    end
+    @testset "push deletions" begin
+        # test that deletions get pushed
+        template = "CCGTAAAC"
+        seqs = ["CGTAAAC", "CCGTAAAC", "CGTAAAC"]
+        lps = Vector{Float64}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
+                              [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
+                              [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
+        expected = [Proposals.Deletion(2)]
+        _test_fast_proposals(template, seqs, lps, expected,
+                             do_alignment=false, do_surgery=true)
+    end
+    @testset "push deletions - simple" begin
+        # test that deletions get pushed to end
+        template = "CCC"
+        seqs = ["CC"]
+        expected = [Proposals.Deletion(3)]
+        _test_fast_proposals(template, seqs, [], expected,
+                             do_alignment=false, do_surgery=true)
+    end
+    @testset "push insertions" begin
+        # test that insertions get pushed to end
+        template = "TT"
+        seqs = ["TTT",
+                "CTT"]
+        expected = [Proposals.Insertion(0, 'C'),
+                    Proposals.Insertion(2, 'T')]
+        _test_fast_proposals(template, seqs, [], expected,
+                             do_alignment=false, do_surgery=true)
     end
 end
 
+@testset "candidate scores" begin
+    bandwidth = 10
 
-function test_fast_proposals()
-    template = "ACGAG"
-    seqs = ["CGTAC",
-            "CGAC",
-            "CGTAG"]
-    expected = [Proposals.Deletion(1),
-                Proposals.Insertion(3, 'T'),
-                Proposals.Substitution(5, 'C')]
-    _test_fast_proposals(template, seqs, [], expected)
+    function _test_candidate_scores(template, pseqs, scores, expected)
+        ref_scores = Model.Scores(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+        state = Quiver2.Model.initial_state(template, pseqs)
+        rseq = Quiver2.Model.PString("", Float64[], 1)
+        redo_as = true
+        redo_bs = true
+        use_ref = false
+        mult = 2
+        Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult,
+                                 redo_as, redo_bs, 2, use_ref)
+        do_alignment_proposals = true
+        do_surgery_proposals = true
+        trust_proposals = true
+        indels_only = false
+        cands = Quiver2.Model.get_candidate_proposals(state, pseqs, scores,
+                                                      rseq, ref_scores,
+                                                      do_alignment_proposals,
+                                                      do_surgery_proposals,
+                                                      trust_proposals,
+                                                      indels_only)
+        @test length(expected) == length(cands)
+        if length(expected) == length(cands)
+            exp_scores = sort([c.score for c in expected])
+            cand_scores = sort([c.score for c in cands])
+            @test all([a ≈ b for (a, b) in zip(exp_scores, cand_scores)])
+        end
+    end
 
-    template = "AA"
-    seqs = ["AAG",
-            "AA",
-            "AAG"]
-    expected = [Proposals.Insertion(2, 'G')]
-    _test_fast_proposals(template, seqs, [], expected)
+    @testset "substitutions" begin
+        template = "TTT"
+        seqs = ["TAT"]
+        lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
-    template = "AA"
-    seqs = ["GAA",
-            "AA",
-            "GAA"]
-    expected = [Proposals.Insertion(0, 'G')]
-    _test_fast_proposals(template, seqs, [], expected)
+        pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+                                      for (s, p) in zip(seqs, lps)]
+        scores = Model.Scores(Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
 
-    # test that highly confident base overwhelms others
-    template = "AA"
-    seqs = ["GAA",
-            "AA",
-            "AA"]
-    lps = Vector{Float64}[[-10.0, -5.0, -5.0],
-                          [-3.0, -5.0],
-                          [-3.0, -50]]
-    expected = [Proposals.Insertion(0, 'G')]
-    _test_fast_proposals(template, seqs, lps, expected)
+        expected = [CandProposal(Proposals.Substitution(2, 'A'),
+                                 sum(pseqs[1].match_log_p)),
+                    CandProposal(Proposals.Deletion(3),
+                                 sum([pseqs[1].match_log_p[1],
+                                      pseqs[1].error_log_p[2] + scores.insertion,
+                                      pseqs[1].match_log_p[3]]))]
+        _test_candidate_scores(template, pseqs, scores, expected)
+    end
+    @testset "deletion" begin
+        template = "TTT"
+        seqs = ["TT"]
+        lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
-    # test that deletions get pushed
-    template = "CCGTAAAC"
-    seqs = ["CGTAAAC", "CCGTAAAC", "CGTAAAC"]
-    lps = Vector{Float64}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
-                          [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
-                          [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
-    expected = [Proposals.Deletion(2)]
-    _test_fast_proposals(template, seqs, lps, expected,
-                         do_alignment=false, do_surgery=true)
+        pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+                                      for (s, p) in zip(seqs, lps)]
+        scores = Model.Scores(Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
 
-    # test that deletions get pushed to end
-    template = "CCC"
-    seqs = ["CC"]
-    expected = [Proposals.Deletion(3)]
-    _test_fast_proposals(template, seqs, [], expected,
-                         do_alignment=false, do_surgery=true)
+        expected = [CandProposal(Proposals.Deletion(3),
+                                 sum(pseqs[1].match_log_p))]
+        _test_candidate_scores(template, pseqs, scores, expected)
+    end
 
-    # test that insertions get pushed to end
-    template = "TT"
-    seqs = ["TTT",
-            "CTT"]
-    expected = [Proposals.Insertion(0, 'C'),
-                Proposals.Insertion(2, 'T')]
-    _test_fast_proposals(template, seqs, lps, expected,
-                         do_alignment=false, do_surgery=true)
+    @testset "insertion" begin
+        # test insertion
+        template = "TT"
+        seqs = ["TAT"]
+        lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
+        pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+                                      for (s, p) in zip(seqs, lps)]
+        scores = Model.Scores(Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
+
+        expected = [CandProposal(Proposals.Insertion(2, 'A'),
+                                 sum(pseqs[1].match_log_p))]
+        _test_candidate_scores(template, pseqs, scores, expected)
+    end
 end
 
-function test_quiver2()
+@testset "full model" begin
     # can't guarantee this test actually passes, since it is random
     n_seqs = 3
     len = 30
@@ -386,12 +487,7 @@ function test_quiver2()
     seq_errors = Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0)
     seq_scores = Model.Scores(seq_errors)
 
-    n = 100
-    n_wrong = 0
-    n_wrong_length = 0
-    n_out_frame = 0
-
-    for i in 1:n
+    @testset "full model iterations" for i in 1:100
         use_ref = rand([true, false])
         do_alignment_proposals = rand([true, false])
         do_surgery_proposals = rand([true, false])
@@ -424,26 +520,12 @@ function test_quiver2()
                                        indel_correction_only=indel_correction_only,
                                        bandwidth=10, min_dist=9, batch=5,
                                        max_iters=100)
-        if length(result) % 3 != 0
-            n_out_frame += 1
-        end
-        if length(result) != length(template)
-            n_wrong_length += 1
-        end
-        if result != template
-            n_wrong += 1
-        end
-    end
-    if n_wrong > 0
-        println("wrong length : $(n_wrong_length) / $(n)")
-        println("out of frame : $(n_out_frame) / $(n)")
-        println("wrong        : $(n_wrong) / $(n)")
-        @test false
+        @test result == template
     end
 end
 
 
-function test_base_probs()
+@testset "base_probs" begin
     template = "CGTAC"
     seqs = ["CGAC",
             "CGAC",
@@ -469,7 +551,7 @@ function test_base_probs()
 end
 
 
-function test_ins_probs()
+@testset "ins_probs" begin
     template = "CGAT"
     seqs = ["CGTAT",
             "CGTAT",
@@ -493,7 +575,7 @@ function test_ins_probs()
     @test probs.ins[3, 4] > 0.9
 end
 
-function test_alignment_probs()
+@testset "alignment_probs" begin
     consensus = "ACGT"
     seqs = ["ACGT",
             "CGT",
@@ -520,50 +602,27 @@ function test_alignment_probs()
     @test indices == expected
 end
 
-function test_align()
-    template = "ATAA"
-    seq = "AAA"
-    bandwidth = 10
-    log_p = [-2.0, -3.0, -3.0]
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    moves = Model.align_moves(template, pseq, scores)
-    t, s = Model.moves_to_alignment_strings(moves, template, seq)
-    @test t == "ATAA"
-    @test s == "A-AA"
+@testset "align" begin
+    @testset "align 1" begin
+        template = "ATAA"
+        seq = "AAA"
+        bandwidth = 10
+        log_p = [-2.0, -3.0, -3.0]
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        moves = Model.align_moves(template, pseq, scores)
+        t, s = Model.moves_to_alignment_strings(moves, template, seq)
+        @test t == "ATAA"
+        @test s == "A-AA"
+    end
+
+    @testset "align 2" begin
+        template = "AACCTT"
+        seq = "AAACCCTT"
+        bandwidth = 10
+        log_p = fill(log10(0.1), length(seq))
+        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        moves = Model.align_moves(template, pseq, scores)
+        t, s = Model.moves_to_alignment_strings(moves, template, seq)
+        @test t[end-1:end] == "TT"
+    end
 end
-
-function test_align_2()
-    template = "AACCTT"
-    seq = "AAACCCTT"
-    bandwidth = 10
-    log_p = fill(log10(0.1), length(seq))
-    pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
-    moves = Model.align_moves(template, pseq, scores)
-    t, s = Model.moves_to_alignment_strings(moves, template, seq)
-    @test t[end-1:end] == "TT"
-end
-
-
-srand(1234)
-
-test_perfect_forward()
-test_imperfect_backward()
-test_imperfect_forward()
-test_equal_ranges()
-test_forward_backward_agreement()
-test_forward_backward_agreement_2()
-test_insertion_agreement()
-test_deletion_agreement()
-test_deletion_agreement2()
-test_random_substitutions()
-test_random_insertions()
-test_random_deletions()
-test_no_single_indels()
-test_single_indel_proposals()
-test_fast_proposals()
-test_base_probs()
-test_ins_probs()
-test_alignment_probs()
-test_align()
-test_align_2()
-test_quiver2()
