@@ -720,7 +720,7 @@ function surgery_proposals(state::State,
             mismatch_score = error_score + scores.mismatch
             insertion_score = error_score + scores.insertion
             deletion_score = max(seq.error_log_p[max(seq_idx, 1)],
-                                 seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
+                                 seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))]) + scores.deletion
 
             # handle pushed deletions
             if del_base != '-' && del_base != cbase
@@ -984,6 +984,7 @@ function align_moves(t::String, s::PString,
                               trim=trim, skew_matches=skew_matches)
     return backtrace(Amoves)
 end
+
 
 function align(t::String, s::PString,
                scores::Scores;
