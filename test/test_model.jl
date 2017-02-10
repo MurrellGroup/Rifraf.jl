@@ -493,7 +493,7 @@ function test_ins_probs()
     @test probs.ins[3, 4] > 0.9
 end
 
-function test_posterior_probs()
+function test_alignment_probs()
     consensus = "ACGT"
     seqs = ["ACGT",
             "CGT",
@@ -513,7 +513,7 @@ function test_posterior_probs()
     state = Quiver2.Model.initial_state(consensus, pseqs)
     Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
 
-    result = Quiver2.Model.posterior_error_probs(length(consensus),
+    result = Quiver2.Model.alignment_error_probs(length(consensus),
                                                  pseqs, state.Amoves)
     indices = sortperm(result)
     expected = [4, 3, 2, 1]
@@ -563,7 +563,7 @@ test_single_indel_proposals()
 test_fast_proposals()
 test_base_probs()
 test_ins_probs()
-test_posterior_probs()
+test_alignment_probs()
 test_align()
 test_align_2()
 test_quiver2()

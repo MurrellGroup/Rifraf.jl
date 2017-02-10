@@ -1218,7 +1218,13 @@ function base_distribution(base::Char, lp, ilp)
 end
 
 
-function posterior_error_probs(tlen::Int,
+"""Assign error probabilities to consensus bases.
+
+Compute posterior error probability from all sequence bases
+that aligned to the consensus base.
+
+"""
+function alignment_error_probs(tlen::Int,
                                seqs::Vector{PString},
                                Amoves::Vector{BandedArray{Int}})
     # FIXME: incorporate scores
@@ -1382,8 +1388,8 @@ function quiver2(seqstrings::Vector{String},
 
                 # fix distant single indels right away
                 if fix_indels_stat
-                    cons_errors = posterior_error_probs(length(state.consensus),
-                                                      seqs, state.Amoves)
+                    cons_errors = alignment_error_probs(length(state.consensus),
+                                                        seqs, state.Amoves)
                     # ensure none are 0.0
                     cons_errors = [max(p, 1e-10) for p in cons_errors]
                     cons_pstring = PString(state.consensus, log10(cons_errors), bandwidth)
@@ -1555,6 +1561,8 @@ function quiver2(seqstrings::Vector{String},
     info["error_probs"] = estimate_probs(state, seqs, scores,
                                          ref_pstring, ref_scores,
                                          use_ref_for_qvs)
+    info["aln_error_probs"] = alignment_error_probs(length(state.consensus),
+                                                    seqs, state.Amoves)
     return state.consensus, info
 end
 
