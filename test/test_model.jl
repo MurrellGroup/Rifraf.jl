@@ -9,9 +9,6 @@ using Quiver2.Util
 using Base.Test
 
 
-const errors = Model.normalize(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
-const scores = Model.Scores(errors)
-
 srand(1234)
 
 
@@ -52,6 +49,9 @@ end
 
 
 @testset "test forward and backward" begin
+    const errors = Model.normalize(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+    const scores = Model.Scores(errors)
+
     @testset "perfect_forward" begin
         bandwidth = 1
         template = "AA"
@@ -182,6 +182,9 @@ end
 end
 
 @testset "scoring proposals" begin
+    const errors = Model.normalize(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+    const scores = Model.Scores(errors)
+
     function test_random_proposal(proposal, template_len)
         template_seq = random_seq(template_len)
         template = convert(String, template_seq)
@@ -274,8 +277,8 @@ end
 
 
 @testset "single_indel_proposals" begin
-    ref_errors = Quiver2.Model.ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0);
-    ref_scores = Quiver2.Model.Scores(ref_errors);
+    ref_errors = Quiver2.Model.ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
+    ref_scores = Quiver2.Model.Scores(ref_errors)
 
     ref = "CGGCGATTT"
     consensus_errors = Float64[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
@@ -439,6 +442,7 @@ end
                                       pseqs[1].match_log_p[3]]))]
         _test_candidate_scores(template, pseqs, scores, expected)
     end
+
     @testset "deletion" begin
         template = "TTT"
         seqs = ["TT"]
@@ -471,14 +475,14 @@ end
 
 @testset "full model" begin
     # can't guarantee this test actually passes, since it is random
-    n_seqs = 3
+    n_seqs = 5
     len = 30
-    ref_error_rate = 0.3
+    ref_error_rate = 0.1
     ref_sample_errors = Model.ErrorModel(8.0, 0.0, 0.0, 1.0, 1.0)
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
 
-    template_error_mean = 0.0001
+    template_error_mean = 0.01
     template_alpha = 1.0
     phred_scale = 3.0
     log_seq_actual_std = 3.0
@@ -487,7 +491,7 @@ end
     seq_errors = Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0)
     seq_scores = Model.Scores(seq_errors)
 
-    @testset "full model iterations" for i in 1:100
+    @testset "full model $i" for i in 1:100
         use_ref = rand([true, false])
         do_alignment_proposals = rand([true, false])
         do_surgery_proposals = rand([true, false])
@@ -535,6 +539,8 @@ end
                           [-9.0, -9.0, -9.0, -9.0]]
     bandwidth = 5
     mult = 2
+    errors = Model.normalize(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+    scores = Model.Scores(errors)
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
 
@@ -558,6 +564,8 @@ end
             "CGTAT"]
     bandwidth = 5
     mult = 2
+    errors = Model.normalize(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+    scores = Model.Scores(errors)
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
 
@@ -582,6 +590,9 @@ end
             "CCGT"]
     bandwidth = 5
     mult = 2
+
+    errors = Model.normalize(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+    scores = Model.Scores(errors)
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
 
@@ -603,6 +614,9 @@ end
 end
 
 @testset "align" begin
+    const errors = Model.normalize(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+    const scores = Model.Scores(errors)
+
     @testset "align 1" begin
         template = "ATAA"
         seq = "AAA"

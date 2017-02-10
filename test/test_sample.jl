@@ -5,9 +5,6 @@ using Base.Test
 
 srand(1)
 
-const seq_errors = ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0)
-const ref_errors = ErrorModel(1.0, 0.0, 0.0, 1.0, 1.0)
-
 @testset "Sample.jl" begin
     const seq_errors = ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0)
     const ref_errors = ErrorModel(1.0, 0.0, 0.0, 1.0, 1.0)
