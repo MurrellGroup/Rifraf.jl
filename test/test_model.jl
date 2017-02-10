@@ -381,6 +381,7 @@ end
         _test_fast_proposals(template, seqs, [], expected,
                              do_alignment=false, do_surgery=true)
     end
+
     @testset "push insertions" begin
         # test that insertions get pushed to end
         template = "TT"
@@ -389,6 +390,18 @@ end
         expected = [Proposals.Insertion(0, 'C'),
                     Proposals.Insertion(2, 'T')]
         _test_fast_proposals(template, seqs, [], expected,
+                             do_alignment=false, do_surgery=true)
+    end
+
+    @testset "push subs" begin
+        # test that subs get pushed backwards
+        template = "ATG"
+        seqs = ["ATG", "CATG", "CTG"]
+        lps = [[-0.8, -1.7, -0.8],
+               [-0.7, -0.5, -1.2, -1.0],
+               [-0.9, -1.9, -1.0]]
+        expected = [Proposals.Substitution(1, 'C')]
+        _test_fast_proposals(template, seqs, lps, expected,
                              do_alignment=false, do_surgery=true)
     end
 
