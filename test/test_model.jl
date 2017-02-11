@@ -293,7 +293,9 @@ end
 @testset "fast proposals" begin
     function _test_fast_proposals(template, seqs, lps, expected;
                                   do_alignment::Bool=true,
-                                  do_surgery::Bool=true)
+                                  do_surgery::Bool=true,
+                                  do_subs::Bool=true,
+                                  do_indels::Bool=true)
         bandwidth = 5
         rseq = Quiver2.Model.PString("", Float64[], bandwidth)
         mult = 2
@@ -301,9 +303,6 @@ end
         scores = Model.Scores(errors)
         ref_errors = Model.ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
         ref_scores = Model.Scores(ref_errors)
-
-        do_subs = true
-        do_indels = true
 
         if length(lps) == 0
             lps =  Vector{Float64}[fill(-9.0, length(s)) for s in seqs]
@@ -418,6 +417,21 @@ end
         _test_fast_proposals(template, seqs, lps, expected,
                              do_alignment=false, do_surgery=true)
 
+    end
+
+    @testset "test fast proposals converged 2" begin
+        template = "CAGTGCCGG"
+        seqs = ["CATGCCGG",
+                "CATGCCCTGG",
+                "CAGGGCCGG"]
+        phreds = Vector{Int8}[[13,7,12,13,7,11,6,14],
+                              [16,14,14,20,5,5,15,12,10,20],
+                              [23,9,7,6,9,10,10,10,23]]
+        lps = map(Quiver2.Util.phred_to_log_p, phreds)
+        expected = []
+        _test_fast_proposals(template, seqs, lps, expected,
+                             do_alignment=false, do_surgery=true,
+                             do_subs=true, do_indels=false)
     end
 end
 
