@@ -681,19 +681,14 @@ function surgery_proposals(state::State,
         seq_idx = 0
         cons_idx = 0
 
-        # map each base to its maximum delta
-        # start with deletion scores for each
-        deletion_score = seq.error_log_p[1] + scores.deletion
-
         # push insertions and deletions to the end, on the fly
         # insertions that match consensus should *keep* getting pushed
         # deletions in a poly-base run should also get pushed
-        insertion_bases = Dict{Char, Float64}(
-                                              'A' => deletion_score,
+        deletion_score = seq.error_log_p[1] + scores.deletion
+        insertion_bases = Dict{Char, Float64}('A' => deletion_score,
                                               'C' => deletion_score,
                                               'G' => deletion_score,
-                                              'T' => deletion_score,
-                                              )
+                                              'T' => deletion_score)
 
         del_base = '-'
         del_idx = 0
@@ -712,15 +707,17 @@ function surgery_proposals(state::State,
             end
 
             match_score = -Inf
-            error_score = Inf
+            error_score = -Inf
+            max_error_score = -Inf
             if seq_idx > 0
                 match_score = seq.match_log_p[seq_idx]
                 error_score = seq.error_log_p[seq_idx]
+                max_error_score = max(seq.error_log_p[max(seq_idx, 1)],
+                                      seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
             end
             mismatch_score = error_score + scores.mismatch
             insertion_score = error_score + scores.insertion
-            deletion_score = max(seq.error_log_p[max(seq_idx, 1)],
-                                 seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))]) + scores.deletion
+            deletion_score = max_error_score + scores.deletion
 
             # handle pushed deletions
             if del_base != '-' && del_base != cbase
@@ -751,6 +748,7 @@ function surgery_proposals(state::State,
                     insertion_bases[new_base] = max(insertion_bases[new_base],
                                                     new_score - insertion_score)
                 end
+
             elseif move == dp_match
                 # consider all substitution proposals
                 for (baseint, new_base) in enumerate(bases)
