@@ -796,27 +796,30 @@ function surgery_proposals(state::State,
             insertion_score = error_score + scores.insertion
             deletion_score = max_error_score + scores.deletion
 
-            # handle pushed deletions
-            if del_base != '-' && del_base != cbase
-                del_deltas[del_idx] += pushed_del_score
-                del_base = '-'
-                del_idx = 0
-                pushed_del_score = -Inf
-            end
-            if move != dp_ins
-                # handle insertions before this position.
-                for (base, delta) in insertion_bases
-                    # if current base equals attempted insertion,
-                    # keep pushing it
-                    if cbase != base
-                        ins_deltas[cons_idx, baseints[base]] += delta
-                        insertion_bases[base] = deletion_score
+
+            if do_indels
+                if del_base != '-' && del_base != cbase
+                    # handle pushed deletions
+                    del_deltas[del_idx] += pushed_del_score
+                    del_base = '-'
+                    del_idx = 0
+                    pushed_del_score = -Inf
+                end
+                if move != dp_ins
+                    # handle insertions before this position.
+                    for (base, delta) in insertion_bases
+                        # if current base equals attempted insertion,
+                        # keep pushing it
+                        if cbase != base
+                            ins_deltas[cons_idx, baseints[base]] += delta
+                            insertion_bases[base] = deletion_score
+                        end
                     end
                 end
             end
 
             old_match_score = (sbase == cbase ? match_score : mismatch_score)
-            if move == dp_ins
+            if move == dp_ins && do_indels
                 # consider insertion proposals.
                 # push all insertion proposals to the end
                 for (baseint, new_base) in enumerate(bases)
@@ -826,50 +829,51 @@ function surgery_proposals(state::State,
                     insertion_bases[new_base] = max(insertion_bases[new_base],
                                                     new_score - insertion_score)
                 end
-
             elseif move == dp_match
-                # TODO: do this on the fly
-                best_ins = best_surrounding_ins_bases(moves, seq, aln_idx, seq_idx)
-                del_bases = surrounding_del_bases(moves, state.consensus, seq,
-                                                  aln_idx, cons_idx, seq_idx)
-
                 # consider all substitution proposals
-                for (baseint, new_base) in enumerate(bases)
-                    if new_base == cbase
-                        continue
-                    end
-                    delta = -Inf
+                if do_subs
+                    # TODO: do this on the fly
+                    best_ins = best_surrounding_ins_bases(moves, seq, aln_idx, seq_idx)
+                    del_bases = surrounding_del_bases(moves, state.consensus, seq,
+                                                      aln_idx, cons_idx, seq_idx)
 
-                    if haskey(best_ins, new_base)
-                        # do substitution and align with a different insertion.
-                        # ins/match -> match/ins
-                        other_match_p = best_ins[new_base]
-                        other_error_p = log10(1.0 - exp10(other_match_p))
+                    for (baseint, new_base) in enumerate(bases)
+                        if new_base == cbase
+                            continue
+                        end
+                        delta = -Inf
 
-                        old_score = other_error_p + old_match_score
-                        new_score = other_match_p + error_score
-                        delta = max(delta, new_score - old_score)
-                    end
-                    if haskey(del_bases, new_base)
-                        # del/match -> match/del
-                        # do substitution and delete this base, moving seq
-                        # base to different position
-                        old_del_score, new_del_score = del_bases[new_base]
-                        old_score =  old_match_score + old_del_score
-                        new_score = match_score + new_del_score
-                        delta = max(delta, new_score - old_score)
-                    end
-                    if sbase == new_base
-                        # proposal would help
-                        delta = max(delta, (match_score - mismatch_score))
-                    elseif sbase == cbase
-                        # proposal would hurt
-                        delta = max(delta, (mismatch_score - match_score))
-                    else
-                        # proposal would still be a mismatch. do nothing.
-                    end
-                    if delta > -Inf
-                        sub_deltas[cons_idx, baseint] += delta
+                        if haskey(best_ins, new_base)
+                            # do substitution and align with a different insertion.
+                            # ins/match -> match/ins
+                            other_match_p = best_ins[new_base]
+                            other_error_p = log10(1.0 - exp10(other_match_p))
+
+                            old_score = other_error_p + old_match_score
+                            new_score = other_match_p + error_score
+                            delta = max(delta, new_score - old_score)
+                        end
+                        if haskey(del_bases, new_base)
+                            # del/match -> match/del
+                            # do substitution and delete this base, moving seq
+                            # base to different position
+                            old_del_score, new_del_score = del_bases[new_base]
+                            old_score =  old_match_score + old_del_score
+                            new_score = match_score + new_del_score
+                            delta = max(delta, new_score - old_score)
+                        end
+                        if sbase == new_base
+                            # proposal would help
+                            delta = max(delta, (match_score - mismatch_score))
+                        elseif sbase == cbase
+                            # proposal would hurt
+                            delta = max(delta, (mismatch_score - match_score))
+                        else
+                            # proposal would still be a mismatch. do nothing.
+                        end
+                        if delta > -Inf
+                            sub_deltas[cons_idx, baseint] += delta
+                        end
                     end
                 end
                 # consider deleting the consensus base.
@@ -878,7 +882,7 @@ function surgery_proposals(state::State,
                 del_idx = cons_idx
                 pushed_del_score = max(pushed_del_score,
                                        insertion_score - old_match_score)
-            elseif move == dp_del
+            elseif do_indels && move == dp_del
                 # no reason to consider substitutions. delta = 0.
                 # consider deletion proposal. would convert deletion
                 # to no-op.
@@ -888,14 +892,16 @@ function surgery_proposals(state::State,
                                        0 - deletion_score)
             end
         end
-        # handle deletion at end
-        if del_base != '-'
-            del_deltas[end] += pushed_del_score
-        end
+        if do_indels
+            # handle deletion at end
+            if del_base != '-'
+                del_deltas[end] += pushed_del_score
+            end
 
-        # handle insertions at the end
-        for (base, delta) in insertion_bases
-            ins_deltas[end, baseints[base]] += delta
+            # handle insertions at the end
+            for (base, delta) in insertion_bases
+                ins_deltas[end, baseints[base]] += delta
+            end
         end
     end
 
