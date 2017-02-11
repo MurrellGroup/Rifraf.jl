@@ -782,14 +782,15 @@ function surgery_proposals(state::State,
                 cbase = state.consensus[cons_idx]
             end
 
+            # TODO: ensure these are never used
             match_score = -Inf
             error_score = -Inf
-            max_error_score = -Inf
+            max_error_score = max(seq.error_log_p[max(seq_idx, 1)],
+                                  seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
+
             if seq_idx > 0
                 match_score = seq.match_log_p[seq_idx]
                 error_score = seq.error_log_p[seq_idx]
-                max_error_score = max(seq.error_log_p[max(seq_idx, 1)],
-                                      seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
             end
             mismatch_score = error_score + scores.mismatch
             insertion_score = error_score + scores.insertion
