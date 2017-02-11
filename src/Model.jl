@@ -665,6 +665,82 @@ function alignment_proposals(state::State,
     return collect(result)
 end
 
+function best_surrounding_ins_bases(moves::Vector{DPMove},
+                                    seq::PString,
+                                    aln_idx::Int, seq_idx::Int)
+    # TODO: do not reallocate for each call
+    ins_bases = Dict{Char, Float64}()
+    search_idx = aln_idx - 1
+    seq_search_idx = seq_idx - 1
+    while search_idx >= 1 && moves[search_idx] == dp_ins
+        search_base = seq.seq[seq_search_idx]
+        if !haskey(ins_bases, search_base)
+            ins_bases[search_base] = -Inf
+        end
+        ins_bases[search_base] = max(ins_bases[search_base],
+                                     seq.match_log_p[seq_search_idx])
+        search_idx -= 1
+        seq_search_idx -= 1
+    end
+    search_idx = aln_idx + 1
+    seq_search_idx = seq_idx + 1
+    while search_idx <= length(moves) && moves[search_idx] == dp_ins
+        search_base = seq.seq[seq_search_idx]
+        if !haskey(ins_bases, search_base)
+            ins_bases[search_base] = -Inf
+        end
+        ins_bases[search_base] = max(ins_bases[search_base],
+                                     seq.match_log_p[seq_search_idx])
+        search_idx += 1
+        seq_search_idx += 1
+    end
+    return ins_bases
+end
+
+function surrounding_del_bases(moves::Vector{DPMove},
+                               consensus::String,
+                               seq::PString, aln_idx::Int,
+                               cons_idx::Int, seq_idx::Int)
+    result = Dict{Char, Tuple{Float64, Float64}}()
+
+    search_idx = aln_idx - 1
+    cons_search_idx = cons_idx - 1
+
+    before_error_score = max(seq.error_log_p[max(seq_idx - 1, 1)],
+                             seq.error_log_p[seq_idx])
+    after_error_score = max(seq.error_log_p[seq_idx],
+                            seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
+    old_deletion_score = before_error_score
+    new_deletion_score = after_error_score
+    while search_idx >= 1 && moves[search_idx] == dp_del
+        search_base = consensus[cons_search_idx]
+        result[search_base] = (old_deletion_score, new_deletion_score)
+        search_idx -= 1
+        cons_search_idx -= 1
+    end
+
+    search_idx = aln_idx + 1
+    cons_search_idx = cons_idx + 1
+
+    old_deletion_score = after_error_score
+    new_deletion_score = before_error_score
+
+    while search_idx <= length(seq) && moves[search_idx] == dp_del
+        search_base = consensus[cons_search_idx]
+        if haskey(result, search_base)
+            prev_old, prev_new = result[search_base]
+            if new_deletion_score > prev_new
+                result[search_base] = (old_deletion_score, new_deletion_score)
+            end
+        else
+            result[search_base] = (old_deletion_score, new_deletion_score)
+        end
+        search_idx -= 1
+        cons_search_idx -= 1
+    end
+    return result
+end
+
 
 """Use model surgery heuristic to get proposals with positive score deltas."""
 function surgery_proposals(state::State,
@@ -738,6 +814,7 @@ function surgery_proposals(state::State,
                 end
             end
 
+            old_match_score = (sbase == cbase ? match_score : mismatch_score)
             if move == dp_ins
                 # consider insertion proposals.
                 # push all insertion proposals to the end
@@ -750,19 +827,48 @@ function surgery_proposals(state::State,
                 end
 
             elseif move == dp_match
+                # TODO: do this on the fly
+                best_ins = best_surrounding_ins_bases(moves, seq, aln_idx, seq_idx)
+                del_bases = surrounding_del_bases(moves, state.consensus, seq,
+                                                  aln_idx, cons_idx, seq_idx)
+
                 # consider all substitution proposals
                 for (baseint, new_base) in enumerate(bases)
                     if new_base == cbase
                         continue
                     end
+                    delta = -Inf
+
+                    if haskey(best_ins, new_base)
+                        # do substitution and align with a different insertion.
+                        # ins/match -> match/ins
+                        other_match_p = best_ins[new_base]
+                        other_error_p = log10(1.0 - exp10(other_match_p))
+
+                        old_score = other_error_p + old_match_score
+                        new_score = other_match_p + error_score
+                        delta = max(delta, new_score - old_score)
+                    end
+                    if haskey(del_bases, new_base)
+                        # del/match -> match/del
+                        # do substitution and delete this base, moving seq
+                        # base to different position
+                        old_del_score, new_del_score = del_bases[new_base]
+                        old_score =  old_match_score + old_del_score
+                        new_score = match_score + new_del_score
+                        delta = max(delta, new_score - old_score)
+                    end
                     if sbase == new_base
                         # proposal would help
-                        sub_deltas[cons_idx, baseint] += (match_score - mismatch_score)
+                        delta = max(delta, (match_score - mismatch_score))
                     elseif sbase == cbase
                         # proposal would hurt
-                        sub_deltas[cons_idx, baseint] += (mismatch_score - match_score)
+                        delta = max(delta, (mismatch_score - match_score))
                     else
                         # proposal would still be a mismatch. do nothing.
+                    end
+                    if delta > -Inf
+                        sub_deltas[cons_idx, baseint] += delta
                     end
                 end
                 # consider deleting the consensus base.
@@ -770,7 +876,7 @@ function surgery_proposals(state::State,
                 del_base = cbase
                 del_idx = cons_idx
                 pushed_del_score = max(pushed_del_score,
-                                       insertion_score - (sbase == cbase ? match_score : mismatch_score))
+                                       insertion_score - old_match_score)
             elseif move == dp_del
                 # no reason to consider substitutions. delta = 0.
                 # consider deletion proposal. would convert deletion
