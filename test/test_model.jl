@@ -291,7 +291,7 @@ end
 
 
 @testset "fast proposals" begin
-    function _test_fast_proposals(template, seqs, lps, expected;
+    function _test_fast_proposals(consensus, seqs, lps, expected;
                                   do_alignment::Bool=true,
                                   do_surgery::Bool=true,
                                   do_subs::Bool=true,
@@ -310,7 +310,7 @@ end
 
         pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
                                       for (s, p) in zip(seqs, lps)]
-        state = Quiver2.Model.initial_state(template, pseqs)
+        state = Quiver2.Model.initial_state(consensus, pseqs)
         Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
 
         if do_alignment
@@ -324,34 +324,34 @@ end
     end
 
     @testset "fast proposals 1" begin
-        template = "ACGAG"
+        consensus = "ACGAG"
         seqs = ["CGTAC",
                 "CGAC",
                 "CGTAG"]
         expected = [Proposals.Deletion(1),
                     Proposals.Insertion(3, 'T'),
                     Proposals.Substitution(5, 'C')]
-        _test_fast_proposals(template, seqs, [], expected)
+        _test_fast_proposals(consensus, seqs, [], expected)
 
-        template = "AA"
+        consensus = "AA"
         seqs = ["AAG",
                 "AA",
                 "AAG"]
         expected = [Proposals.Insertion(2, 'G')]
-        _test_fast_proposals(template, seqs, [], expected)
+        _test_fast_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals 2" begin
-        template = "AA"
+        consensus = "AA"
         seqs = ["GAA",
                 "AA",
                 "GAA"]
         expected = [Proposals.Insertion(0, 'G')]
-        _test_fast_proposals(template, seqs, [], expected)
+        _test_fast_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals - highly confident base" begin
-        template = "AA"
+        consensus = "AA"
         seqs = ["GAA",
                 "AA",
                 "AA"]
@@ -359,53 +359,54 @@ end
                               [-3.0, -5.0],
                               [-3.0, -50]]
         expected = [Proposals.Insertion(0, 'G')]
-        _test_fast_proposals(template, seqs, lps, expected)
+        _test_fast_proposals(consensus, seqs, lps, expected)
     end
     @testset "push deletions" begin
         # test that deletions get pushed
-        template = "CCGTAAAC"
+        consensus = "CCGTAAAC"
         seqs = ["CGTAAAC", "CCGTAAAC", "CGTAAAC"]
         lps = Vector{Float64}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
                               [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
                               [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
         expected = [Proposals.Deletion(2)]
-        _test_fast_proposals(template, seqs, lps, expected,
+        _test_fast_proposals(consensus, seqs, lps, expected,
                              do_alignment=false, do_surgery=true)
     end
     @testset "push deletions - simple" begin
         # test that deletions get pushed to end
-        template = "CCC"
+        consensus = "CCC"
         seqs = ["CC"]
         expected = [Proposals.Deletion(3)]
-        _test_fast_proposals(template, seqs, [], expected,
+        _test_fast_proposals(consensus, seqs, [], expected,
                              do_alignment=false, do_surgery=true)
     end
 
     @testset "push insertions" begin
         # test that insertions get pushed to end
-        template = "TT"
+        consensus = "TT"
         seqs = ["TTT",
                 "CTT"]
         expected = [Proposals.Insertion(0, 'C'),
                     Proposals.Insertion(2, 'T')]
-        _test_fast_proposals(template, seqs, [], expected,
+        _test_fast_proposals(consensus, seqs, [], expected,
                              do_alignment=false, do_surgery=true)
     end
 
     @testset "push subs" begin
         # test that subs get pushed backwards
-        template = "ATG"
+        consensus = "ATG"
         seqs = ["ATG", "CATG", "CTG"]
         lps = [[-0.8, -1.7, -0.8],
                [-0.7, -0.5, -1.2, -1.0],
                [-0.9, -1.9, -1.0]]
         expected = [Proposals.Substitution(1, 'C')]
-        _test_fast_proposals(template, seqs, lps, expected,
-                             do_alignment=false, do_surgery=true)
+        _test_fast_proposals(consensus, seqs, lps, expected,
+                             do_alignment=false, do_surgery=true,
+                             do_subs=true, do_indels=false)
     end
 
     @testset "test fast proposals converged" begin
-        template = "GTTCGGCTC"
+        consensus = "GTTCGGCTC"
         seqs = ["GTTCGGCTTC",
                 "GTTCGGCTC",
                 "GTTCCTG"]
@@ -414,13 +415,13 @@ end
                               [26,14,5,24,8,12,7]]
         lps = map(Quiver2.Util.phred_to_log_p, phreds)
         expected = []
-        _test_fast_proposals(template, seqs, lps, expected,
+        _test_fast_proposals(consensus, seqs, lps, expected,
                              do_alignment=false, do_surgery=true)
 
     end
 
     @testset "test fast proposals converged 2" begin
-        template = "CAGTGCCGG"
+        consensus = "CAGTGCCGG"
         seqs = ["CATGCCGG",
                 "CATGCCCTGG",
                 "CAGGGCCGG"]
@@ -429,9 +430,27 @@ end
                               [23,9,7,6,9,10,10,10,23]]
         lps = map(Quiver2.Util.phred_to_log_p, phreds)
         expected = []
-        _test_fast_proposals(template, seqs, lps, expected,
+        # no indels, because this happened during refinement
+        _test_fast_proposals(consensus, seqs, lps, expected,
                              do_alignment=false, do_surgery=true,
                              do_subs=true, do_indels=false)
+    end
+    @testset "test fast proposals insertion/mismatch swap" begin
+        # inserting 'T' after position 5 should swap with G/T
+        # mismatch in second sequence
+        consensus = "GGAAGTCC"
+        seqs = ["GGAAGTCC",
+                "GGAATTCC",
+                "GGAAGTCTACC"]
+        phreds = Vector{Int8}[[18,9,12,14,11,11,15,14],
+                              [25,10,6,8,12,11,19,13],
+                              [24,12,9,15,8,8,8,8,8,23,19]]
+        lps = map(Quiver2.Util.phred_to_log_p, phreds)
+        expected = [Proposals.Substitution(5, 'T'),
+                    Proposals.Insertion(6, 'T')]
+        _test_fast_proposals(consensus, seqs, lps, expected,
+                             do_alignment=false, do_surgery=true,
+                             do_subs=true, do_indels=true)
     end
 end
 
@@ -458,11 +477,11 @@ end
                                                       do_surgery_proposals,
                                                       trust_proposals,
                                                       indels_only)
-        @test length(expected) == length(cands)
-        if length(expected) == length(cands)
-            exp_scores = sort([c.score for c in expected])
+        @test length(cands) == length(expected)
+        if length(cands) == length(expected)
             cand_scores = sort([c.score for c in cands])
-            @test all([a ≈ b for (a, b) in zip(exp_scores, cand_scores)])
+            exp_scores = sort([c.score for c in expected])
+            @test all([a ≈ b for (a, b) in zip(cand_scores, exp_scores)])
         end
     end
 
@@ -477,6 +496,10 @@ end
 
         expected = [CandProposal(Proposals.Substitution(2, 'A'),
                                  sum(pseqs[1].match_log_p)),
+                    CandProposal(Proposals.Insertion(1, 'A'),
+                                 sum(pseqs[1].match_log_p) + pseqs[1].error_log_p[1] + scores.deletion),
+                    CandProposal(Proposals.Insertion(2, 'A'),
+                                 sum(pseqs[1].match_log_p) + pseqs[1].error_log_p[2] + scores.deletion),
                     CandProposal(Proposals.Deletion(3),
                                  sum([pseqs[1].match_log_p[1],
                                       pseqs[1].error_log_p[2] + scores.insertion,

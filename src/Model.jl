@@ -771,6 +771,13 @@ function update_deltas(sub_deltas::Array{Float64, 2},
                        do_subs::Bool, do_indels::Bool)
     # FIXME: modularize this function and test each part
 
+    # local alignment fixes:
+    # - insertions next to a matching base get pushed to end of match
+    # - deletions get pushed to the end of poly-base runs
+    # - substitutions that convert matches to mismatches try to swap
+    #   with neighboring insertions and deletions
+    # - insertions next to an eligible (mis)match get swapped
+
     # push insertions and deletions to the end, on the fly
     # insertions that match consensus should *keep* getting pushed
     # deletions in a poly-base run should also get pushed
@@ -786,6 +793,8 @@ function update_deltas(sub_deltas::Array{Float64, 2},
 
     cons_idx = 0
     seq_idx = 0
+    n_moves = length(moves)
+    prev_del_score = -Inf
     for (aln_idx, move) in enumerate(moves)
         cbase = '-'
         sbase = '-'
@@ -811,17 +820,31 @@ function update_deltas(sub_deltas::Array{Float64, 2},
             end
             if move != dp_ins
                 # handle insertions before this position.
-                for (base, delta) in insertion_bases
-                    # if current base equals attempted insertion,
-                    # keep pushing it
-                    if cbase != base
-                        ins_deltas[cons_idx, baseints[base]] += delta
-                        insertion_bases[base] = del_score
+                for (ins_base, delta) in insertion_bases
+                    if cbase == ins_base
+                        # do nothing; keep pushing this insertion
+                    else
+                        # update `insertion_bases` with candidate
+                        # insertion after this position
+                        # this move is a mismatch, consider
+                        # swapping with prev and next insertions
+
+                        # FIXME: this is causing duplicate insertions
+                        # before and after the same base. Detect this
+                        # case and account for it.
+                        new_delta = del_score
+                        if move == dp_match && sbase == ins_base && cbase != sbase
+                            prev_swap_delta = (del_score + match_score) - mm_score
+                            next_swap_delta = (prev_del_score + match_score) - mm_score
+                            delta = max(delta, prev_swap_delta)
+                            new_delta = max(new_delta, next_swap_delta)
+                        end
+                        ins_deltas[cons_idx, baseints[ins_base]] += delta
+                        insertion_bases[ins_base] = new_delta
                     end
                 end
             end
         end
-
         old_match_score = (sbase == cbase ? match_score : mm_score)
         if move == dp_ins && do_indels
             # consider insertion proposals.
@@ -896,6 +919,7 @@ function update_deltas(sub_deltas::Array{Float64, 2},
             pushed_del_score = max(pushed_del_score,
                                    0 - del_score)
         end
+        prev_del_score = del_score
     end
     if do_indels
         # handle deletion at end
