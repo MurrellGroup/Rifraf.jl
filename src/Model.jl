@@ -742,169 +742,190 @@ function surrounding_del_bases(moves::Vector{DPMove},
 end
 
 
+function seq_posn_scores(seq::PString, seq_idx::Int, scores::Scores)
+    # TODO: ensure these are never used
+    match_score = -Inf
+    error_score = -Inf
+    max_error_score = max(seq.error_log_p[max(seq_idx, 1)],
+                          seq.error_log_p[min(seq_idx + 1,
+                                              length(seq.error_log_p))])
+
+    if seq_idx > 0
+        match_score = seq.match_log_p[seq_idx]
+        error_score = seq.error_log_p[seq_idx]
+    end
+    mm_score = error_score + scores.mismatch
+    ins_score = error_score + scores.insertion
+    del_score = max_error_score + scores.deletion
+
+    return match_score, error_score, mm_score, ins_score, del_score
+end
+
+
+function update_deltas(sub_deltas::Array{Float64, 2},
+                       del_deltas::Array{Float64, 1},
+                       ins_deltas::Array{Float64, 2},
+                       consensus::String,
+                       seq::PString, moves::Vector{DPMove},
+                       scores::Scores,
+                       do_subs::Bool, do_indels::Bool)
+    # FIXME: modularize this function and test each part
+
+    # push insertions and deletions to the end, on the fly
+    # insertions that match consensus should *keep* getting pushed
+    # deletions in a poly-base run should also get pushed
+    deletion_score = seq.error_log_p[1] + scores.deletion
+    insertion_bases = Dict{Char, Float64}('A' => deletion_score,
+                                          'C' => deletion_score,
+                                          'G' => deletion_score,
+                                          'T' => deletion_score)
+
+    del_base = '-'
+    del_idx = 0
+    pushed_del_score = -Inf
+
+    cons_idx = 0
+    seq_idx = 0
+    for (aln_idx, move) in enumerate(moves)
+        cbase = '-'
+        sbase = '-'
+        if move in (dp_match, dp_ins)
+            seq_idx += 1
+            sbase = seq.seq[seq_idx]
+        end
+        if move in (dp_match, dp_del)
+            cons_idx += 1
+            cbase = consensus[cons_idx]
+        end
+
+        all_scores = seq_posn_scores(seq, seq_idx, scores)
+        (match_score, error_score, mm_score, ins_score, del_score) = all_scores
+
+        if do_indels
+            if del_base != '-' && del_base != cbase
+                # handle pushed deletions
+                del_deltas[del_idx] += pushed_del_score
+                del_base = '-'
+                del_idx = 0
+                pushed_del_score = -Inf
+            end
+            if move != dp_ins
+                # handle insertions before this position.
+                for (base, delta) in insertion_bases
+                    # if current base equals attempted insertion,
+                    # keep pushing it
+                    if cbase != base
+                        ins_deltas[cons_idx, baseints[base]] += delta
+                        insertion_bases[base] = del_score
+                    end
+                end
+            end
+        end
+
+        old_match_score = (sbase == cbase ? match_score : mm_score)
+        if move == dp_ins && do_indels
+            # consider insertion proposals.
+            # push all insertion proposals to the end
+            for (baseint, new_base) in enumerate(bases)
+                # try all insertions, converting dp_ins to (mis)match
+                sbase = seq.seq[seq_idx]
+                new_score = (sbase == new_base) ? match_score : mm_score
+                insertion_bases[new_base] = max(insertion_bases[new_base],
+                                                new_score - ins_score)
+            end
+        elseif move == dp_match
+            # consider all substitution proposals
+            if do_subs
+                # TODO: do this on the fly
+                best_ins = best_surrounding_ins_bases(moves, seq, aln_idx, seq_idx)
+                del_bases = surrounding_del_bases(moves, consensus, seq,
+                                                  aln_idx, cons_idx, seq_idx)
+
+                for (baseint, new_base) in enumerate(bases)
+                    if new_base == cbase
+                        continue
+                    end
+                    delta = -Inf
+
+                    if haskey(best_ins, new_base)
+                        # do substitution and align with a different insertion.
+                        # ins/match -> match/ins
+                        other_match_p = best_ins[new_base]
+                        other_error_p = log10(1.0 - exp10(other_match_p))
+
+                        old_score = other_error_p + old_match_score
+                        new_score = other_match_p + error_score
+                        delta = max(delta, new_score - old_score)
+                    end
+
+                    if sbase == new_base
+                        # proposal would help
+                        delta = max(delta, (match_score - mm_score))
+                    elseif sbase == cbase
+                        if haskey(del_bases, sbase)
+                            # del/match -> match/del
+                            # do substitution and delete this base, moving seq
+                            # base to different position
+                            old_del_score, new_del_score = del_bases[sbase]
+                            old_score = old_match_score + old_del_score
+                            new_score = match_score + new_del_score
+                            delta = max(delta, new_score - old_score)
+                        end
+                        # proposal would hurt
+                        delta = max(delta, (mm_score - match_score))
+                    else
+                        # proposal would still be a mismatch. do nothing.
+                    end
+                    if delta > -Inf
+                        sub_deltas[cons_idx, baseint] += delta
+                    end
+                end
+            end
+            # consider deleting the consensus base.
+            # This would convert (mis)match to insertion
+            del_base = cbase
+            del_idx = cons_idx
+            pushed_del_score = max(pushed_del_score,
+                                   ins_score - old_match_score)
+        elseif do_indels && move == dp_del
+            # no reason to consider substitutions. delta = 0.
+            # consider deletion proposal. would convert deletion
+            # to no-op.
+            del_base = cbase
+            del_idx = cons_idx
+            pushed_del_score = max(pushed_del_score,
+                                   0 - del_score)
+        end
+    end
+    if do_indels
+        # handle deletion at end
+        if del_base != '-'
+            del_deltas[end] += pushed_del_score
+        end
+
+        # handle insertions at the end
+        for (base, delta) in insertion_bases
+            ins_deltas[end, baseints[base]] += delta
+        end
+    end
+end
+
+
 """Use model surgery heuristic to get proposals with positive score deltas."""
 function surgery_proposals(state::State,
                            sequences::Vector{PString},
                            scores::Scores,
                            do_subs::Bool,
                            do_indels::Bool)
-    # FIXME: modularize this function and test each part
     sub_deltas = zeros(Float64, (length(state.consensus), 4))
     del_deltas = zeros(Float64, (length(state.consensus)))
     ins_deltas = zeros(Float64, (length(state.consensus) + 1, 4))
 
-    for (Amoves, seq) in zip(state.Amoves, sequences)
+    for (seq, Amoves) in zip(sequences, state.Amoves)
         moves = backtrace(Amoves)
-        seq_idx = 0
-        cons_idx = 0
-
-        # push insertions and deletions to the end, on the fly
-        # insertions that match consensus should *keep* getting pushed
-        # deletions in a poly-base run should also get pushed
-        deletion_score = seq.error_log_p[1] + scores.deletion
-        insertion_bases = Dict{Char, Float64}('A' => deletion_score,
-                                              'C' => deletion_score,
-                                              'G' => deletion_score,
-                                              'T' => deletion_score)
-
-        del_base = '-'
-        del_idx = 0
-        pushed_del_score = -Inf
-
-        for (aln_idx, move) in enumerate(moves)
-            cbase = '-'
-            sbase = '-'
-            if move in (dp_match, dp_ins)
-                seq_idx += 1
-                sbase = seq.seq[seq_idx]
-            end
-            if move in (dp_match, dp_del)
-                cons_idx += 1
-                cbase = state.consensus[cons_idx]
-            end
-
-            # TODO: ensure these are never used
-            match_score = -Inf
-            error_score = -Inf
-            max_error_score = max(seq.error_log_p[max(seq_idx, 1)],
-                                  seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
-
-            if seq_idx > 0
-                match_score = seq.match_log_p[seq_idx]
-                error_score = seq.error_log_p[seq_idx]
-            end
-            mismatch_score = error_score + scores.mismatch
-            insertion_score = error_score + scores.insertion
-            deletion_score = max_error_score + scores.deletion
-
-
-            if do_indels
-                if del_base != '-' && del_base != cbase
-                    # handle pushed deletions
-                    del_deltas[del_idx] += pushed_del_score
-                    del_base = '-'
-                    del_idx = 0
-                    pushed_del_score = -Inf
-                end
-                if move != dp_ins
-                    # handle insertions before this position.
-                    for (base, delta) in insertion_bases
-                        # if current base equals attempted insertion,
-                        # keep pushing it
-                        if cbase != base
-                            ins_deltas[cons_idx, baseints[base]] += delta
-                            insertion_bases[base] = deletion_score
-                        end
-                    end
-                end
-            end
-
-            old_match_score = (sbase == cbase ? match_score : mismatch_score)
-            if move == dp_ins && do_indels
-                # consider insertion proposals.
-                # push all insertion proposals to the end
-                for (baseint, new_base) in enumerate(bases)
-                    # try all insertions, converting dp_ins to (mis)match
-                    sbase = seq.seq[seq_idx]
-                    new_score = (sbase == new_base) ? match_score : mismatch_score
-                    insertion_bases[new_base] = max(insertion_bases[new_base],
-                                                    new_score - insertion_score)
-                end
-            elseif move == dp_match
-                # consider all substitution proposals
-                if do_subs
-                    # TODO: do this on the fly
-                    best_ins = best_surrounding_ins_bases(moves, seq, aln_idx, seq_idx)
-                    del_bases = surrounding_del_bases(moves, state.consensus, seq,
-                                                      aln_idx, cons_idx, seq_idx)
-
-                    for (baseint, new_base) in enumerate(bases)
-                        if new_base == cbase
-                            continue
-                        end
-                        delta = -Inf
-
-                        if haskey(best_ins, new_base)
-                            # do substitution and align with a different insertion.
-                            # ins/match -> match/ins
-                            other_match_p = best_ins[new_base]
-                            other_error_p = log10(1.0 - exp10(other_match_p))
-
-                            old_score = other_error_p + old_match_score
-                            new_score = other_match_p + error_score
-                            delta = max(delta, new_score - old_score)
-                        end
-
-                        if sbase == new_base
-                            # proposal would help
-                            delta = max(delta, (match_score - mismatch_score))
-                        elseif sbase == cbase
-                            if haskey(del_bases, sbase)
-                                # del/match -> match/del
-                                # do substitution and delete this base, moving seq
-                                # base to different position
-                                old_del_score, new_del_score = del_bases[sbase]
-                                old_score = old_match_score + old_del_score
-                                new_score = match_score + new_del_score
-                                delta = max(delta, new_score - old_score)
-                            end
-                            # proposal would hurt
-                            delta = max(delta, (mismatch_score - match_score))
-                        else
-                            # proposal would still be a mismatch. do nothing.
-                        end
-                        if delta > -Inf
-                            sub_deltas[cons_idx, baseint] += delta
-                        end
-                    end
-                end
-                # consider deleting the consensus base.
-                # This would convert (mis)match to insertion
-                del_base = cbase
-                del_idx = cons_idx
-                pushed_del_score = max(pushed_del_score,
-                                       insertion_score - old_match_score)
-            elseif do_indels && move == dp_del
-                # no reason to consider substitutions. delta = 0.
-                # consider deletion proposal. would convert deletion
-                # to no-op.
-                del_base = cbase
-                del_idx = cons_idx
-                pushed_del_score = max(pushed_del_score,
-                                       0 - deletion_score)
-            end
-        end
-        if do_indels
-            # handle deletion at end
-            if del_base != '-'
-                del_deltas[end] += pushed_del_score
-            end
-
-            # handle insertions at the end
-            for (base, delta) in insertion_bases
-                ins_deltas[end, baseints[base]] += delta
-            end
-        end
+        update_deltas(sub_deltas, del_deltas, ins_deltas,
+                      state.consensus, seq, moves, scores,
+                      do_subs, do_indels)
     end
     # only return proposals with positive deltas
     result = Proposal[]
