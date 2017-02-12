@@ -752,6 +752,7 @@ function surgery_proposals(state::State,
     sub_deltas = zeros(Float64, (length(state.consensus), 4))
     del_deltas = zeros(Float64, (length(state.consensus)))
     ins_deltas = zeros(Float64, (length(state.consensus) + 1, 4))
+
     for (Amoves, seq) in zip(state.Amoves, sequences)
         moves = backtrace(Amoves)
         seq_idx = 0
@@ -853,19 +854,20 @@ function surgery_proposals(state::State,
                             new_score = other_match_p + error_score
                             delta = max(delta, new_score - old_score)
                         end
-                        if haskey(del_bases, new_base)
-                            # del/match -> match/del
-                            # do substitution and delete this base, moving seq
-                            # base to different position
-                            old_del_score, new_del_score = del_bases[new_base]
-                            old_score =  old_match_score + old_del_score
-                            new_score = match_score + new_del_score
-                            delta = max(delta, new_score - old_score)
-                        end
+
                         if sbase == new_base
                             # proposal would help
                             delta = max(delta, (match_score - mismatch_score))
                         elseif sbase == cbase
+                            if haskey(del_bases, sbase)
+                                # del/match -> match/del
+                                # do substitution and delete this base, moving seq
+                                # base to different position
+                                old_del_score, new_del_score = del_bases[sbase]
+                                old_score = old_match_score + old_del_score
+                                new_score = match_score + new_del_score
+                                delta = max(delta, new_score - old_score)
+                            end
                             # proposal would hurt
                             delta = max(delta, (mismatch_score - match_score))
                         else
@@ -904,7 +906,6 @@ function surgery_proposals(state::State,
             end
         end
     end
-
     # only return proposals with positive deltas
     result = Proposal[]
     deltas = Float64[]
