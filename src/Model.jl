@@ -1095,9 +1095,9 @@ function moves_to_alignment_strings(moves::Vector{DPMove},
             push!(aligned_s, '-')
         elseif move == dp_codon_ins
             append!(aligned_t, ['-', '-', '-'])
-            append!(aligned_s, [s[i], s[i-1], s[i-2]])
+            append!(aligned_s, [s[i-2], s[i-1], s[i]])
         elseif move == dp_codon_del
-            append!(aligned_t, [t[j], t[j-1], t[j-2]])
+            append!(aligned_t, [t[j-2], t[j-1], t[j]])
             append!(aligned_s, ['-', '-', '-'])
         end
     end
