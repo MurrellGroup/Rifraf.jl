@@ -1505,12 +1505,14 @@ function quiver2(seqstrings::Vector{String},
 
     n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(consensus)]
-    consensus_stages = ["", "", ""]
+    consensus_stages = [[], [], []]
+    cons_pstring = PString("", Int8[], bandwidth)
 
     stage_iterations = zeros(Int, Int(typemax(Stage)) - 1)
     stage_times = Float64[0, 0, 0]
     tic()
     for i in 1:max_iters
+        push!(consensus_stages[Int(state.stage)], state.consensus)
         stage_iterations[Int(state.stage)] += 1
         old_consensus = state.consensus
         old_score = state.score
@@ -1531,7 +1533,6 @@ function quiver2(seqstrings::Vector{String},
                 println(STDERR, "  no candidates found")
             end
             push!(n_proposals, zeros(Int, 3))
-            consensus_stages[Int(state.stage)] = state.consensus
             stage_times[Int(state.stage)] = toq()
             tic()
             if state.stage == initial_stage
@@ -1560,6 +1561,7 @@ function quiver2(seqstrings::Vector{String},
                         if verbose > 1
                             println(STDERR, "  skipping straight to refinement stage")
                         end
+                        push!(consensus_stages[Int(state.stage)], state.consensus)
                         state.stage = refinement_stage
                     end
                 end
@@ -1703,6 +1705,7 @@ function quiver2(seqstrings::Vector{String},
                 "exceeded_max_iterations" => exceeded,
                 "ref_scores" => ref_scores,
                 "consensus_stages" => consensus_stages,
+                "cons_pstring" => cons_pstring,
                 "n_proposals" => transpose(hcat(n_proposals...)),
                 "consensus_lengths" => consensus_lengths,
                 "ref_error_rate" => ref_error_rate,
@@ -1750,7 +1753,8 @@ function quiver2(sequences::Vector{DNASequence},
                              consensus=new_consensus,
                              reference=new_reference,
                              kwargs...)
-    info["consensus_stages"] = DNASequence[DNASequence(s) for s in info["consensus_stages"]]
+    info["consensus_stages"] = Vector{DNASequence}[[DNASequence(s) for s in cs]
+                                                   for cs in info["consensus_stages"]]
     return DNASequence(result), info
 end
 
