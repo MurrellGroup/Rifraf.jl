@@ -29,6 +29,10 @@ export quiver2, ErrorModel, Scores, normalize, estimate_point_probs, estimate_in
 
 @enum Stage initial_stage=1 frame_correction_stage=2 refinement_stage=3 scoring_stage=4
 
+function next_stage(s::Stage)
+    return Stage(Int(s) + 1)
+end
+
 """Convenience type for passing around a sequence and its per-base
 error probabilities.
 
@@ -1206,7 +1210,8 @@ function single_indel_proposals(reference::String,
 end
 
 
-function initial_state(consensus::String, seqs::Vector{PString})
+function initial_state(consensus::String, seqs::Vector{PString},
+                       stage::Stage=initial_stage)
     if length(consensus) == 0
         # choose highest-quality sequence
         idx = indmin([Util.logsumexp10(s.error_log_p)
@@ -1222,7 +1227,7 @@ function initial_state(consensus::String, seqs::Vector{PString})
     Amoves = BandedArray{Int}[]
 
     return State(0.0, consensus, A_t, B_t, As, Amoves,
-                 Bs, initial_stage, false)
+                 Bs, stage, false)
 end
 
 
@@ -1416,6 +1421,10 @@ function quiver2(seqstrings::Vector{String},
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
+                 enabled_stages::Vector{Stage}=[initial_stage,
+                                                frame_correction_stage,
+                                                refinement_stage,
+                                                scoring_stage],
                  do_alignment_proposals::Bool=true,
                  do_surgery_proposals::Bool=true,
                  trust_proposals::Bool=true,
@@ -1463,6 +1472,11 @@ function quiver2(seqstrings::Vector{String},
         end
     end
 
+    if length(enabled_stages) == 0
+        error("no stages enabled")
+    end
+    enabled_stages = Set(enabled_stages)
+
     sequences = PString[PString(s, p, bandwidth)
                         for (s, p) in zip(seqstrings, error_log_ps)]
 
@@ -1488,7 +1502,7 @@ function quiver2(seqstrings::Vector{String},
     if verbose > 1
         println(STDERR, "computing initial alignments")
     end
-    state = initial_state(consensus, seqs)
+    state = initial_state(consensus, seqs, minimum(enabled_stages))
     recompute_Bs = !(do_surgery_proposals && trust_proposals)
     recompute!(state, seqs, scores,
                ref_pstring, ref_scores,
@@ -1505,13 +1519,23 @@ function quiver2(seqstrings::Vector{String},
 
     n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(consensus)]
-    consensus_stages = [[], [], []]
+    consensus_stages = [[] for _ in 1:(Int(typemax(Stage)) - 1)]
     cons_pstring = PString("", Int8[], bandwidth)
 
     stage_iterations = zeros(Int, Int(typemax(Stage)) - 1)
-    stage_times = Float64[0, 0, 0]
+    stage_times = zeros(Float64, Int(typemax(Stage)) - 1)
     tic()
     for i in 1:max_iters
+        while state.stage < scoring_stage && !(state.stage in enabled_stages)
+            state.stage = next_stage(state.stage)
+            if verbose > 0
+                println("skipped to $(state.stage)")
+            end
+        end
+        if state.stage == scoring_stage
+            break
+        end
+
         push!(consensus_stages[Int(state.stage)], state.consensus)
         stage_iterations[Int(state.stage)] += 1
         old_consensus = state.consensus
@@ -1532,7 +1556,7 @@ function quiver2(seqstrings::Vector{String},
             if verbose > 1
                 println(STDERR, "  no candidates found")
             end
-            push!(n_proposals, zeros(Int, 3))
+            push!(n_proposals, zeros(Int, length(subtypes(Proposal))))
             stage_times[Int(state.stage)] = toq()
             tic()
             if state.stage == initial_stage
@@ -1543,7 +1567,7 @@ function quiver2(seqstrings::Vector{String},
                 state.stage = frame_correction_stage
 
                 # fix distant single indels right away
-                if fix_indels_stat
+                if frame_correction_stage in enabled_stages && fix_indels_stat
                     cons_errors = alignment_error_probs(length(state.consensus),
                                                         seqs, state.Amoves)
                     # ensure none are 0.0
@@ -1565,7 +1589,7 @@ function quiver2(seqstrings::Vector{String},
                         state.stage = refinement_stage
                     end
                 end
-                if state.stage == frame_correction_stage
+                if state.stage == frame_correction_stage && frame_correction_stage in enabled_stages
                     # estimate reference error rate
                     # TODO: use consensus estimated error rate here too
                     edit_dist = levenshtein(reference, state.consensus)
@@ -1711,16 +1735,18 @@ function quiver2(seqstrings::Vector{String},
                 "ref_error_rate" => ref_error_rate,
                 "stage_times" => stage_times,
                 )
-    # FIXME: recomputing for all sequences is costly, but using batch
-    # is less accurate
-    recompute!(state, seqs, scores, ref_pstring, ref_scores,
-               bandwidth_mult, true, true, verbose,
-               use_ref_for_qvs)
-    info["error_probs"] = estimate_probs(state, seqs, scores,
-                                         ref_pstring, ref_scores,
-                                         use_ref_for_qvs)
-    info["aln_error_probs"] = alignment_error_probs(length(state.consensus),
-                                                    seqs, state.Amoves)
+    if scoring_stage in enabled_stages
+        # FIXME: recomputing for all sequences is costly, but using batch
+        # is less accurate
+        recompute!(state, seqs, scores, ref_pstring, ref_scores,
+                   bandwidth_mult, true, true, verbose,
+                   use_ref_for_qvs)
+        info["error_probs"] = estimate_probs(state, seqs, scores,
+                                             ref_pstring, ref_scores,
+                                             use_ref_for_qvs)
+        info["aln_error_probs"] = alignment_error_probs(length(state.consensus),
+                                                        seqs, state.Amoves)
+    end
     return state.consensus, info
 end
 
