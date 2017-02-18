@@ -13,8 +13,8 @@ const OFFSETS = ([1, 1],  # sub
 function move_scores(t_base::DNANucleotide,
                      s_base::DNANucleotide,
                      seq_i::Int,
-                     error_log_p::Vector{Float64},
-                     match_log_p::Vector{Float64},
+                     error_log_p::Vector{ErrorLogProb},
+                     match_log_p::Vector{MatchLogProb},
                      scores::Scores;
                      match_mult::Float64=0.0)
     cur_i = max(seq_i, 1)
@@ -41,7 +41,7 @@ function move_scores(t_base::DNANucleotide,
 end
 
 function codon_move_scores(seq_i::Int,
-                           error_log_p::Vector{Float64},
+                           error_log_p::Vector{ErrorProb},
                            scores::Scores)
     # we're moving INTO seq_i. so need previous three
     start = max(1, seq_i-2)
@@ -54,11 +54,11 @@ function codon_move_scores(seq_i::Int,
     return codon_ins_score, codon_del_score
 end
 
-function update_helper(newcols::Array{Float64, 2},
-                       A::BandedArray{Float64},
+function update_helper(newcols::Array{Score, 2},
+                       A::BandedArray{Score},
                        i::Int, j::Int, acol::Int,
-                       move::DPMove, move_score::Float64,
-                       final_score::Float64, final_move::DPMove)
+                       move::DPMove, move_score::Score,
+                       final_score::Score, final_move::DPMove)
     offset = OFFSETS[Int(move)]
     prev_i = i - offset[1]
     prev_j = j - offset[2]
@@ -78,12 +78,12 @@ function update_helper(newcols::Array{Float64, 2},
     return final_score, final_move
 end
 
-function update(A::BandedArray{Float64},
+function update(A::BandedArray{Score},
                 i::Int, j::Int,
                 s_base::DNANucleotide, t_base::DNANucleotide,
                 pseq::RifrafSequence,
                 scores::Scores;
-                newcols::Array{Float64, 2}=Array(Float64, (0, 0)),
+                newcols::Array{Score, 2}=Array(Score, (0, 0)),
                 acol=-1, trim=false,
                 skew_matches=false)
     result = (-Inf, dp_none)
@@ -134,7 +134,7 @@ function forward_moves(t::DNASeq, s::RifrafSequence,
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
-    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), s.bandwidth)
+    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth)
     moves = BandedArray(Int, result.shape, s.bandwidth)
     moves[1, 1] = Int(dp_none)
     nrows, ncols = size(result)
@@ -163,7 +163,7 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 """
 function forward(t::DNASeq, s::RifrafSequence,
                  scores::Scores)
-    result = BandedArray(Float64, (length(s) + 1, length(t) + 1), s.bandwidth)
+    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth)
     nrows, ncols = size(result)
     for j = 1:ncols
         start, stop = row_range(result, j)
@@ -178,7 +178,7 @@ function forward(t::DNASeq, s::RifrafSequence,
             result[i, j] = x[1]
         end
     end
-    return result::BandedArray{Float64}
+    return result::BandedArray{Score}
 end
 
 

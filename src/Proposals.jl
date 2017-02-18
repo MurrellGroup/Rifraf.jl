@@ -28,7 +28,7 @@ end
 
 immutable CandProposal
     proposal::Proposal
-    score::Float64
+    score::Score
 end
 
 """

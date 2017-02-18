@@ -1,19 +1,19 @@
 immutable ErrorModel
-    mismatch::Float64
-    insertion::Float64
-    deletion::Float64
-    codon_insertion::Float64
-    codon_deletion::Float64
+    mismatch::ErrorProb
+    insertion::ErrorProb
+    deletion::ErrorProb
+    codon_insertion::ErrorProb
+    codon_deletion::ErrorProb
 end
 
-function ErrorModel(mismatch::Float64,
-                    insertion::Float64,
-                    deletion::Float64)
+function ErrorModel(mismatch::ErrorProb,
+                    insertion::ErrorProb,
+                    deletion::ErrorProb)
     return ErrorModel(mismatch, insertion, deletion, 0.0, 0.0)
 end
 
 function normalize(errors::ErrorModel)
-    args = Float64[errors.mismatch,
+    args = ErrorProb[errors.mismatch,
                    errors.insertion,
                    errors.deletion,
                    errors.codon_insertion,
@@ -22,23 +22,24 @@ function normalize(errors::ErrorModel)
     return ErrorModel(m, i, d, ci, cd)
 end
 
+
 immutable Scores
-    mismatch::Float64
-    insertion::Float64
-    deletion::Float64
-    codon_insertion::Float64
-    codon_deletion::Float64
+    mismatch::Score
+    insertion::Score
+    deletion::Score
+    codon_insertion::Score
+    codon_deletion::Score
 end
 
 function Scores(errors::ErrorModel;
-                mismatch::Float64=0.0,
-                insertion::Float64=0.0,
-                deletion::Float64=0.0)
-    args = Float64[errors.mismatch,
-                   errors.insertion,
-                   errors.deletion,
-                   errors.codon_insertion,
-                   errors.codon_deletion]
+                mismatch::Score=0.0,
+                insertion::Score=0.0,
+                deletion::Score=0.0)
+    args = Score[errors.mismatch,
+                 errors.insertion,
+                 errors.deletion,
+                 errors.codon_insertion,
+                 errors.codon_deletion]
     m, i, d, ci, cd = log10(normalize(args))
     return Scores(m + mismatch,
                   i + insertion,

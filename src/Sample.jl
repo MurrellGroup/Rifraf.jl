@@ -32,7 +32,7 @@ const MAX_PROB = 0.3
 
 
 """Add independent noise to each position in vector."""
-function jitter_phred(x::Vector{Float64},
+function jitter_phred(x::Vector{ErrorProb},
                       phred_std::Float64,
                       mult::Float64=1.0)
     error = randn(length(x)) * phred_std / 10.0
@@ -45,7 +45,7 @@ end
 
 
 function hmm_sample(sequence::DNASeq,
-                    error_p::Vector{Float64},
+                    error_p::Vector{ErrorProb},
                     errors::ErrorModel;
                     mutation_mult::Float64=1.0,
                     correct_mult::Float64=1.0)
@@ -72,7 +72,7 @@ function hmm_sample(sequence::DNASeq,
         del_ratio = errors.codon_deletion
     end
     final_seq = []
-    final_error_p = Float64[]
+    final_error_p = ErrorProb[]
     seqbools = Bool[]
     tbools = Bool[]
     skip = 0
@@ -142,7 +142,7 @@ end
 
 
 function sample_reference(reference::DNASeq,
-                          error_rate::Float64,
+                          error_rate::ErrorProb,
                           errors::ErrorModel)
     errors = normalize(errors)
     if errors.insertion > 0.0 || errors.deletion > 0.0
@@ -160,7 +160,7 @@ reported_error_std: standard deviation of reported phred values
 
 """
 function sample_from_template(template::DNASeq,
-                              template_error_p::Vector{Float64},
+                              template_error_p::Vector{ErrorProb},
                               errors::ErrorModel,
                               phred_scale::Float64,
                               actual_std::Float64,
@@ -198,9 +198,9 @@ end
 
 function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                         n_diffs::Int,
-                        ref_error_rate::Float64,
+                        ref_error_rate::ErrorProb,
                         ref_errors::ErrorModel,
-                        error_rate::Float64,
+                        error_rate::ErrorProb,
                         alpha::Float64,
                         phred_scale::Float64,
                         actual_std::Float64,
@@ -227,7 +227,7 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
     template_error_p = rand(error_dist, len) * (MAX_PROB - MIN_PROB) + MIN_PROB
 
     seqs = DNASeq[]
-    actual_error_ps = Vector{Float64}[]
+    actual_error_ps = Vector{ErrorProb}[]
     phreds = Vector{Int8}[]
     seqbools = Vector{Bool}[]
     tbools = Vector{Bool}[]
@@ -277,9 +277,9 @@ seq_error_ratios: sequence error model
 
 """
 function sample(nseqs::Int, len::Int,
-                ref_error_rate::Float64,
+                ref_error_rate::ErrorProb,
                 ref_errors::ErrorModel,
-                error_rate::Float64,
+                error_rate::ErrorProb,
                 alpha::Float64,
                 phred_scale::Float64,
                 actual_std::Float64,

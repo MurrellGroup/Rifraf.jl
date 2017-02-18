@@ -27,13 +27,16 @@ import Rifraf.sample_from_template,
        Rifraf.surgery_proposals,
        Rifraf.align_moves,
        Rifraf.moves_to_aligned_seqs,
-       Rifraf.alignment_error_probs
+       Rifraf.alignment_error_probs,
+       Rifraf.ErrorProb,
+       Rifraf.ErrorLogProb,
+       Rifraf.MatchLogProb
 
 srand(1234)
 
 
-function inv_log10(logp::Float64)
-    log10(1.0 - exp10(logp))
+function inv_log10(logvals)
+    log10(1.0 - exp10(logvals))
 end
 
 function check_all_cols(A, B, codon_moves)
@@ -207,7 +210,7 @@ end
     function test_random_proposal(proposal, template_len)
         template = random_seq(template_len)
 
-        template_error_p = Float64[0.1 for i=1:length(template)]
+        template_error_p = ErrorProb[0.1 for i=1:length(template)]
         codon_moves = rand([true, false])
         if codon_moves
             local_errors = ErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
@@ -226,7 +229,7 @@ end
                                         phred_scale,
                                         log_actual_error_std,
                                         log_reported_error_std)
-        log_p = Float64[Float64(q) / (-10.0) for q in phreds]
+        log_p = ErrorLogProb[float(q) / (-10.0) for q in phreds]
         bandwidth = max(5 * abs(length(template) - length(seq)), 30)
         pseq = RifrafSequence(seq, log_p, bandwidth)
 
@@ -238,7 +241,7 @@ end
         A = forward(template, pseq, local_scores)
         B = backward(template, pseq, local_scores)
         check_all_cols(A, B, codon_moves)
-        newcols = zeros(Float64, size(A)[1], 6)
+        newcols = zeros(size(A)[1], 6)
         score = seq_score_proposal(proposal, A, B, template, pseq,
                                    local_scores, newcols)
         @test_approx_eq_eps score Anew[end, end] 0.1
@@ -296,7 +299,7 @@ end
     ref_scores = Scores(ref_errors)
 
     ref = DNASeq("CGGCGATTT")
-    consensus_errors = Float64[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
+    consensus_errors = ErrorLogProb[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
     consensus = RifrafSequence(DNASeq("CTGCCGA"), consensus_errors, 10)
 
     proposals = single_indel_proposals(ref, consensus, ref_scores)
@@ -312,7 +315,7 @@ end
                                   do_subs::Bool=true,
                                   do_indels::Bool=true)
         bandwidth = 5
-        rseq = RifrafSequence(DNASeq(), Float64[], bandwidth)
+        rseq = RifrafSequence(DNASeq(), ErrorLogProb[], bandwidth)
         mult = 2
         errors = ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0)
         scores = Scores(errors)
@@ -320,7 +323,7 @@ end
         ref_scores = Scores(ref_errors)
 
         if length(lps) == 0
-            lps =  Vector{Float64}[fill(-9.0, length(s)) for s in seqs]
+            lps =  Vector{ErrorLogProb}[fill(-9.0, length(s)) for s in seqs]
         end
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
@@ -382,9 +385,9 @@ end
         seqs = [DNASeq("GAA"),
                 DNASeq("AA"),
                 DNASeq("AA")]
-        lps = Vector{Float64}[[-10.0, -5.0, -5.0],
-                              [-3.0, -5.0],
-                              [-3.0, -50]]
+        lps = Vector{ErrorLogProb}[[-10.0, -5.0, -5.0],
+                                   [-3.0, -5.0],
+                                   [-3.0, -50]]
         expected = [Insertion(0, DNA_G)]
         _test_fast_proposals(consensus, seqs, lps, expected)
     end
@@ -392,9 +395,9 @@ end
         # test that deletions get pushed
         consensus = DNASeq("CCGTAAAC")
         seqs = [DNASeq("CGTAAAC"), DNASeq("CCGTAAAC"), DNASeq("CGTAAAC")]
-        lps = Vector{Float64}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
-                              [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
-                              [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
+        lps = Vector{ErrorLogProb}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
+                                   [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
+                                   [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
         expected = [Deletion(2)]
         _test_fast_proposals(consensus, seqs, lps, expected,
                              do_alignment=false, do_surgery=true)
@@ -487,7 +490,7 @@ end
     function _test_candidate_scores(template, pseqs, scores, expected)
         ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
         state = initial_state(template, pseqs)
-        rseq = RifrafSequence(DNASeq(), Float64[], 1)
+        rseq = RifrafSequence(DNASeq(), ErrorLogProb[], 1)
         redo_as = true
         redo_bs = true
         use_ref = false
@@ -515,7 +518,7 @@ end
     @testset "substitutions" begin
         template = DNASeq("TTT")
         seqs = [DNASeq("TAT")]
-        lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
+        lps =  Vector{ErrorLogProb}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                                for (s, p) in zip(seqs, lps)]
@@ -537,7 +540,7 @@ end
     @testset "deletion" begin
         template = DNASeq("TTT")
         seqs = [DNASeq("TT")]
-        lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
+        lps =  Vector{ErrorLogProb}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                                for (s, p) in zip(seqs, lps)]
@@ -552,7 +555,7 @@ end
         # test insertion
         template = DNASeq("TT")
         seqs = [DNASeq("TAT")]
-        lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
+        lps =  Vector{ErrorLogProb}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                                for (s, p) in zip(seqs, lps)]
@@ -625,9 +628,9 @@ end
     seqs = [DNASeq("CGAC"),
             DNASeq("CGAC"),
             DNASeq("CGAC")]
-    lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0],
-                          [-9.0, -9.0, -9.0, -9.0],
-                          [-9.0, -9.0, -9.0, -9.0]]
+    lps = Vector{ErrorLogProb}[[-9.0, -9.0, -9.0, -9.0],
+                               [-9.0, -9.0, -9.0, -9.0],
+                               [-9.0, -9.0, -9.0, -9.0]]
     bandwidth = 5
     mult = 2
     errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
@@ -637,7 +640,7 @@ end
 
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), Float64[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), ErrorLogProb[], bandwidth)
     state = initial_state(template, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     probs = estimate_probs(state, pseqs, scores, rseq, scores, false)
@@ -659,12 +662,12 @@ end
     ref_errors = ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Scores(ref_errors)
 
-    lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
-                          [-9.0, -9.0, -9.0, -9.0, -9.0],
-                          [-9.0, -9.0, -9.0, -9.0, -9.0]]
+    lps = Vector{ErrorLogProb}[[-9.0, -9.0, -9.0, -9.0, -9.0],
+                               [-9.0, -9.0, -9.0, -9.0, -9.0],
+                               [-9.0, -9.0, -9.0, -9.0, -9.0]]
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), Float64[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), ErrorLogProb[], bandwidth)
     state = initial_state(template, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     probs = estimate_probs(state, pseqs, scores, rseq, scores, false)
@@ -691,7 +694,7 @@ end
     lps = map(log10, ps)
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), Float64[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), ErrorLogProb[], bandwidth)
     state = initial_state(consensus, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
 
