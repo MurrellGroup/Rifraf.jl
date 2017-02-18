@@ -59,7 +59,7 @@ end
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
         A = Model.forward(template, pseq, scores)
         # transpose because of column-major order
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
@@ -76,7 +76,7 @@ end
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
         B = Model.backward(template, pseq, scores)
         expected = transpose(reshape([[lp + scores.mismatch + match,
                                        lp + scores.insertion + match, 0.0];
@@ -95,7 +95,7 @@ end
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
         A = Model.forward(template, pseq, scores)
         B = Model.backward(template, pseq, scores)
         check_all_cols(A, B, false)
@@ -113,7 +113,7 @@ end
             seq = dna"GTCG"
             log_p = [-1.2, -0.8, -0.7, -1.0]
             bandwidth = 5
-            pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+            pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
             local_scores = Model.Scores(Model.ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
             A = Model.forward(template, pseq, local_scores)
             B = Model.backward(template, pseq, local_scores)
@@ -125,7 +125,7 @@ end
             seq = dna"GACAC"
             log_p = [-1.1, -1.1, -0.4, -1.0, -0.7]
             bandwidth = 5
-            pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+            pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
             local_scores = Model.Scores(Model.ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
             A = Model.forward(template, pseq, local_scores)
             B = Model.backward(template, pseq, local_scores)
@@ -138,7 +138,7 @@ end
         seq = dna"ATA"
         bandwidth = 10
         log_p = [-5.0, -1.0, -6.0]
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
         A = Model.forward(template, pseq, scores)
         B = Model.backward(template, pseq, scores)
         score = (inv_log10(log_p[1]) +
@@ -153,7 +153,7 @@ end
         seq = dna"GAAG"
         bandwidth = 10
         log_p = [-5.0, -2.0, -1.0, -6.0]
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
         A = Model.forward(template, pseq, scores)
         B = Model.backward(template, pseq, scores)
         score = (inv_log10(log_p[1]) +
@@ -170,7 +170,7 @@ end
         seq = dna"AA"
         bandwidth = 10
         log_p = [-2.0, -3.0]
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
         A = Model.forward(template, pseq, scores)
         B = Model.backward(template, pseq, scores)
         score = (inv_log10(log_p[1]) +
@@ -209,7 +209,7 @@ end
                                         log_reported_error_std)
         log_p = Float64[Float64(q) / (-10.0) for q in phreds]
         bandwidth = max(5 * abs(length(template) - length(seq)), 30)
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
 
         new_template = Proposals.apply_proposal(template, proposal)
         Anew = Model.forward(new_template, pseq, local_scores)
@@ -257,7 +257,7 @@ end
     reference = dna"AAAGGGTTT"
     ref_log_p = fill(log10(0.01), length(reference))
     bandwidth = 6
-    rseq = Quiver2.Model.PString(reference, ref_log_p, bandwidth)
+    rseq = Quiver2.Model.RifrafSequence(reference, ref_log_p, bandwidth)
     local_errors = Model.normalize(Model.ErrorModel(2.0, 0.5, 0.5, 1.0, 1.0))
     local_scores = Model.Scores(local_errors)
 
@@ -280,7 +280,7 @@ end
 
     ref = dna"CGGCGATTT"
     consensus_errors = Float64[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
-    consensus = Quiver2.Model.PString(dna"CTGCCGA", consensus_errors, 10)
+    consensus = Quiver2.Model.RifrafSequence(dna"CTGCCGA", consensus_errors, 10)
 
     proposals = Quiver2.Model.single_indel_proposals(ref, consensus, ref_scores)
     expected = [Quiver2.Proposals.Deletion(4)]
@@ -295,7 +295,7 @@ end
                                   do_subs::Bool=true,
                                   do_indels::Bool=true)
         bandwidth = 5
-        rseq = Quiver2.Model.PString(DNASequence(), Float64[], bandwidth)
+        rseq = Quiver2.Model.RifrafSequence(DNASequence(), Float64[], bandwidth)
         mult = 2
         errors = Model.ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0)
         scores = Model.Scores(errors)
@@ -306,7 +306,7 @@ end
             lps =  Vector{Float64}[fill(-9.0, length(s)) for s in seqs]
         end
 
-        pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+        pseqs = Quiver2.Model.RifrafSequence[Quiver2.Model.RifrafSequence(s, p, bandwidth)
                                       for (s, p) in zip(seqs, lps)]
         state = Quiver2.Model.initial_state(consensus, pseqs)
         Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
@@ -469,7 +469,7 @@ end
     function _test_candidate_scores(template, pseqs, scores, expected)
         ref_scores = Model.Scores(Model.ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
         state = Quiver2.Model.initial_state(template, pseqs)
-        rseq = Quiver2.Model.PString(DNASequence(), Float64[], 1)
+        rseq = Quiver2.Model.RifrafSequence(DNASequence(), Float64[], 1)
         redo_as = true
         redo_bs = true
         use_ref = false
@@ -499,7 +499,7 @@ end
         seqs = [dna"TAT"]
         lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
-        pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+        pseqs = Quiver2.Model.RifrafSequence[Quiver2.Model.RifrafSequence(s, p, bandwidth)
                                       for (s, p) in zip(seqs, lps)]
         scores = Model.Scores(Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
 
@@ -521,7 +521,7 @@ end
         seqs = [dna"TT"]
         lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
-        pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+        pseqs = Quiver2.Model.RifrafSequence[Quiver2.Model.RifrafSequence(s, p, bandwidth)
                                       for (s, p) in zip(seqs, lps)]
         scores = Model.Scores(Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
 
@@ -536,7 +536,7 @@ end
         seqs = [dna"TAT"]
         lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
-        pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+        pseqs = Quiver2.Model.RifrafSequence[Quiver2.Model.RifrafSequence(s, p, bandwidth)
                                       for (s, p) in zip(seqs, lps)]
         scores = Model.Scores(Model.ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
 
@@ -617,9 +617,9 @@ end
     ref_errors = Model.ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Model.Scores(ref_errors)
 
-    pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+    pseqs = Quiver2.Model.RifrafSequence[Quiver2.Model.RifrafSequence(s, p, bandwidth)
                                   for (s, p) in zip(seqs, lps)]
-    rseq = Quiver2.Model.PString(DNASequence(), Float64[], bandwidth)
+    rseq = Quiver2.Model.RifrafSequence(DNASequence(), Float64[], bandwidth)
     state = Quiver2.Model.initial_state(template, pseqs)
     Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     probs = Quiver2.Model.estimate_probs(state, pseqs, scores,
@@ -645,9 +645,9 @@ end
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
-    pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+    pseqs = Quiver2.Model.RifrafSequence[Quiver2.Model.RifrafSequence(s, p, bandwidth)
                                   for (s, p) in zip(seqs, lps)]
-    rseq = Quiver2.Model.PString(DNASequence(), Float64[], bandwidth)
+    rseq = Quiver2.Model.RifrafSequence(DNASequence(), Float64[], bandwidth)
     state = Quiver2.Model.initial_state(template, pseqs)
     Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     probs = Quiver2.Model.estimate_probs(state, pseqs, scores,
@@ -673,9 +673,9 @@ end
           [0.2, 0.1, 0.1],
           [0.2, 0.1, 0.1, 0.1]]
     lps = map(log10, ps)
-    pseqs = Quiver2.Model.PString[Quiver2.Model.PString(s, p, bandwidth)
+    pseqs = Quiver2.Model.RifrafSequence[Quiver2.Model.RifrafSequence(s, p, bandwidth)
                                   for (s, p) in zip(seqs, lps)]
-    rseq = Quiver2.Model.PString(DNASequence(), Float64[], bandwidth)
+    rseq = Quiver2.Model.RifrafSequence(DNASequence(), Float64[], bandwidth)
     state = Quiver2.Model.initial_state(consensus, pseqs)
     Quiver2.Model.recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
 
@@ -695,7 +695,7 @@ end
         seq = dna"AAA"
         bandwidth = 10
         log_p = [-2.0, -3.0, -3.0]
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
         moves = Model.align_moves(template, pseq, scores)
         t, s = Model.moves_to_aligned_seqs(moves, template, seq)
         @test t == dna"ATAA"
@@ -707,7 +707,7 @@ end
         seq = dna"AAACCCTT"
         bandwidth = 10
         log_p = fill(log10(0.1), length(seq))
-        pseq = Quiver2.Model.PString(seq, log_p, bandwidth)
+        pseq = Quiver2.Model.RifrafSequence(seq, log_p, bandwidth)
         moves = Model.align_moves(template, pseq, scores)
         t, s = Model.moves_to_aligned_seqs(moves, template, seq)
         @test t[end-1:end] == dna"TT"

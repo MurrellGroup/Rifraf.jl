@@ -37,13 +37,13 @@ end
 error probabilities.
 
 """
-type PString
+type RifrafSequence
     seq::DNASequence
     error_log_p::Vector{Float64}
     match_log_p::Vector{Float64}
     bandwidth::Int
 
-    function PString(seq::DNASequence, error_log_p::Vector{Float64}, bandwidth::Int)
+    function RifrafSequence(seq::DNASequence, error_log_p::Vector{Float64}, bandwidth::Int)
         if bandwidth < 1
             error("bandwidth must be positive")
         end
@@ -66,17 +66,17 @@ type PString
     end
 end
 
-function PString(seq::DNASequence, phreds::Vector{Int8}, bandwidth::Int)
+function RifrafSequence(seq::DNASequence, phreds::Vector{Int8}, bandwidth::Int)
     error_log_p = phred_to_log_p(phreds)
-    return PString(seq, error_log_p, bandwidth)
+    return RifrafSequence(seq, error_log_p, bandwidth)
 end
 
-function length(s::PString)
+function length(s::RifrafSequence)
     return length(s.seq)
 end
 
-function reverse(s::PString)
-    return PString(reverse(s.seq), reverse(s.error_log_p), s.bandwidth)
+function reverse(s::RifrafSequence)
+    return RifrafSequence(reverse(s.seq), reverse(s.error_log_p), s.bandwidth)
 end
 
 
@@ -247,7 +247,7 @@ end
 function update(A::BandedArray{Float64},
                 i::Int, j::Int,
                 s_base::DNANucleotide, t_base::DNANucleotide,
-                pseq::PString,
+                pseq::RifrafSequence,
                 scores::Scores;
                 newcols::Array{Float64, 2}=empty_array,
                 acol=-1, trim=false,
@@ -291,7 +291,7 @@ end
 
 
 """Does backtracing to find best alignment."""
-function forward_moves(t::DNASequence, s::PString,
+function forward_moves(t::DNASequence, s::RifrafSequence,
                        scores::Scores;
                        trim::Bool=false,
                        skew_matches::Bool=false)
@@ -325,7 +325,7 @@ end
 F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
-function forward(t::DNASequence, s::PString,
+function forward(t::DNASequence, s::RifrafSequence,
                  scores::Scores)
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), s.bandwidth)
     nrows, ncols = size(result)
@@ -350,7 +350,7 @@ end
 B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
-function backward(t::DNASequence, s::PString,
+function backward(t::DNASequence, s::RifrafSequence,
                   scores::Scores)
     result = forward(reverse(t), reverse(s), scores)
     return flip(result)
@@ -413,7 +413,7 @@ const boffsets = Dict(Substitution => 2,
 
 function score_nocodon(proposal::Proposal,
                        A::BandedArray{Float64}, B::BandedArray{Float64},
-                       pseq::PString,
+                       pseq::RifrafSequence,
                        scores::Scores,
                        newcols::Array{Float64, 2})
     t = typeof(proposal)
@@ -460,7 +460,7 @@ end
 function seq_score_proposal(proposal::Proposal,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
                             consensus::DNASequence,
-                            pseq::PString,
+                            pseq::RifrafSequence,
                             scores::Scores,
                             newcols::Array{Float64, 2})
     codon_moves = (scores.codon_insertion > -Inf ||
@@ -570,10 +570,10 @@ end
 
 function score_proposal(m::Proposal,
                         state::State,
-                        sequences::Vector{PString},
+                        sequences::Vector{RifrafSequence},
                         scores::Scores,
                         use_ref::Bool,
-                        reference::PString,
+                        reference::RifrafSequence,
                         ref_scores::Scores,
                         newcols::Array{Float64, 2})
     score = 0.0
@@ -591,7 +591,7 @@ end
 
 function all_proposals(stage::Stage,
                        consensus::DNASequence,
-                       sequences::Vector{PString},
+                       sequences::Vector{RifrafSequence},
                        Amoves::Vector{BandedArray{Int}},
                        scores::Scores,
                        indel_correction_only::Bool)
@@ -627,7 +627,7 @@ end
 
 
 function moves_to_proposals(moves::Vector{DPMove},
-                            consensus::DNASequence, seq::PString)
+                            consensus::DNASequence, seq::RifrafSequence)
     proposals = Proposal[]
     i, j = (0, 0)
     for move in moves
@@ -654,7 +654,7 @@ end
 
 """Only get proposals that appear in at least one alignment"""
 function alignment_proposals(state::State,
-                             sequences::Vector{PString},
+                             sequences::Vector{RifrafSequence},
                              do_subs::Bool,
                              do_indels::Bool)
     result = Set{Proposal}()
@@ -670,7 +670,7 @@ function alignment_proposals(state::State,
 end
 
 function best_surrounding_ins_bases(moves::Vector{DPMove},
-                                    seq::PString,
+                                    seq::RifrafSequence,
                                     aln_idx::Int, seq_idx::Int)
     # TODO: do not reallocate for each call
     ins_bases = Dict{DNANucleotide, Float64}()
@@ -703,7 +703,7 @@ end
 
 function surrounding_del_bases(moves::Vector{DPMove},
                                consensus::DNASequence,
-                               seq::PString, aln_idx::Int,
+                               seq::RifrafSequence, aln_idx::Int,
                                cons_idx::Int, seq_idx::Int)
     result = Dict{DNANucleotide, Tuple{Float64, Float64}}()
 
@@ -746,7 +746,7 @@ function surrounding_del_bases(moves::Vector{DPMove},
 end
 
 
-function seq_posn_scores(seq::PString, seq_idx::Int, scores::Scores)
+function seq_posn_scores(seq::RifrafSequence, seq_idx::Int, scores::Scores)
     # TODO: ensure these are never used
     match_score = -Inf
     error_score = -Inf
@@ -770,7 +770,7 @@ function update_deltas(sub_deltas::Array{Float64, 2},
                        del_deltas::Array{Float64, 1},
                        ins_deltas::Array{Float64, 2},
                        consensus::DNASequence,
-                       seq::PString, moves::Vector{DPMove},
+                       seq::RifrafSequence, moves::Vector{DPMove},
                        scores::Scores,
                        do_subs::Bool, do_indels::Bool)
     # FIXME: modularize this function and test each part
@@ -941,7 +941,7 @@ end
 
 """Use model surgery heuristic to get proposals with positive score deltas."""
 function surgery_proposals(state::State,
-                           sequences::Vector{PString},
+                           sequences::Vector{RifrafSequence},
                            scores::Scores,
                            do_subs::Bool,
                            do_indels::Bool)
@@ -985,9 +985,9 @@ function surgery_proposals(state::State,
 end
 
 function get_candidate_proposals(state::State,
-                                 sequences::Vector{PString},
+                                 sequences::Vector{RifrafSequence},
                                  scores::Scores,
-                                 reference::PString,
+                                 reference::RifrafSequence,
                                  ref_scores::Scores,
                                  do_alignment_proposals::Bool,
                                  do_surgery_proposals::Bool,
@@ -1134,7 +1134,7 @@ function moves_to_indices(moves::Vector{DPMove},
     return result
 end
 
-function align_moves(t::DNASequence, s::PString,
+function align_moves(t::DNASequence, s::RifrafSequence,
                      scores::Scores;
                      trim::Bool=false,
                      skew_matches::Bool=false)
@@ -1144,7 +1144,7 @@ function align_moves(t::DNASequence, s::PString,
 end
 
 
-function align(t::DNASequence, s::PString,
+function align(t::DNASequence, s::RifrafSequence,
                scores::Scores;
                trim::Bool=false,
                skew_matches::Bool=false)
@@ -1158,7 +1158,7 @@ function align(t::DNASequence, s::DNASequence, phreds::Vector{Int8},
                bandwidth::Int;
                trim::Bool=false,
                skew_matches::Bool=false)
-    moves = align_moves(t, PString(s, phreds, bandwidth), scores,
+    moves = align_moves(t, RifrafSequence(s, phreds, bandwidth), scores,
                         trim=trim, skew_matches=skew_matches)
     return moves_to_aligned_seqs(moves, t, s)
 end
@@ -1170,7 +1170,7 @@ end
 
 
 function has_single_indels(consensus::DNASequence,
-                           reference::PString,
+                           reference::RifrafSequence,
                            ref_scores::Scores)
     has_right_length = length(consensus) % codon_length == 0
     moves = align_moves(consensus, reference, ref_scores)
@@ -1183,7 +1183,7 @@ end
 
 
 function single_indel_proposals(reference::DNASequence,
-                                consensus::PString,
+                                consensus::RifrafSequence,
                                 ref_scores::Scores)
     moves = align_moves(reference, consensus, ref_scores;
                         skew_matches=true)
@@ -1210,7 +1210,7 @@ function single_indel_proposals(reference::DNASequence,
 end
 
 
-function initial_state(consensus::DNASequence, seqs::Vector{PString},
+function initial_state(consensus::DNASequence, seqs::Vector{RifrafSequence},
                        stage::Stage=initial_stage)
     if length(consensus) == 0
         # choose highest-quality sequence
@@ -1231,8 +1231,8 @@ function initial_state(consensus::DNASequence, seqs::Vector{PString},
 end
 
 
-function recompute!(state::State, seqs::Vector{PString},
-                    scores::Scores, reference::PString,
+function recompute!(state::State, seqs::Vector{RifrafSequence},
+                    scores::Scores, reference::RifrafSequence,
                     ref_scores::Scores, bandwidth_mult::Int,
                     recompute_As::Bool, recompute_Bs::Bool,
                     verbose::Int, use_ref_for_qvs::Bool)
@@ -1296,9 +1296,9 @@ end
 
 
 function estimate_probs(state::State,
-                        sequences::Vector{PString},
+                        sequences::Vector{RifrafSequence},
                         scores::Scores,
-                        reference::PString,
+                        reference::RifrafSequence,
                         ref_scores::Scores,
                         use_ref_for_qvs::Bool)
     # `sub_scores[i]` gives the following log probabilities
@@ -1385,7 +1385,7 @@ that aligned to the consensus base.
 
 """
 function alignment_error_probs(tlen::Int,
-                               seqs::Vector{PString},
+                               seqs::Vector{RifrafSequence},
                                Amoves::Vector{BandedArray{Int}})
     # FIXME: incorporate scores
     # FIXME: account for indels
@@ -1477,13 +1477,13 @@ function quiver2(seqstrings::Vector{DNASequence},
     end
     enabled_stages = Set(enabled_stages)
 
-    sequences = PString[PString(s, p, bandwidth)
+    sequences = RifrafSequence[RifrafSequence(s, p, bandwidth)
                         for (s, p) in zip(seqstrings, error_log_ps)]
 
     # will need to update after initial stage
     ref_error_rate = 1.0
     ref_error_log_p = fill(log10(ref_error_rate), length(reference))
-    ref_pstring = PString(reference, ref_error_log_p, bandwidth)
+    ref_pstring = RifrafSequence(reference, ref_error_log_p, bandwidth)
 
     if max_iters < 1
         error("invalid max iters: $max_iters")
@@ -1520,7 +1520,7 @@ function quiver2(seqstrings::Vector{DNASequence},
     n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(consensus)]
     consensus_stages = [[] for _ in 1:(Int(typemax(Stage)) - 1)]
-    cons_pstring = PString(DNASequence(), Int8[], bandwidth)
+    cons_pstring = RifrafSequence(DNASequence(), Int8[], bandwidth)
 
     stage_iterations = zeros(Int, Int(typemax(Stage)) - 1)
     stage_times = zeros(Float64, Int(typemax(Stage)) - 1)
@@ -1572,7 +1572,7 @@ function quiver2(seqstrings::Vector{DNASequence},
                                                         seqs, state.Amoves)
                     # ensure none are 0.0
                     cons_errors = [max(p, 1e-10) for p in cons_errors]
-                    cons_pstring = PString(state.consensus, log10(cons_errors), bandwidth)
+                    cons_pstring = RifrafSequence(state.consensus, log10(cons_errors), bandwidth)
                     indel_proposals = single_indel_proposals(reference, cons_pstring, ref_scores)
                     if verbose > 1
                         println(STDERR, "  fixing $(length(indel_proposals)) single indels")
@@ -1598,7 +1598,7 @@ function quiver2(seqstrings::Vector{DNASequence},
                     # needs to be < 0.5, otherwise matches aren't rewarded at all
                     ref_error_rate = min(max(ref_error_rate, 1e-10), 0.5)
                     ref_error_log_p = fill(log10(ref_error_rate), length(reference))
-                    ref_pstring = PString(reference, ref_error_log_p, bandwidth)
+                    ref_pstring = RifrafSequence(reference, ref_error_log_p, bandwidth)
                 end
             elseif state.stage == frame_correction_stage
                 if !has_single_indels(state.consensus, ref_pstring, ref_scores)
