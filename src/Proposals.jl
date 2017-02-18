@@ -1,5 +1,7 @@
 module Proposals
 
+using Bio.Seq
+
 export Proposal, Substitution, Insertion,
        Deletion, CandProposal,
        are_unambiguous, base_shift, apply_proposals,
@@ -9,12 +11,12 @@ abstract Proposal
 
 immutable Substitution <: Proposal
     pos::Int
-    base::Char
+    base::DNANucleotide
 end
 
 immutable Insertion <: Proposal
     pos::Int  # insert after this position
-    base::Char
+    base::DNANucleotide
 end
 
 immutable Deletion <: Proposal
@@ -45,7 +47,7 @@ Whether proposals can be applied in any order.
 - ensure only one insertion at every position
 
 """
-function are_unambiguous(ms::Vector{Proposal})
+function are_ambiguous(ms::Vector{Proposal})
     ins_positions = []
     other_positions = []
     for i in 1:length(ms)
@@ -59,27 +61,27 @@ function are_unambiguous(ms::Vector{Proposal})
     end
     ins_good = length(Set(ins_positions)) == length(ins_positions)
     others_good = length(Set(other_positions)) == length(other_positions)
-    return ins_good && others_good
+    return !ins_good || !others_good
 end
 
-function update_template(template::String,
+function apply_proposal(seq::DNASequence,
                          proposal::Substitution)
-    return string(template[1:(proposal.pos - 1)],
-                  proposal.base,
-                  template[(proposal.pos + 1):end])
+    return DNASequence(seq[1:(proposal.pos - 1)],
+                       DNASequence([proposal.base]),
+                       seq[(proposal.pos + 1):end])
 end
 
-function update_template(template::String,
+function apply_proposal(seq::DNASequence,
                          proposal::Insertion)
-    return string(template[1:(proposal.pos)],
-                  proposal.base,
-                  template[(proposal.pos+1):end])
+    return DNASequence(seq[1:(proposal.pos)],
+                       DNASequence([proposal.base]),
+                       seq[(proposal.pos+1):end])
 end
 
-function update_template(template::String,
+function apply_proposal(seq::DNASequence,
                          proposal::Deletion)
-    return string(template[1:(proposal.pos - 1)],
-                  template[(proposal.pos + 1):end])
+    return DNASequence(seq[1:(proposal.pos - 1)],
+                       seq[(proposal.pos + 1):end])
 end
 
 base_shift_dict = Dict(Insertion => 1,
@@ -96,15 +98,15 @@ end
 immutable AmbiguousProposalsError <: Exception end
 
 
-function apply_proposals(template::String,
+function apply_proposals(seq::DNASequence,
                          proposals::Vector{Proposal})
-    if !are_unambiguous(proposals)
+    if are_ambiguous(proposals)
         throw(AmbiguousProposalsError())
     end
     remaining = deepcopy(proposals)
     while length(remaining) > 0
         m = pop!(remaining)
-        template = update_template(template, m)
+        seq = apply_proposal(seq, m)
         shift = base_shift(m)
         for i in 1:length(remaining)
             m2 = remaining[i]
@@ -113,7 +115,7 @@ function apply_proposals(template::String,
             end
         end
     end
-    return template
+    return seq
 end
 
 end

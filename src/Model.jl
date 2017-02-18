@@ -38,12 +38,12 @@ error probabilities.
 
 """
 type PString
-    seq::String
+    seq::DNASequence
     error_log_p::Vector{Float64}
     match_log_p::Vector{Float64}
     bandwidth::Int
 
-    function PString(seq::String, error_log_p::Vector{Float64}, bandwidth::Int)
+    function PString(seq::DNASequence, error_log_p::Vector{Float64}, bandwidth::Int)
         if bandwidth < 1
             error("bandwidth must be positive")
         end
@@ -66,7 +66,7 @@ type PString
     end
 end
 
-function PString(seq::String, phreds::Vector{Int8}, bandwidth::Int)
+function PString(seq::DNASequence, phreds::Vector{Int8}, bandwidth::Int)
     error_log_p = phred_to_log_p(phreds)
     return PString(seq, error_log_p, bandwidth)
 end
@@ -145,7 +145,7 @@ const codon_length = 3
 
 type State
     score::Float64
-    consensus::String
+    consensus::DNASequence
     A_t::BandedArray{Float64}
     B_t::BandedArray{Float64}
     As::Vector{BandedArray{Float64}}
@@ -166,18 +166,18 @@ const offsets = ([1, 1],  # sub
                  [3, 0],  # codon insertion
                  [0, 3])  # codon deletion
 
-const bases = "ACGT"
-const bases_set = Set{Char}(bases)
-const baseints = Dict('A' => 1,
-                      'C' => 2,
-                      'G' => 3,
-                      'T' => 4,
+const bases = dna"ACGT"
+const bases_set = Set{DNANucleotide}(bases)
+const baseints = Dict(DNA_A => 1,
+                      DNA_C => 2,
+                      DNA_G => 3,
+                      DNA_T => 4,
                       )
 
 const empty_array = Array(Float64, (0, 0))
 
-function move_scores(t_base::Char,
-                     s_base::Char,
+function move_scores(t_base::DNANucleotide,
+                     s_base::DNANucleotide,
                      seq_i::Int,
                      error_log_p::Vector{Float64},
                      match_log_p::Vector{Float64},
@@ -246,7 +246,7 @@ end
 
 function update(A::BandedArray{Float64},
                 i::Int, j::Int,
-                s_base::Char, t_base::Char,
+                s_base::DNANucleotide, t_base::DNANucleotide,
                 pseq::PString,
                 scores::Scores;
                 newcols::Array{Float64, 2}=empty_array,
@@ -291,7 +291,7 @@ end
 
 
 """Does backtracing to find best alignment."""
-function forward_moves(t::String, s::PString,
+function forward_moves(t::DNASequence, s::PString,
                        scores::Scores;
                        trim::Bool=false,
                        skew_matches::Bool=false)
@@ -308,8 +308,8 @@ function forward_moves(t::String, s::PString,
             if i == 1 && j == 1
                 continue
             end
-            sbase = i > 1 ? s.seq[i-1] : 'X'
-            tbase = j > 1 ? t[j-1] : 'X'
+            sbase = i > 1 ? s.seq[i-1] : DNA_Gap
+            tbase = j > 1 ? t[j-1] : DNA_Gap
             x = update(result, i, j, sbase, tbase,
                        s, scores; trim=trim,
                        skew_matches=skew_matches)
@@ -325,7 +325,7 @@ end
 F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
-function forward(t::String, s::PString,
+function forward(t::DNASequence, s::PString,
                  scores::Scores)
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), s.bandwidth)
     nrows, ncols = size(result)
@@ -335,8 +335,8 @@ function forward(t::String, s::PString,
             if i == 1 && j == 1
                 continue
             end
-            sbase = i > 1 ? s.seq[i-1] : 'X'
-            tbase = j > 1 ? t[j-1] : 'X'
+            sbase = i > 1 ? s.seq[i-1] : DNA_Gap
+            tbase = j > 1 ? t[j-1] : DNA_Gap
             x = update(result, i, j, sbase, tbase,
                        s, scores)
             result[i, j] = x[1]
@@ -350,7 +350,7 @@ end
 B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
-function backward(t::String, s::PString,
+function backward(t::DNASequence, s::PString,
                   scores::Scores)
     result = forward(reverse(t), reverse(s), scores)
     return flip(result)
@@ -381,18 +381,18 @@ end
 end
 
 
-function get_sub_consensus(proposal::Proposal, seq::String,
+function get_sub_consensus(proposal::Proposal, seq::DNASequence,
                            next_posn::Int, n_after::Int)
     # next valid position in sequence after this proposal
     t = typeof(proposal)
     pos = proposal.pos
-    prefix = ""
+    prefix = DNASequence()
     stop = min(next_posn + n_after - 1, length(seq))
     suffix = seq[next_posn:stop]
     if t in (Substitution, Insertion)
-        prefix = string(proposal.base)
+        prefix = DNASequence([proposal.base])
     end
-    return string(prefix, suffix)
+    return DNASequence(prefix, suffix)
 end
 
 function seq_score_deletion(A::BandedArray{Float64}, B::BandedArray{Float64},
@@ -432,7 +432,7 @@ function score_nocodon(proposal::Proposal,
     # new base
     amin, amax = row_range(A, min(new_acol, ncols))
     for i in amin:amax
-        seq_base = i > 1 ? pseq.seq[i-1] : 'X'
+        seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
         x = update(A, i, new_acol,
                    seq_base, proposal.base,
                    pseq, scores;
@@ -459,7 +459,7 @@ end
 
 function seq_score_proposal(proposal::Proposal,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
-                            consensus::String,
+                            consensus::DNASequence,
                             pseq::PString,
                             scores::Scores,
                             newcols::Array{Float64, 2})
@@ -514,7 +514,7 @@ function seq_score_proposal(proposal::Proposal,
         range_col = min(acol + j, ncols)
         amin, amax = row_range(A, range_col)
         for i in amin:amax
-            seq_base = i > 1 ? pseq.seq[i-1] : 'X'
+            seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
             x = update(A, i, acol + j,
                        seq_base, sub_consensus[j],
                        pseq, scores;
@@ -590,7 +590,7 @@ end
 
 
 function all_proposals(stage::Stage,
-                       consensus::String,
+                       consensus::DNASequence,
                        sequences::Vector{PString},
                        Amoves::Vector{BandedArray{Int}},
                        scores::Scores,
@@ -627,7 +627,7 @@ end
 
 
 function moves_to_proposals(moves::Vector{DPMove},
-                            consensus::String, seq::PString)
+                            consensus::DNASequence, seq::PString)
     proposals = Proposal[]
     i, j = (0, 0)
     for move in moves
@@ -673,7 +673,7 @@ function best_surrounding_ins_bases(moves::Vector{DPMove},
                                     seq::PString,
                                     aln_idx::Int, seq_idx::Int)
     # TODO: do not reallocate for each call
-    ins_bases = Dict{Char, Float64}()
+    ins_bases = Dict{DNANucleotide, Float64}()
     search_idx = aln_idx - 1
     seq_search_idx = seq_idx - 1
     while search_idx >= 1 && moves[search_idx] == dp_ins
@@ -702,10 +702,10 @@ function best_surrounding_ins_bases(moves::Vector{DPMove},
 end
 
 function surrounding_del_bases(moves::Vector{DPMove},
-                               consensus::String,
+                               consensus::DNASequence,
                                seq::PString, aln_idx::Int,
                                cons_idx::Int, seq_idx::Int)
-    result = Dict{Char, Tuple{Float64, Float64}}()
+    result = Dict{DNANucleotide, Tuple{Float64, Float64}}()
 
     search_idx = aln_idx - 1
     cons_search_idx = cons_idx - 1
@@ -769,7 +769,7 @@ end
 function update_deltas(sub_deltas::Array{Float64, 2},
                        del_deltas::Array{Float64, 1},
                        ins_deltas::Array{Float64, 2},
-                       consensus::String,
+                       consensus::DNASequence,
                        seq::PString, moves::Vector{DPMove},
                        scores::Scores,
                        do_subs::Bool, do_indels::Bool)
@@ -786,12 +786,12 @@ function update_deltas(sub_deltas::Array{Float64, 2},
     # insertions that match consensus should *keep* getting pushed
     # deletions in a poly-base run should also get pushed
     deletion_score = seq.error_log_p[1] + scores.deletion
-    insertion_bases = Dict{Char, Float64}('A' => deletion_score,
-                                          'C' => deletion_score,
-                                          'G' => deletion_score,
-                                          'T' => deletion_score)
+    insertion_bases = Dict{DNANucleotide, Float64}(DNA_A => deletion_score,
+                                                   DNA_C => deletion_score,
+                                                   DNA_G => deletion_score,
+                                                   DNA_T => deletion_score)
 
-    del_base = '-'
+    del_base = DNA_Gap
     del_idx = 0
     pushed_del_score = -Inf
 
@@ -800,8 +800,8 @@ function update_deltas(sub_deltas::Array{Float64, 2},
     n_moves = length(moves)
     prev_del_score = -Inf
     for (aln_idx, move) in enumerate(moves)
-        cbase = '-'
-        sbase = '-'
+        cbase = DNA_Gap
+        sbase = DNA_Gap
         if move in (dp_match, dp_ins)
             seq_idx += 1
             sbase = seq.seq[seq_idx]
@@ -815,10 +815,10 @@ function update_deltas(sub_deltas::Array{Float64, 2},
         (match_score, error_score, mm_score, ins_score, del_score) = all_scores
 
         if do_indels
-            if del_base != '-' && del_base != cbase
+            if del_base != DNA_Gap && del_base != cbase
                 # handle pushed deletions
                 del_deltas[del_idx] += pushed_del_score
-                del_base = '-'
+                del_base = DNA_Gap
                 del_idx = 0
                 pushed_del_score = -Inf
             end
@@ -927,7 +927,7 @@ function update_deltas(sub_deltas::Array{Float64, 2},
     end
     if do_indels
         # handle deletion at end
-        if del_base != '-'
+        if del_base != DNA_Gap
             del_deltas[end] += pushed_del_score
         end
 
@@ -1079,10 +1079,10 @@ function band_tolerance(Amoves::BandedArray{Int})
     return dist
 end
 
-function moves_to_alignment_strings(moves::Vector{DPMove},
-                                    t::String, s::String)
-    aligned_t = Char[]
-    aligned_s = Char[]
+function moves_to_aligned_seqs(moves::Vector{DPMove},
+                               t::DNASequence, s::DNASequence)
+    aligned_t = DNASequence()
+    aligned_s = DNASequence()
     i, j = (0, 0)
     for move in moves
         (ii, jj) = offsets[Int(move)]
@@ -1092,20 +1092,20 @@ function moves_to_alignment_strings(moves::Vector{DPMove},
             push!(aligned_t, t[j])
             push!(aligned_s, s[i])
         elseif move == dp_ins
-            push!(aligned_t, '-')
+            push!(aligned_t, DNA_Gap)
             push!(aligned_s, s[i])
         elseif move == dp_del
             push!(aligned_t, t[j])
-            push!(aligned_s, '-')
+            push!(aligned_s, DNA_Gap)
         elseif move == dp_codon_ins
-            append!(aligned_t, ['-', '-', '-'])
+            append!(aligned_t, [DNA_Gap, DNA_Gap, DNA_Gap])
             append!(aligned_s, [s[i-2], s[i-1], s[i]])
         elseif move == dp_codon_del
             append!(aligned_t, [t[j-2], t[j-1], t[j]])
-            append!(aligned_s, ['-', '-', '-'])
+            append!(aligned_s, [DNA_Gap, DNA_Gap, DNA_Gap])
         end
     end
-    return string(aligned_t...), string(aligned_s...)
+    return aligned_t, aligned_s
 end
 
 
@@ -1134,7 +1134,7 @@ function moves_to_indices(moves::Vector{DPMove},
     return result
 end
 
-function align_moves(t::String, s::PString,
+function align_moves(t::DNASequence, s::PString,
                      scores::Scores;
                      trim::Bool=false,
                      skew_matches::Bool=false)
@@ -1144,32 +1144,32 @@ function align_moves(t::String, s::PString,
 end
 
 
-function align(t::String, s::PString,
+function align(t::DNASequence, s::PString,
                scores::Scores;
                trim::Bool=false,
                skew_matches::Bool=false)
     moves = align_moves(t, s, scores, trim=trim,
                         skew_matches=skew_matches)
-    return moves_to_alignment_strings(moves, t, s.seq)
+    return moves_to_aligned_seqs(moves, t, s.seq)
 end
 
-function align(t::String, s::String, phreds::Vector{Int8},
+function align(t::DNASequence, s::DNASequence, phreds::Vector{Int8},
                scores::Scores,
                bandwidth::Int;
                trim::Bool=false,
                skew_matches::Bool=false)
     moves = align_moves(t, PString(s, phreds, bandwidth), scores,
                         trim=trim, skew_matches=skew_matches)
-    return moves_to_alignment_strings(moves, t, s)
+    return moves_to_aligned_seqs(moves, t, s)
 end
 
 
-function base_consensus(d::Dict{Char, Float64})
+function base_consensus(d::Dict{DNANucleotide, Float64})
     return minimum((v, k) for (k, v) in d)[2]
 end
 
 
-function has_single_indels(consensus::String,
+function has_single_indels(consensus::DNASequence,
                            reference::PString,
                            ref_scores::Scores)
     has_right_length = length(consensus) % codon_length == 0
@@ -1182,7 +1182,7 @@ function has_single_indels(consensus::String,
 end
 
 
-function single_indel_proposals(reference::String,
+function single_indel_proposals(reference::DNASequence,
                                 consensus::PString,
                                 ref_scores::Scores)
     moves = align_moves(reference, consensus, ref_scores;
@@ -1210,7 +1210,7 @@ function single_indel_proposals(reference::String,
 end
 
 
-function initial_state(consensus::String, seqs::Vector{PString},
+function initial_state(consensus::DNASequence, seqs::Vector{PString},
                        stage::Stage=initial_stage)
     if length(consensus) == 0
         # choose highest-quality sequence
@@ -1371,7 +1371,7 @@ function estimate_point_probs(probs::EstErrorProbs)
 end
 
 
-function base_distribution(base::Char, lp, ilp)
+function base_distribution(base::DNANucleotide, lp, ilp)
     result = fill(lp - log10(3), 4)
     result[baseints[base]] = ilp
     return result
@@ -1413,11 +1413,11 @@ function alignment_error_probs(tlen::Int,
 end
 
 
-function quiver2(seqstrings::Vector{String},
+function quiver2(seqstrings::Vector{DNASequence},
                  error_log_ps::Vector{Vector{Float64}},
                  scores::Scores;
-                 consensus::String="",
-                 reference::String="",
+                 consensus::DNASequence=DNASequence(),
+                 reference::DNASequence=DNASequence(),
                  ref_scores::Scores=default_ref_scores,
                  ref_indel_penalty::Float64=-3.0,
                  min_ref_indel_score::Float64=-15.0,
@@ -1520,7 +1520,7 @@ function quiver2(seqstrings::Vector{String},
     n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(consensus)]
     consensus_stages = [[] for _ in 1:(Int(typemax(Stage)) - 1)]
-    cons_pstring = PString("", Int8[], bandwidth)
+    cons_pstring = PString(DNASequence(), Int8[], bandwidth)
 
     stage_iterations = zeros(Int, Int(typemax(Stage)) - 1)
     stage_times = zeros(Float64, Int(typemax(Stage)) - 1)
@@ -1592,7 +1592,8 @@ function quiver2(seqstrings::Vector{String},
                 if state.stage == frame_correction_stage && frame_correction_stage in enabled_stages
                     # estimate reference error rate
                     # TODO: use consensus estimated error rate here too
-                    edit_dist = levenshtein(reference, state.consensus)
+                    edit_dist = levenshtein(convert(String, reference),
+                                            convert(String, state.consensus))
                     ref_error_rate = edit_dist / max(length(reference), length(state.consensus))
                     # needs to be < 0.5, otherwise matches aren't rewarded at all
                     ref_error_rate = min(max(ref_error_rate, 1e-10), 0.5)
@@ -1750,7 +1751,7 @@ function quiver2(seqstrings::Vector{String},
     return state.consensus, info
 end
 
-function quiver2(sequences::Vector{String},
+function quiver2(sequences::Vector{DNASequence},
                  phreds::Vector{Vector{Int8}},
                  scores::Scores;
                  kwargs...)
@@ -1759,29 +1760,6 @@ function quiver2(sequences::Vector{String},
     end
     error_log_ps = Util.phred_to_log_p(phreds)
     return quiver2(sequences, error_log_ps, scores; kwargs...)
-end
-
-
-"""
-Alternate quiver2() using BioJulia types.
-
-"""
-function quiver2(sequences::Vector{DNASequence},
-                 phreds::Vector{Vector{Int8}},
-                 scores::Scores;
-                 consensus::DNASequence=DNASequence(""),
-                 reference::DNASequence=DNASequence(""),
-                 kwargs...)
-    new_reference = convert(String, reference)
-    new_consensus = convert(String, consensus)
-    new_sequences = String[convert(String, s) for s in sequences]
-    (result, info) = quiver2(new_sequences, phreds, scores;
-                             consensus=new_consensus,
-                             reference=new_reference,
-                             kwargs...)
-    info["consensus_stages"] = Vector{DNASequence}[[DNASequence(s) for s in cs]
-                                                   for cs in info["consensus_stages"]]
-    return DNASequence(result), info
 end
 
 end
