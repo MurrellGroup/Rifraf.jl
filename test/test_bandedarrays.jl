@@ -1,6 +1,6 @@
 using Base.Test
 
-using Rifraf.BandedArrays
+using Rifraf
 
 
 @testset "BandedArrays" begin

@@ -31,8 +31,6 @@ export rifraf,
 # keep this as a submodule. might eventually break it out into its own
 # project
 include("bandedarrays.jl")
-using Rifraf.BandedArrays
-
 include("types.jl")
 include("phred.jl")
 include("util.jl")
