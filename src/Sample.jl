@@ -10,7 +10,7 @@ function mutate_base(base::DNANucleotide)
     return result
 end
 
-function mutate_seq(seq::DNASequence, n_diffs::Int)
+function mutate_seq(seq::DNASeq, n_diffs::Int)
     seq = copy(seq)
     positions = Base.rand(1:length(seq), n_diffs)
     for i in positions
@@ -24,7 +24,7 @@ function random_codon()
 end
 
 function random_seq(n)
-    return DNASequence(map(_ -> rbase(), 1:n))
+    return DNASeq(map(_ -> rbase(), 1:n))
 end
 
 const MIN_PROB = 1e-10
@@ -44,7 +44,7 @@ function jitter_phred(x::Vector{Float64},
 end
 
 
-function hmm_sample(sequence::DNASequence,
+function hmm_sample(sequence::DNASeq,
                     error_p::Vector{Float64},
                     errors::ErrorModel;
                     mutation_mult::Float64=1.0,
@@ -137,11 +137,11 @@ function hmm_sample(sequence::DNASequence,
             push!(final_error_p, p)
         end
     end
-    return DNASequence(final_seq), final_error_p, seqbools, tbools
+    return DNASeq(final_seq), final_error_p, seqbools, tbools
 end
 
 
-function sample_reference(reference::DNASequence,
+function sample_reference(reference::DNASeq,
                           error_rate::Float64,
                           errors::ErrorModel)
     errors = normalize(errors)
@@ -159,7 +159,7 @@ actual_error_std: standard deviation of true phred values
 reported_error_std: standard deviation of reported phred values
 
 """
-function sample_from_template(template::DNASequence,
+function sample_from_template(template::DNASeq,
                               template_error_p::Vector{Float64},
                               errors::ErrorModel,
                               phred_scale::Float64,
@@ -192,7 +192,7 @@ function sample_from_template(template::DNASequence,
     reported_error_p = jitter_phred(actual_error_p,
                                     reported_std)
     phreds = p_to_phred(reported_error_p)
-    return DNASequence(seq), actual_error_p, phreds, sbools, tbools
+    return DNASeq(seq), actual_error_p, phreds, sbools, tbools
 end
 
 
@@ -215,7 +215,7 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
 
     template1 = random_seq(len)
     template2 = mutate_seq(template1, n_diffs)
-    templates = DNASequence[template1, template2]
+    templates = DNASeq[template1, template2]
 
     reference = sample_reference(template1,
                                  ref_error_rate,
@@ -226,7 +226,7 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
     error_dist = Beta(alpha, beta)
     template_error_p = rand(error_dist, len) * (MAX_PROB - MIN_PROB) + MIN_PROB
 
-    seqs = DNASequence[]
+    seqs = DNASeq[]
     actual_error_ps = Vector{Float64}[]
     phreds = Vector{Int8}[]
     seqbools = Vector{Bool}[]
@@ -250,8 +250,8 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
             push!(tbools, db)
         end
     end
-    return (DNASequence(reference),
-            DNASequence[DNASequence(t) for t in templates],
+    return (DNASeq(reference),
+            DNASeq[DNASeq(t) for t in templates],
             template_error_p, seqs, actual_error_ps, phreds,
             seqbools, tbools)
 

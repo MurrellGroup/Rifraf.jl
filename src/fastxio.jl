@@ -9,7 +9,7 @@ end
 
 function read_fasta(filename)
     records = read_fasta_records(filename)
-    return DNASequence[r.seq for r in records]
+    return DNASeq[r.seq for r in records]
 end
 
 function write_fasta(filename, seqs)
@@ -35,7 +35,7 @@ end
 
 function read_fastq(filename)
     records = read_fastq_records(filename)
-    seqs = DNASequence[]
+    seqs = DNASeq[]
     phreds = Vector{Int8}[]
     names = String[]
     for record in records

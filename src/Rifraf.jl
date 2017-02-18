@@ -16,7 +16,8 @@ export rifraf,
        sample_mixture,
        RifrafSequence,
        length,
-       reverse
+       reverse,
+       DNASeq
 
 # keep this as a submodule. might eventually break it out into its own
 # project

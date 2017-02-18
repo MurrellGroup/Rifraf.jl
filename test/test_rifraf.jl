@@ -72,8 +72,8 @@ end
 
     @testset "perfect_forward" begin
         bandwidth = 1
-        template = dna"AA"
-        seq = dna"AA"
+        template = DNASeq("AA")
+        seq = DNASeq("AA")
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
@@ -89,8 +89,8 @@ end
 
     @testset "imperfect_backward" begin
         bandwidth = 1
-        template = dna"AA"
-        seq = dna"AT"
+        template = DNASeq("AA")
+        seq = DNASeq("AT")
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
@@ -108,8 +108,8 @@ end
 
     @testset "imperfect_forward" begin
         bandwidth = 1
-        template = dna"AA"
-        seq = dna"AT"
+        template = DNASeq("AA")
+        seq = DNASeq("AT")
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
@@ -127,8 +127,8 @@ end
 
     @testset "forward/backward agreement" begin
         @testset "forward/backward agreement 1" begin
-            template = dna"TG"
-            seq = dna"GTCG"
+            template = DNASeq("TG")
+            seq = DNASeq("GTCG")
             log_p = [-1.2, -0.8, -0.7, -1.0]
             bandwidth = 5
             pseq = RifrafSequence(seq, log_p, bandwidth)
@@ -139,8 +139,8 @@ end
         end
 
         @testset "forward/backward agreement" begin
-            template = dna"GCACGGTC"
-            seq = dna"GACAC"
+            template = DNASeq("GCACGGTC")
+            seq = DNASeq("GACAC")
             log_p = [-1.1, -1.1, -0.4, -1.0, -0.7]
             bandwidth = 5
             pseq = RifrafSequence(seq, log_p, bandwidth)
@@ -152,8 +152,8 @@ end
     end
 
     @testset "insertion_agreement" begin
-        template = dna"AA"
-        seq = dna"ATA"
+        template = DNASeq("AA")
+        seq = DNASeq("ATA")
         bandwidth = 10
         log_p = [-5.0, -1.0, -6.0]
         pseq = RifrafSequence(seq, log_p, bandwidth)
@@ -167,8 +167,8 @@ end
     end
 
     @testset "deletion agreement" begin
-        template = dna"GATAG"
-        seq = dna"GAAG"
+        template = DNASeq("GATAG")
+        seq = DNASeq("GAAG")
         bandwidth = 10
         log_p = [-5.0, -2.0, -1.0, -6.0]
         pseq = RifrafSequence(seq, log_p, bandwidth)
@@ -184,8 +184,8 @@ end
     end
 
     @testset "deletion agreement 2" begin
-        template = dna"ATA"
-        seq = dna"AA"
+        template = DNASeq("ATA")
+        seq = DNASeq("AA")
         bandwidth = 10
         log_p = [-2.0, -3.0]
         pseq = RifrafSequence(seq, log_p, bandwidth)
@@ -273,20 +273,20 @@ end
 end
 
 @testset "no single indels" begin
-    reference = dna"AAAGGGTTT"
+    reference = DNASeq("AAAGGGTTT")
     ref_log_p = fill(log10(0.01), length(reference))
     bandwidth = 6
     rseq = RifrafSequence(reference, ref_log_p, bandwidth)
     local_errors = Rifraf.normalize(ErrorModel(2.0, 0.5, 0.5, 1.0, 1.0))
     local_scores = Scores(local_errors)
 
-    template = dna"AAACCCGGGTTT"
+    template = DNASeq("AAACCCGGGTTT")
     @test !has_single_indels(template, rseq, local_scores)
 
-    template = dna"AAACCCGGGTTTT"
+    template = DNASeq("AAACCCGGGTTTT")
     @test has_single_indels(template, rseq, local_scores)
 
-    template = dna"AAA"
+    template = DNASeq("AAA")
     @test !has_single_indels(template, rseq, local_scores)
 end
 
@@ -295,9 +295,9 @@ end
     ref_errors = ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
     ref_scores = Scores(ref_errors)
 
-    ref = dna"CGGCGATTT"
+    ref = DNASeq("CGGCGATTT")
     consensus_errors = Float64[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
-    consensus = RifrafSequence(dna"CTGCCGA", consensus_errors, 10)
+    consensus = RifrafSequence(DNASeq("CTGCCGA"), consensus_errors, 10)
 
     proposals = single_indel_proposals(ref, consensus, ref_scores)
     expected = [Deletion(4)]
@@ -312,7 +312,7 @@ end
                                   do_subs::Bool=true,
                                   do_indels::Bool=true)
         bandwidth = 5
-        rseq = RifrafSequence(DNASequence(), Float64[], bandwidth)
+        rseq = RifrafSequence(DNASeq(), Float64[], bandwidth)
         mult = 2
         errors = ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0)
         scores = Scores(errors)
@@ -340,10 +340,10 @@ end
     end
 
     @testset "fast proposals 1" begin
-        consensus = dna"ACGAG"
-        seqs = [dna"CGTAC",
-                dna"CGAC",
-                dna"CGTAG"]
+        consensus = DNASeq("ACGAG")
+        seqs = [DNASeq("CGTAC"),
+                DNASeq("CGAC"),
+                DNASeq("CGTAG")]
         expected = [Deletion(1),
                     Insertion(3, DNA_T),
                     Substitution(5, DNA_C)]
@@ -351,37 +351,37 @@ end
     end
 
     @testset "fast proposals 2" begin
-        consensus = dna"AA"
-        seqs = [dna"AAG",
-                dna"AA",
-                dna"AAG"]
+        consensus = DNASeq("AA")
+        seqs = [DNASeq("AAG"),
+                DNASeq("AA"),
+                DNASeq("AAG")]
         expected = [Insertion(2, DNA_G)]
         _test_fast_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals 3" begin
-        consensus = dna"AA"
-        seqs = [dna"GAA",
-                dna"AA",
-                dna"GAA"]
+        consensus = DNASeq("AA")
+        seqs = [DNASeq("GAA"),
+                DNASeq("AA"),
+                DNASeq("GAA")]
         expected = [Insertion(0, DNA_G)]
         _test_fast_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals 4" begin
-        consensus = dna"AA"
-        seqs = [dna"AGA",
-                dna"AA",
-                dna"AGA"]
+        consensus = DNASeq("AA")
+        seqs = [DNASeq("AGA"),
+                DNASeq("AA"),
+                DNASeq("AGA")]
         expected = [Insertion(1, DNA_G)]
         _test_fast_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals - highly confident base" begin
-        consensus = dna"AA"
-        seqs = [dna"GAA",
-                dna"AA",
-                dna"AA"]
+        consensus = DNASeq("AA")
+        seqs = [DNASeq("GAA"),
+                DNASeq("AA"),
+                DNASeq("AA")]
         lps = Vector{Float64}[[-10.0, -5.0, -5.0],
                               [-3.0, -5.0],
                               [-3.0, -50]]
@@ -390,8 +390,8 @@ end
     end
     @testset "push deletions" begin
         # test that deletions get pushed
-        consensus = dna"CCGTAAAC"
-        seqs = [dna"CGTAAAC", dna"CCGTAAAC", dna"CGTAAAC"]
+        consensus = DNASeq("CCGTAAAC")
+        seqs = [DNASeq("CGTAAAC"), DNASeq("CCGTAAAC"), DNASeq("CGTAAAC")]
         lps = Vector{Float64}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
                               [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
                               [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
@@ -401,8 +401,8 @@ end
     end
     @testset "push deletions - simple" begin
         # test that deletions get pushed to end
-        consensus = dna"CCC"
-        seqs = [dna"CC"]
+        consensus = DNASeq("CCC")
+        seqs = [DNASeq("CC")]
         expected = [Deletion(3)]
         _test_fast_proposals(consensus, seqs, [], expected,
                              do_alignment=false, do_surgery=true)
@@ -410,9 +410,9 @@ end
 
     @testset "push insertions" begin
         # test that insertions get pushed to end
-        consensus = dna"TT"
-        seqs = [dna"TTT",
-                dna"CTT"]
+        consensus = DNASeq("TT")
+        seqs = [DNASeq("TTT"),
+                DNASeq("CTT")]
         expected = [Insertion(0, DNA_C),
                     Insertion(2, DNA_T)]
         _test_fast_proposals(consensus, seqs, [], expected,
@@ -421,8 +421,8 @@ end
 
     @testset "push subs" begin
         # test that subs get pushed backwards
-        consensus = dna"ATG"
-        seqs = [dna"ATG", dna"CATG", dna"CTG"]
+        consensus = DNASeq("ATG")
+        seqs = [DNASeq("ATG"), DNASeq("CATG"), DNASeq("CTG")]
         lps = [[-0.8, -1.7, -0.8],
                [-0.7, -0.5, -1.2, -1.0],
                [-0.9, -1.9, -1.0]]
@@ -433,10 +433,10 @@ end
     end
 
     @testset "test fast proposals converged" begin
-        consensus = dna"GTTCGGCTC"
-        seqs = [dna"GTTCGGCTTC",
-                dna"GTTCGGCTC",
-                dna"GTTCCTG"]
+        consensus = DNASeq("GTTCGGCTC")
+        seqs = [DNASeq("GTTCGGCTTC"),
+                DNASeq("GTTCGGCTC"),
+                DNASeq("GTTCCTG")]
         phreds = Vector{Int8}[[28,16,13,21,15,13,13,12,20,16],
                               [21,16,9,17,6,15,6,16,12],
                               [26,14,5,24,8,12,7]]
@@ -448,10 +448,10 @@ end
     end
 
 @testset "test fast proposals converged 2" begin
-    consensus = dna"CAGTGCCGG"
-    seqs = [dna"CATGCCGG",
-            dna"CATGCCCTGG",
-            dna"CAGGGCCGG"]
+    consensus = DNASeq("CAGTGCCGG")
+    seqs = [DNASeq("CATGCCGG"),
+            DNASeq("CATGCCCTGG"),
+            DNASeq("CAGGGCCGG")]
     phreds = Vector{Int8}[[13,7,12,13,7,11,6,14],
                           [16,14,14,20,5,5,15,12,10,20],
                           [23,9,7,6,9,10,10,10,23]]
@@ -465,10 +465,10 @@ end
 @testset "test fast proposals insertion/mismatch swap" begin
     # inserting 'T' after position 5 should swap with G/T
     # mismatch in second sequence
-    consensus = dna"GGAAGTCC"
-    seqs = [dna"GGAAGTCC",
-            dna"GGAATTCC",
-            dna"GGAAGTCTACC"]
+    consensus = DNASeq("GGAAGTCC")
+    seqs = [DNASeq("GGAAGTCC"),
+            DNASeq("GGAATTCC"),
+            DNASeq("GGAAGTCTACC")]
     phreds = Vector{Int8}[[18,9,12,14,11,11,15,14],
                           [25,10,6,8,12,11,19,13],
                           [24,12,9,15,8,8,8,8,8,23,19]]
@@ -487,7 +487,7 @@ end
     function _test_candidate_scores(template, pseqs, scores, expected)
         ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
         state = initial_state(template, pseqs)
-        rseq = RifrafSequence(DNASequence(), Float64[], 1)
+        rseq = RifrafSequence(DNASeq(), Float64[], 1)
         redo_as = true
         redo_bs = true
         use_ref = false
@@ -513,8 +513,8 @@ end
     end
 
     @testset "substitutions" begin
-        template = dna"TTT"
-        seqs = [dna"TAT"]
+        template = DNASeq("TTT")
+        seqs = [DNASeq("TAT")]
         lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
@@ -535,8 +535,8 @@ end
     end
 
     @testset "deletion" begin
-        template = dna"TTT"
-        seqs = [dna"TT"]
+        template = DNASeq("TTT")
+        seqs = [DNASeq("TT")]
         lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
@@ -550,8 +550,8 @@ end
 
     @testset "insertion" begin
         # test insertion
-        template = dna"TT"
-        seqs = [dna"TAT"]
+        template = DNASeq("TT")
+        seqs = [DNASeq("TAT")]
         lps =  Vector{Float64}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
@@ -601,7 +601,7 @@ end
                           log_seq_reported_std,
                           seq_errors)
         if !use_ref
-            reference = DNASequence()
+            reference = DNASeq()
         end
 
         (result, info) = rifraf(reads,
@@ -621,10 +621,10 @@ end
 
 
 @testset "base_probs" begin
-    template = dna"CGTAC"
-    seqs = [dna"CGAC",
-            dna"CGAC",
-            dna"CGAC"]
+    template = DNASeq("CGTAC")
+    seqs = [DNASeq("CGAC"),
+            DNASeq("CGAC"),
+            DNASeq("CGAC")]
     lps = Vector{Float64}[[-9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0]]
@@ -637,7 +637,7 @@ end
 
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASequence(), Float64[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), Float64[], bandwidth)
     state = initial_state(template, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     probs = estimate_probs(state, pseqs, scores, rseq, scores, false)
@@ -648,10 +648,10 @@ end
 
 
 @testset "ins_probs" begin
-    template = dna"CGAT"
-    seqs = [dna"CGTAT",
-            dna"CGTAT",
-            dna"CGTAT"]
+    template = DNASeq("CGAT")
+    seqs = [DNASeq("CGTAT"),
+            DNASeq("CGTAT"),
+            DNASeq("CGTAT")]
     bandwidth = 5
     mult = 2
     errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
@@ -664,7 +664,7 @@ end
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASequence(), Float64[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), Float64[], bandwidth)
     state = initial_state(template, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     probs = estimate_probs(state, pseqs, scores, rseq, scores, false)
@@ -673,10 +673,10 @@ end
 end
 
 @testset "alignment_probs" begin
-    consensus = dna"ACGT"
-    seqs = [dna"ACGT",
-            dna"CGT",
-            dna"CCGT"]
+    consensus = DNASeq("ACGT")
+    seqs = [DNASeq("ACGT"),
+            DNASeq("CGT"),
+            DNASeq("CCGT")]
     bandwidth = 5
     mult = 2
 
@@ -691,7 +691,7 @@ end
     lps = map(log10, ps)
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASequence(), Float64[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), Float64[], bandwidth)
     state = initial_state(consensus, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
 
@@ -707,25 +707,25 @@ end
     const scores = Scores(errors)
 
     @testset "align 1" begin
-        template = dna"ATAA"
-        seq = dna"AAA"
+        template = DNASeq("ATAA")
+        seq = DNASeq("AAA")
         bandwidth = 10
         log_p = [-2.0, -3.0, -3.0]
         pseq = RifrafSequence(seq, log_p, bandwidth)
         moves = align_moves(template, pseq, scores)
         t, s = moves_to_aligned_seqs(moves, template, seq)
-        @test t == dna"ATAA"
-        @test s == dna"A-AA"
+        @test t == DNASequence("ATAA")
+        @test s == DNASequence("A-AA")
     end
 
     @testset "align 2" begin
-        template = dna"AACCTT"
-        seq = dna"AAACCCTT"
+        template = DNASeq("AACCTT")
+        seq = DNASeq("AAACCCTT")
         bandwidth = 10
         log_p = fill(log10(0.1), length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth)
         moves = align_moves(template, pseq, scores)
         t, s = moves_to_aligned_seqs(moves, template, seq)
-        @test t[end-1:end] == dna"TT"
+        @test t[end-1:end] == DNASequence("TT")
     end
 end

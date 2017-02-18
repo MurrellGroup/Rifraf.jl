@@ -28,7 +28,7 @@ const CODON_LENGTH = 3
 
 type State
     score::Float64
-    consensus::DNASequence
+    consensus::DNASeq
     A_t::BandedArray{Float64}
     B_t::BandedArray{Float64}
     As::Vector{BandedArray{Float64}}
@@ -63,18 +63,18 @@ end
 end
 
 
-function get_sub_consensus(proposal::Proposal, seq::DNASequence,
+function get_sub_consensus(proposal::Proposal, seq::DNASeq,
                            next_posn::Int, n_after::Int)
     # next valid position in sequence after this proposal
     t = typeof(proposal)
     pos = proposal.pos
-    prefix = DNASequence()
+    prefix = DNASeq()
     stop = min(next_posn + n_after - 1, length(seq))
     suffix = seq[next_posn:stop]
     if t in (Substitution, Insertion)
-        prefix = DNASequence([proposal.base])
+        prefix = DNASeq([proposal.base])
     end
-    return DNASequence(prefix, suffix)
+    return DNASeq(prefix, suffix)
 end
 
 function seq_score_deletion(A::BandedArray{Float64}, B::BandedArray{Float64},
@@ -141,7 +141,7 @@ end
 
 function seq_score_proposal(proposal::Proposal,
                             A::BandedArray{Float64}, B::BandedArray{Float64},
-                            consensus::DNASequence,
+                            consensus::DNASeq,
                             pseq::RifrafSequence,
                             scores::Scores,
                             newcols::Array{Float64, 2})
@@ -258,7 +258,7 @@ end
 
 
 function all_proposals(stage::Stage,
-                       consensus::DNASequence,
+                       consensus::DNASeq,
                        sequences::Vector{RifrafSequence},
                        Amoves::Vector{BandedArray{Int}},
                        scores::Scores,
@@ -327,7 +327,7 @@ function best_surrounding_ins_bases(moves::Vector{DPMove},
 end
 
 function surrounding_del_bases(moves::Vector{DPMove},
-                               consensus::DNASequence,
+                               consensus::DNASeq,
                                seq::RifrafSequence, aln_idx::Int,
                                cons_idx::Int, seq_idx::Int)
     result = Dict{DNANucleotide, Tuple{Float64, Float64}}()
@@ -394,7 +394,7 @@ end
 function update_deltas(sub_deltas::Array{Float64, 2},
                        del_deltas::Array{Float64, 1},
                        ins_deltas::Array{Float64, 2},
-                       consensus::DNASequence,
+                       consensus::DNASeq,
                        seq::RifrafSequence, moves::Vector{DPMove},
                        scores::Scores,
                        do_subs::Bool, do_indels::Bool)
@@ -670,7 +670,7 @@ function base_consensus(d::Dict{DNANucleotide, Float64})
 end
 
 
-function has_single_indels(consensus::DNASequence,
+function has_single_indels(consensus::DNASeq,
                            reference::RifrafSequence,
                            ref_scores::Scores)
     has_right_length = length(consensus) % CODON_LENGTH == 0
@@ -683,7 +683,7 @@ function has_single_indels(consensus::DNASequence,
 end
 
 
-function single_indel_proposals(reference::DNASequence,
+function single_indel_proposals(reference::DNASeq,
                                 consensus::RifrafSequence,
                                 ref_scores::Scores)
     moves = align_moves(reference, consensus, ref_scores;
@@ -711,7 +711,7 @@ function single_indel_proposals(reference::DNASequence,
 end
 
 
-function initial_state(consensus::DNASequence, seqs::Vector{RifrafSequence},
+function initial_state(consensus::DNASeq, seqs::Vector{RifrafSequence},
                        stage::Stage=initial_stage)
     if length(consensus) == 0
         # choose highest-quality sequence
@@ -921,11 +921,11 @@ function alignment_error_probs(tlen::Int,
 end
 
 
-function rifraf(seqstrings::Vector{DNASequence},
+function rifraf(seqstrings::Vector{DNASeq},
                 error_log_ps::Vector{Vector{Float64}},
                 scores::Scores;
-                consensus::DNASequence=DNASequence(),
-                reference::DNASequence=DNASequence(),
+                consensus::DNASeq=DNASeq(),
+                reference::DNASeq=DNASeq(),
                 ref_scores::Scores=Scores(0.0, 0.0, 0.0, 0.0, 0.0),
                 ref_indel_penalty::Float64=-3.0,
                 min_ref_indel_score::Float64=-15.0,
@@ -1028,7 +1028,7 @@ function rifraf(seqstrings::Vector{DNASequence},
     n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(consensus)]
     consensus_stages = [[] for _ in 1:(Int(typemax(Stage)) - 1)]
-    cons_pstring = RifrafSequence(DNASequence(), Int8[], bandwidth)
+    cons_pstring = RifrafSequence(DNASeq(), Int8[], bandwidth)
 
     stage_iterations = zeros(Int, Int(typemax(Stage)) - 1)
     stage_times = zeros(Float64, Int(typemax(Stage)) - 1)
@@ -1259,7 +1259,7 @@ function rifraf(seqstrings::Vector{DNASequence},
     return state.consensus, info
 end
 
-function rifraf(sequences::Vector{DNASequence},
+function rifraf(sequences::Vector{DNASeq},
                 phreds::Vector{Vector{Int8}},
                 scores::Scores;
                 kwargs...)

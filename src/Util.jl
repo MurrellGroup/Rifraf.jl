@@ -1,7 +1,9 @@
+typealias DNASeq BioSequence{DNAAlphabet{2}}
+
 const MIN_PHRED = 1
 const MAX_PHRED = Int('~') - 33
 
-const BASES = dna"ACGT"
+const BASES = DNASeq("ACGT")
 const BASEINTS = Dict(DNA_A => 1, DNA_C => 2, DNA_G => 3, DNA_T => 4)
 
 

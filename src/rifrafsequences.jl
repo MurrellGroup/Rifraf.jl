@@ -3,12 +3,12 @@ error probabilities.
 
 """
 type RifrafSequence
-    seq::DNASequence
+    seq::DNASeq
     error_log_p::Vector{Float64}
     match_log_p::Vector{Float64}
     bandwidth::Int
 
-    function RifrafSequence(seq::DNASequence, error_log_p::Vector{Float64},
+    function RifrafSequence(seq::DNASeq, error_log_p::Vector{Float64},
                             bandwidth::Int)
         if bandwidth < 1
             error("bandwidth must be positive")
@@ -32,7 +32,7 @@ type RifrafSequence
     end
 end
 
-function RifrafSequence(seq::DNASequence, phreds::Vector{Int8}, bandwidth::Int)
+function RifrafSequence(seq::DNASeq, phreds::Vector{Int8}, bandwidth::Int)
     error_log_p = phred_to_log_p(phreds)
     return RifrafSequence(seq, error_log_p, bandwidth)
 end

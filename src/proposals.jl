@@ -55,23 +55,23 @@ function are_ambiguous(ms::Vector{Proposal})
     return !ins_good || !others_good
 end
 
-function apply_proposal(seq::DNASequence,
+function apply_proposal(seq::DNASeq,
                          proposal::Substitution)
-    return DNASequence(seq[1:(proposal.pos - 1)],
-                       DNASequence([proposal.base]),
+    return DNASeq(seq[1:(proposal.pos - 1)],
+                       DNASeq([proposal.base]),
                        seq[(proposal.pos + 1):end])
 end
 
-function apply_proposal(seq::DNASequence,
+function apply_proposal(seq::DNASeq,
                          proposal::Insertion)
-    return DNASequence(seq[1:(proposal.pos)],
-                       DNASequence([proposal.base]),
+    return DNASeq(seq[1:(proposal.pos)],
+                       DNASeq([proposal.base]),
                        seq[(proposal.pos+1):end])
 end
 
-function apply_proposal(seq::DNASequence,
+function apply_proposal(seq::DNASeq,
                          proposal::Deletion)
-    return DNASequence(seq[1:(proposal.pos - 1)],
+    return DNASeq(seq[1:(proposal.pos - 1)],
                        seq[(proposal.pos + 1):end])
 end
 
@@ -89,7 +89,7 @@ end
 immutable AmbiguousProposalsError <: Exception end
 
 
-function apply_proposals(seq::DNASequence,
+function apply_proposals(seq::DNASeq,
                          proposals::Vector{Proposal})
     if are_ambiguous(proposals)
         throw(AmbiguousProposalsError())

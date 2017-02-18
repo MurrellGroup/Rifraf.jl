@@ -127,7 +127,7 @@ end
 
 
 """Does backtracing to find best alignment."""
-function forward_moves(t::DNASequence, s::RifrafSequence,
+function forward_moves(t::DNASeq, s::RifrafSequence,
                        scores::Scores;
                        trim::Bool=false,
                        skew_matches::Bool=false)
@@ -161,7 +161,7 @@ end
 F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
-function forward(t::DNASequence, s::RifrafSequence,
+function forward(t::DNASeq, s::RifrafSequence,
                  scores::Scores)
     result = BandedArray(Float64, (length(s) + 1, length(t) + 1), s.bandwidth)
     nrows, ncols = size(result)
@@ -186,7 +186,7 @@ end
 B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
-function backward(t::DNASequence, s::RifrafSequence,
+function backward(t::DNASeq, s::RifrafSequence,
                   scores::Scores)
     result = forward(reverse(t), reverse(s), scores)
     return flip(result)
@@ -234,7 +234,7 @@ function band_tolerance(Amoves::BandedArray{Int})
 end
 
 function moves_to_aligned_seqs(moves::Vector{DPMove},
-                               t::DNASequence, s::DNASequence)
+                               t::DNASeq, s::DNASeq)
     aligned_t = DNASequence()
     aligned_s = DNASequence()
     i, j = (0, 0)
@@ -288,7 +288,7 @@ function moves_to_indices(moves::Vector{DPMove},
     return result
 end
 
-function align_moves(t::DNASequence, s::RifrafSequence,
+function align_moves(t::DNASeq, s::RifrafSequence,
                      scores::Scores;
                      trim::Bool=false,
                      skew_matches::Bool=false)
@@ -298,7 +298,7 @@ function align_moves(t::DNASequence, s::RifrafSequence,
 end
 
 
-function align(t::DNASequence, s::RifrafSequence,
+function align(t::DNASeq, s::RifrafSequence,
                scores::Scores;
                trim::Bool=false,
                skew_matches::Bool=false)
@@ -307,7 +307,7 @@ function align(t::DNASequence, s::RifrafSequence,
     return moves_to_aligned_seqs(moves, t, s.seq)
 end
 
-function align(t::DNASequence, s::DNASequence, phreds::Vector{Int8},
+function align(t::DNASeq, s::DNASeq, phreds::Vector{Int8},
                scores::Scores,
                bandwidth::Int;
                trim::Bool=false,
@@ -318,7 +318,7 @@ function align(t::DNASequence, s::DNASequence, phreds::Vector{Int8},
 end
 
 function moves_to_proposals(moves::Vector{DPMove},
-                            consensus::DNASequence, seq::RifrafSequence)
+                            consensus::DNASeq, seq::RifrafSequence)
     proposals = Proposal[]
     i, j = (0, 0)
     for move in moves
@@ -345,7 +345,7 @@ end
 
 """Only get proposals that appear in at least one alignment"""
 function alignment_proposals(Amoves::Vector{BandedArray{Int}},
-                             consensus::DNASequence,
+                             consensus::DNASeq,
                              sequences::Vector{RifrafSequence},
                              do_subs::Bool,
                              do_indels::Bool)
