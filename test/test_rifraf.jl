@@ -440,9 +440,9 @@ end
         seqs = [DNASeq("GTTCGGCTTC"),
                 DNASeq("GTTCGGCTC"),
                 DNASeq("GTTCCTG")]
-        phreds = Vector{Int8}[[28,16,13,21,15,13,13,12,20,16],
-                              [21,16,9,17,6,15,6,16,12],
-                              [26,14,5,24,8,12,7]]
+        phreds = Vector{Phred}[[28,16,13,21,15,13,13,12,20,16],
+                               [21,16,9,17,6,15,6,16,12],
+                               [26,14,5,24,8,12,7]]
         lps = map(phred_to_log_p, phreds)
         expected = []
         _test_fast_proposals(consensus, seqs, lps, expected,
@@ -455,9 +455,9 @@ end
     seqs = [DNASeq("CATGCCGG"),
             DNASeq("CATGCCCTGG"),
             DNASeq("CAGGGCCGG")]
-    phreds = Vector{Int8}[[13,7,12,13,7,11,6,14],
-                          [16,14,14,20,5,5,15,12,10,20],
-                          [23,9,7,6,9,10,10,10,23]]
+    phreds = Vector{Phred}[[13,7,12,13,7,11,6,14],
+                           [16,14,14,20,5,5,15,12,10,20],
+                           [23,9,7,6,9,10,10,10,23]]
     lps = map(phred_to_log_p, phreds)
     expected = []
     # no indels, because this happened during refinement
@@ -472,9 +472,9 @@ end
     seqs = [DNASeq("GGAAGTCC"),
             DNASeq("GGAATTCC"),
             DNASeq("GGAAGTCTACC")]
-    phreds = Vector{Int8}[[18,9,12,14,11,11,15,14],
-                          [25,10,6,8,12,11,19,13],
-                          [24,12,9,15,8,8,8,8,8,23,19]]
+    phreds = Vector{Phred}[[18,9,12,14,11,11,15,14],
+                           [25,10,6,8,12,11,19,13],
+                           [24,12,9,15,8,8,8,8,8,23,19]]
     lps = map(phred_to_log_p, phreds)
     expected = [Substitution(5, DNA_T),
                 Insertion(6, DNA_T)]

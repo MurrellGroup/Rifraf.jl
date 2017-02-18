@@ -36,7 +36,7 @@ end
 function read_fastq(filename)
     records = read_fastq_records(filename)
     seqs = DNASeq[]
-    phreds = Vector{Int8}[]
+    phreds = Vector{Phred}[]
     names = String[]
     for record in records
         push!(seqs, record.seq)
@@ -46,7 +46,7 @@ function read_fastq(filename)
     return seqs, phreds, names
 end
 
-function write_fastq(filename, seqs, phreds::Vector{Vector{Int8}};
+function write_fastq(filename, seqs, phreds::Vector{Vector{Phred}};
                      names=String[])
     stream = open(FASTQWriter, filename, quality_encoding=:sanger)
     i = 0

@@ -228,7 +228,7 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
 
     seqs = DNASeq[]
     actual_error_ps = Vector{ErrorProb}[]
-    phreds = Vector{Int8}[]
+    phreds = Vector{Phred}[]
     seqbools = Vector{Bool}[]
     tbools = Vector{Bool}[]
     for (t, n) in zip(templates, nseqs)
@@ -309,7 +309,7 @@ end
 function write_samples(filename, reference, template, template_error, seqs, phreds)
     template_phred = p_to_phred(template_error)
     write_fasta(string(filename, "-reference.fasta"), [reference])
-    write_fastq(string(filename, "-template.fastq"), [template], Vector{Int8}[template_phred])
+    write_fastq(string(filename, "-template.fastq"), [template], Vector{Phred}[template_phred])
     write_fastq(string(filename, "-sequences.fastq"), seqs, phreds)
 end
 

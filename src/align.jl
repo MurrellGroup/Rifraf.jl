@@ -1,5 +1,15 @@
-@enum(DPMove, dp_none=0, dp_match=1, dp_ins=2, dp_del=3,
-      dp_codon_ins=4, dp_codon_del=5)
+import Base.zero
+
+# trace type for pairwise alignment
+typealias Trace Int8
+
+# trace values
+const TRACE_NONE         = Trace(0)
+const TRACE_MATCH        = Trace(1)
+const TRACE_INSERT       = Trace(2)
+const TRACE_DELETE       = Trace(3)
+const TRACE_CODON_INSERT = Trace(4)
+const TRACE_CODON_DELETE = Trace(5)
 
 
 # all offsets are relative to the consensus.
@@ -9,6 +19,19 @@ const OFFSETS = ([1, 1],  # sub
                  [0, 1],  # deletion
                  [3, 0],  # codon insertion
                  [0, 3])  # codon deletion
+
+
+function offset_forward(move::Trace, i::Int, j::Int)
+    (a, b) = OFFSETS[move]
+    return (i + a, j + b)
+end
+
+
+function offset_backward(move::Trace, i::Int, j::Int)
+    (a, b) = OFFSETS[move]
+    return (i - a, j - b)
+end
+
 
 function move_scores(t_base::DNANucleotide,
                      s_base::DNANucleotide,
@@ -40,6 +63,7 @@ function move_scores(t_base::DNANucleotide,
     return match_score, ins_score, del_score
 end
 
+
 function codon_move_scores(seq_i::Int,
                            error_log_p::Vector{ErrorProb},
                            scores::Scores)
@@ -54,15 +78,13 @@ function codon_move_scores(seq_i::Int,
     return codon_ins_score, codon_del_score
 end
 
+
 function update_helper(newcols::Array{Score, 2},
                        A::BandedArray{Score},
                        i::Int, j::Int, acol::Int,
-                       move::DPMove, move_score::Score,
-                       final_score::Score, final_move::DPMove)
-    offset = OFFSETS[Int(move)]
-    prev_i = i - offset[1]
-    prev_j = j - offset[2]
-
+                       move::Trace, move_score::Score,
+                       final_score::Score, final_move::Trace)
+    prev_i, prev_j = offset_backward(move, i, j)
     rangecol = min(prev_j, size(A)[2])
     if inband(A, prev_i, rangecol)
         score = -Inf
@@ -78,6 +100,7 @@ function update_helper(newcols::Array{Score, 2},
     return final_score, final_move
 end
 
+
 function update(A::BandedArray{Score},
                 i::Int, j::Int,
                 s_base::DNANucleotide, t_base::DNANucleotide,
@@ -86,7 +109,7 @@ function update(A::BandedArray{Score},
                 newcols::Array{Score, 2}=Array(Score, (0, 0)),
                 acol=-1, trim=false,
                 skew_matches=false)
-    result = (-Inf, dp_none)
+    result = (-Inf, TRACE_NONE)
     # TODO: this cannot make mismatches preferable to codon indels
     match_mult = skew_matches ? 0.1 : 0.0
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1,
@@ -101,25 +124,25 @@ function update(A::BandedArray{Score},
     if trim && (j == size(A)[2])
         ins_score = 0.0
     end
-    result = update_helper(newcols, A, i, j, acol, dp_match, match_score,
+    result = update_helper(newcols, A, i, j, acol, TRACE_MATCH, match_score,
                            result...)
-    result = update_helper(newcols, A, i, j, acol, dp_ins, ins_score, result...)
-    result = update_helper(newcols, A, i, j, acol, dp_del, del_score, result...)
+    result = update_helper(newcols, A, i, j, acol, TRACE_INSERT, ins_score, result...)
+    result = update_helper(newcols, A, i, j, acol, TRACE_DELETE, del_score, result...)
     codon_ins_score, codon_del_score = codon_move_scores(i-1, pseq.error_log_p,
                                                          scores)
 
     if scores.codon_insertion > -Inf && i > CODON_LENGTH
-        result = update_helper(newcols, A, i, j, acol, dp_codon_ins,
+        result = update_helper(newcols, A, i, j, acol, TRACE_CODON_INSERT,
                                codon_ins_score, result...)
     end
     if scores.codon_deletion > -Inf && j > CODON_LENGTH
-        result = update_helper(newcols, A, i, j, acol, dp_codon_del,
+        result = update_helper(newcols, A, i, j, acol, TRACE_CODON_DELETE,
                                codon_del_score, result...)
     end
     if result[1] == -Inf
         error("new score is invalid")
     end
-    if result[2] == dp_none
+    if result[2] == TRACE_NONE
         error("failed to find a move")
     end
     return result
@@ -135,8 +158,8 @@ function forward_moves(t::DNASeq, s::RifrafSequence,
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
     result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth)
-    moves = BandedArray(Int, result.shape, s.bandwidth)
-    moves[1, 1] = Int(dp_none)
+    moves = BandedArray(Trace, result.shape, s.bandwidth)
+    moves[1, 1] = TRACE_NONE
     nrows, ncols = size(result)
     for j = 1:ncols
         start, stop = row_range(result, j)
@@ -193,20 +216,19 @@ function backward(t::DNASeq, s::RifrafSequence,
 end
 
 
-function backtrace(moves::BandedArray{Int})
-    taken_moves = DPMove[]
+function backtrace(moves::BandedArray{Trace})
+    taken_moves = Trace[]
     i, j = moves.shape
     while i > 1 || j > 1
         m = moves[i, j]
-        push!(taken_moves, DPMove(m))
-        ii, jj = OFFSETS[m]
-        i -= ii
-        j -= jj
+        push!(taken_moves, m)
+        i, j = offset_backward(m, i, j)
     end
     return reverse(taken_moves)
 end
 
-function band_tolerance(Amoves::BandedArray{Int})
+
+function band_tolerance(Amoves::BandedArray{Trace})
     nrows, ncols = size(Amoves)
     dist = nrows
     i, j = nrows, ncols
@@ -233,28 +255,27 @@ function band_tolerance(Amoves::BandedArray{Int})
     return dist
 end
 
-function moves_to_aligned_seqs(moves::Vector{DPMove},
+
+function moves_to_aligned_seqs(moves::Vector{Trace},
                                t::DNASeq, s::DNASeq)
     aligned_t = DNASequence()
     aligned_s = DNASequence()
     i, j = (0, 0)
     for move in moves
-        (ii, jj) = OFFSETS[Int(move)]
-        i += ii
-        j += jj
-        if move == dp_match
+        i, j = offset_forward(move, i, j)
+        if move == TRACE_MATCH
             push!(aligned_t, t[j])
             push!(aligned_s, s[i])
-        elseif move == dp_ins
+        elseif move == TRACE_INSERT
             push!(aligned_t, DNA_Gap)
             push!(aligned_s, s[i])
-        elseif move == dp_del
+        elseif move == TRACE_DELETE
             push!(aligned_t, t[j])
             push!(aligned_s, DNA_Gap)
-        elseif move == dp_codon_ins
+        elseif move == TRACE_CODON_INSERT
             append!(aligned_t, [DNA_Gap, DNA_Gap, DNA_Gap])
             append!(aligned_s, [s[i-2], s[i-1], s[i]])
-        elseif move == dp_codon_del
+        elseif move == TRACE_CODON_DELETE
             append!(aligned_t, [t[j-2], t[j-1], t[j]])
             append!(aligned_s, [DNA_Gap, DNA_Gap, DNA_Gap])
         end
@@ -267,7 +288,7 @@ end
 `s`.
 
 """
-function moves_to_indices(moves::Vector{DPMove},
+function moves_to_indices(moves::Vector{Trace},
                           tlen::Int, slen::Int)
     result = zeros(Int, tlen + 1)
     i, j = (1, 1)
@@ -277,9 +298,7 @@ function moves_to_indices(moves::Vector{DPMove},
             result[j] = i
             last_j = j
         end
-        (ii, jj) = OFFSETS[Int(move)]
-        i += ii
-        j += jj
+        i, j = offset_forward(move, i, j)
     end
     if j > last_j
         result[j] = i
@@ -287,6 +306,7 @@ function moves_to_indices(moves::Vector{DPMove},
     end
     return result
 end
+
 
 function align_moves(t::DNASeq, s::RifrafSequence,
                      scores::Scores;
@@ -307,7 +327,8 @@ function align(t::DNASeq, s::RifrafSequence,
     return moves_to_aligned_seqs(moves, t, s.seq)
 end
 
-function align(t::DNASeq, s::DNASeq, phreds::Vector{Int8},
+
+function align(t::DNASeq, s::DNASeq, phreds::Vector{Phred},
                scores::Scores,
                bandwidth::Int;
                trim::Bool=false,
@@ -317,26 +338,25 @@ function align(t::DNASeq, s::DNASeq, phreds::Vector{Int8},
     return moves_to_aligned_seqs(moves, t, s)
 end
 
-function moves_to_proposals(moves::Vector{DPMove},
+
+function moves_to_proposals(moves::Vector{Trace},
                             consensus::DNASeq, seq::RifrafSequence)
     proposals = Proposal[]
     i, j = (0, 0)
     for move in moves
-        (ii, jj) = OFFSETS[Int(move)]
-        i += ii
-        j += jj
+        i, j = offset_forward(move, i, j)
 
         score = seq.match_log_p[max(i, 1)]
         next_score = seq.match_log_p[min(i + 1, length(seq))]
         del_score = min(score, next_score)
 
-        if move == dp_match
+        if move == TRACE_MATCH
             if seq.seq[i] != consensus[j]
                 push!(proposals, Substitution(j, seq.seq[i]))
             end
-        elseif move == dp_ins
+        elseif move == TRACE_INSERT
             push!(proposals, Insertion(j, seq.seq[i]))
-        elseif move == dp_del
+        elseif move == TRACE_DELETE
             push!(proposals, Deletion(j))
         end
     end
@@ -344,7 +364,7 @@ function moves_to_proposals(moves::Vector{DPMove},
 end
 
 """Only get proposals that appear in at least one alignment"""
-function alignment_proposals(Amoves::Vector{BandedArray{Int}},
+function alignment_proposals(Amoves::Vector{BandedArray{Trace}},
                              consensus::DNASeq,
                              sequences::Vector{RifrafSequence},
                              do_subs::Bool,
