@@ -971,10 +971,13 @@ function rifraf(seqstrings::Vector{DNASeq},
                 skip_frame_correction::Bool=true,
                 indel_correction_only::Bool=true,
                 use_ref_for_qvs::Bool=false,
-                bandwidth::Int=10, bandwidth_mult::Int=2,
-                min_dist::Int=15,
-                batch::Int=10, batch_threshold::Float64=0.05,
-                max_iters::Int=100, verbose::Int=0)
+                bandwidth::Int=(3*CODON_LENGTH),
+                bandwidth_mult::Int=2,
+                min_dist::Int=(5 * CODON_LENGTH),
+                batch::Int=10,
+                batch_threshold::Float64=0.05,
+                max_iters::Int=100,
+                verbose::Int=0)
     check_args(scores, reference, ref_indel_penalty, min_ref_indel_score,
                ref_scores, enabled_stages, max_iters)
 
