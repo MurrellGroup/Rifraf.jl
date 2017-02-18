@@ -1,26 +1,12 @@
 @enum(Stage,
-      initial_stage=1,
-      frame_correction_stage=2,
-      refinement_stage=3,
+      initial_stage=1,  # no reference; all proposals
+      frame_correction_stage=2,  # reference; indel proposals
+      refinement_stage=3,  # no reference; substitutions
       scoring_stage=4)
 
 function next_stage(s::Stage)
     return Stage(Int(s) + 1)
 end
-
-# initial_stage:
-#   - do not use reference.
-#   - propose all proposals
-# frame_correction_stage:
-#   - use reference. (allow codon moves in reference alignment)
-#   - propose all proposals
-# refinement stage:
-#   - do not use reference
-#   - propose subsitutions only
-# scoring stage:
-#   - do not change consensus
-#   - use reference
-#   - propose subsitutions and indels
 
 
 type State
@@ -59,20 +45,6 @@ end
     end
 end
 
-
-function get_sub_consensus(proposal::Proposal, seq::DNASeq,
-                           next_posn::Int, n_after::Int)
-    # next valid position in sequence after this proposal
-    t = typeof(proposal)
-    pos = proposal.pos
-    prefix = DNASeq()
-    stop = min(next_posn + n_after - 1, length(seq))
-    suffix = seq[next_posn:stop]
-    if t in (Substitution, Insertion)
-        prefix = DNASeq([proposal.base])
-    end
-    return DNASeq(prefix, suffix)
-end
 
 function seq_score_deletion(A::BandedArray{Score}, B::BandedArray{Score},
                             acol::Int, bcol::Int)
@@ -136,12 +108,28 @@ function score_nocodon(proposal::Proposal,
     return score
 end
 
-function seq_score_proposal(proposal::Proposal,
-                            A::BandedArray{Score}, B::BandedArray{Score},
-                            consensus::DNASeq,
-                            pseq::RifrafSequence,
-                            scores::Scores,
-                            newcols::Array{Score, 2})
+
+function get_sub_consensus(proposal::Proposal, seq::DNASeq,
+                           next_posn::Int, n_after::Int)
+    # next valid position in sequence after this proposal
+    t = typeof(proposal)
+    pos = proposal.pos
+    prefix = DNASeq()
+    stop = min(next_posn + n_after - 1, length(seq))
+    suffix = seq[next_posn:stop]
+    if t in (Substitution, Insertion)
+        prefix = DNASeq([proposal.base])
+    end
+    return DNASeq(prefix, suffix)
+end
+
+
+function score_proposal(proposal::Proposal,
+                        A::BandedArray{Score}, B::BandedArray{Score},
+                        consensus::DNASeq,
+                        pseq::RifrafSequence,
+                        scores::Scores,
+                        newcols::Array{Score, 2})
     codon_moves = (scores.codon_insertion > -Inf ||
                    scores.codon_deletion > -Inf)
     if !codon_moves
@@ -243,12 +231,12 @@ function score_proposal(m::Proposal,
                         newcols::Array{Score, 2})
     score = 0.0
     for si in 1:length(sequences)
-        score += seq_score_proposal(m, state.As[si], state.Bs[si], state.consensus,
-                                    sequences[si], scores, newcols)
+        score += score_proposal(m, state.As[si], state.Bs[si], state.consensus,
+                                sequences[si], scores, newcols)
     end
     if use_ref
-        score += seq_score_proposal(m, state.A_t, state.B_t, state.consensus,
-                                    reference, ref_scores, newcols)
+        score += score_proposal(m, state.A_t, state.B_t, state.consensus,
+                                reference, ref_scores, newcols)
     end
     return score
 end

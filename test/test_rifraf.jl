@@ -19,7 +19,7 @@ import Rifraf.sample_from_template,
        Rifraf.initial_state,
        Rifraf.estimate_probs,
        Rifraf.has_single_indels,
-       Rifraf.seq_score_proposal,
+       Rifraf.score_proposal,
        Rifraf.single_indel_proposals,
        Rifraf.recompute!,
        Rifraf.get_candidate_proposals,
@@ -242,8 +242,8 @@ end
         B = backward(template, pseq, local_scores)
         check_all_cols(A, B, codon_moves)
         newcols = zeros(size(A)[1], 6)
-        score = seq_score_proposal(proposal, A, B, template, pseq,
-                                   local_scores, newcols)
+        score = score_proposal(proposal, A, B, template, pseq,
+                               local_scores, newcols)
         @test_approx_eq_eps score Anew[end, end] 0.1
     end
 
