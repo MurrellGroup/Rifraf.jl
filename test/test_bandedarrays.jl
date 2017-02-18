@@ -1,6 +1,7 @@
-using Quiver2.BandedArrays
-
 using Base.Test
+
+using Rifraf.BandedArrays
+
 
 @testset "BandedArrays" begin
     @testset "inband" begin

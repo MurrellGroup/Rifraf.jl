@@ -1,9 +1,3 @@
-module QIO
-
-using Bio.Seq
-
-export read_fasta_records, read_fasta, write_fasta, read_fastq_records, read_fastq, write_fastq
-
 function read_fasta_records(filename)
     stream = open(FASTAReader, filename)
     records = FASTASeqRecord[]
@@ -64,6 +58,4 @@ function write_fastq(filename, seqs, phreds::Vector{Vector{Int8}};
         write(stream, Seq.FASTQSeqRecord(n, s, q))
     end
     close(stream)
-end
-
 end

@@ -1,7 +1,11 @@
-using Quiver2.Sample
-using Quiver2.Model
-
 using Base.Test
+
+using Rifraf
+
+import Rifraf.random_seq
+import Rifraf.sample_from_template
+import Rifraf.sample_reference
+
 
 srand(1)
 
