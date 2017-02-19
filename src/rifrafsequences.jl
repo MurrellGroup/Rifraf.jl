@@ -4,11 +4,11 @@ error probabilities.
 """
 type RifrafSequence
     seq::DNASeq
-    error_log_p::Vector{ErrorLogProb}
-    match_log_p::Vector{MatchLogProb}
+    error_log_p::Vector{LogProb}
+    match_log_p::Vector{LogProb}
     bandwidth::Int
 
-    function RifrafSequence(seq::DNASeq, error_log_p::Vector{ErrorLogProb},
+    function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
                             bandwidth::Int)
         if bandwidth < 1
             error("bandwidth must be positive")
@@ -18,7 +18,7 @@ type RifrafSequence
             error("length mismatch")
         end
         if length(seq) == 0
-            return new(seq, ErrorLogProb[], MatchLogProb[])
+            return new(seq, LogProb[], LogProb[])
         end
         if minimum(error_log_p) == -Inf
             error("a log error probability is negative infinity")

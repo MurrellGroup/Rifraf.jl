@@ -28,9 +28,9 @@ import Rifraf.sample_from_template,
        Rifraf.align_moves,
        Rifraf.moves_to_aligned_seqs,
        Rifraf.alignment_error_probs,
-       Rifraf.ErrorProb,
-       Rifraf.ErrorLogProb,
-       Rifraf.MatchLogProb
+       Rifraf.Prob,
+       Rifraf.LogProb,
+       Rifraf.LogProb
 
 srand(1234)
 
@@ -210,7 +210,7 @@ end
     function test_random_proposal(proposal, template_len)
         template = random_seq(template_len)
 
-        template_error_p = ErrorProb[0.1 for i=1:length(template)]
+        template_error_p = Prob[0.1 for i=1:length(template)]
         codon_moves = rand([true, false])
         if codon_moves
             local_errors = ErrorModel(2.0, 0.1, 0.1, 3.0, 3.0)
@@ -229,7 +229,7 @@ end
                                         phred_scale,
                                         log_actual_error_std,
                                         log_reported_error_std)
-        log_p = ErrorLogProb[float(q) / (-10.0) for q in phreds]
+        log_p = LogProb[float(q) / (-10.0) for q in phreds]
         bandwidth = max(5 * abs(length(template) - length(seq)), 30)
         pseq = RifrafSequence(seq, log_p, bandwidth)
 
@@ -299,7 +299,7 @@ end
     ref_scores = Scores(ref_errors)
 
     ref = DNASeq("CGGCGATTT")
-    consensus_errors = ErrorLogProb[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
+    consensus_errors = LogProb[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
     consensus = RifrafSequence(DNASeq("CTGCCGA"), consensus_errors, 10)
 
     proposals = single_indel_proposals(ref, consensus, ref_scores)
@@ -315,7 +315,7 @@ end
                                   do_subs::Bool=true,
                                   do_indels::Bool=true)
         bandwidth = 5
-        rseq = RifrafSequence(DNASeq(), ErrorLogProb[], bandwidth)
+        rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth)
         mult = 2
         errors = ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0)
         scores = Scores(errors)
@@ -323,7 +323,7 @@ end
         ref_scores = Scores(ref_errors)
 
         if length(lps) == 0
-            lps =  Vector{ErrorLogProb}[fill(-9.0, length(s)) for s in seqs]
+            lps =  Vector{LogProb}[fill(-9.0, length(s)) for s in seqs]
         end
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
@@ -385,7 +385,7 @@ end
         seqs = [DNASeq("GAA"),
                 DNASeq("AA"),
                 DNASeq("AA")]
-        lps = Vector{ErrorLogProb}[[-10.0, -5.0, -5.0],
+        lps = Vector{LogProb}[[-10.0, -5.0, -5.0],
                                    [-3.0, -5.0],
                                    [-3.0, -50]]
         expected = [Insertion(0, DNA_G)]
@@ -395,7 +395,7 @@ end
         # test that deletions get pushed
         consensus = DNASeq("CCGTAAAC")
         seqs = [DNASeq("CGTAAAC"), DNASeq("CCGTAAAC"), DNASeq("CGTAAAC")]
-        lps = Vector{ErrorLogProb}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
+        lps = Vector{LogProb}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
                                    [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
                                    [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
         expected = [Deletion(2)]
@@ -490,7 +490,7 @@ end
     function _test_candidate_scores(template, pseqs, scores, expected)
         ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
         state = initial_state(template, pseqs)
-        rseq = RifrafSequence(DNASeq(), ErrorLogProb[], 1)
+        rseq = RifrafSequence(DNASeq(), LogProb[], 1)
         redo_as = true
         redo_bs = true
         use_ref = false
@@ -518,7 +518,7 @@ end
     @testset "substitutions" begin
         template = DNASeq("TTT")
         seqs = [DNASeq("TAT")]
-        lps =  Vector{ErrorLogProb}[fill(-1.0, length(s)) for s in seqs]
+        lps =  Vector{LogProb}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                                for (s, p) in zip(seqs, lps)]
@@ -540,7 +540,7 @@ end
     @testset "deletion" begin
         template = DNASeq("TTT")
         seqs = [DNASeq("TT")]
-        lps =  Vector{ErrorLogProb}[fill(-1.0, length(s)) for s in seqs]
+        lps =  Vector{LogProb}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                                for (s, p) in zip(seqs, lps)]
@@ -555,7 +555,7 @@ end
         # test insertion
         template = DNASeq("TT")
         seqs = [DNASeq("TAT")]
-        lps =  Vector{ErrorLogProb}[fill(-1.0, length(s)) for s in seqs]
+        lps =  Vector{LogProb}[fill(-1.0, length(s)) for s in seqs]
 
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                                for (s, p) in zip(seqs, lps)]
@@ -628,7 +628,7 @@ end
     seqs = [DNASeq("CGAC"),
             DNASeq("CGAC"),
             DNASeq("CGAC")]
-    lps = Vector{ErrorLogProb}[[-9.0, -9.0, -9.0, -9.0],
+    lps = Vector{LogProb}[[-9.0, -9.0, -9.0, -9.0],
                                [-9.0, -9.0, -9.0, -9.0],
                                [-9.0, -9.0, -9.0, -9.0]]
     bandwidth = 5
@@ -640,7 +640,7 @@ end
 
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), ErrorLogProb[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth)
     state = initial_state(template, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     probs = estimate_probs(state, pseqs, scores, rseq, scores, false)
@@ -662,12 +662,12 @@ end
     ref_errors = ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Scores(ref_errors)
 
-    lps = Vector{ErrorLogProb}[[-9.0, -9.0, -9.0, -9.0, -9.0],
+    lps = Vector{LogProb}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                                [-9.0, -9.0, -9.0, -9.0, -9.0],
                                [-9.0, -9.0, -9.0, -9.0, -9.0]]
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), ErrorLogProb[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth)
     state = initial_state(template, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
     probs = estimate_probs(state, pseqs, scores, rseq, scores, false)
@@ -694,7 +694,7 @@ end
     lps = map(log10, ps)
     pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), ErrorLogProb[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth)
     state = initial_state(consensus, pseqs)
     recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
 

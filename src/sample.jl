@@ -27,14 +27,14 @@ function random_seq(n)
     return DNASeq(map(_ -> rbase(), 1:n))
 end
 
-const MIN_PROB = 1e-10
-const MAX_PROB = 0.3
+const MIN_PROB = Prob(1e-10)
+const MAX_PROB = Prob(0.3)
 
 
 """Add independent noise to each position in vector."""
-function jitter_phred(x::Vector{ErrorProb},
-                      phred_std::Float64,
-                      mult::Float64=1.0)
+function jitter_phred_domain(x::Vector{Prob},
+                             phred_std::Prob,
+                             mult::Prob=1.0)
     error = randn(length(x)) * phred_std / 10.0
     error[map(i -> i < 0.0, error)] *= mult
     result = exp10(log10(x) + error)
@@ -45,7 +45,7 @@ end
 
 
 function hmm_sample(sequence::DNASeq,
-                    error_p::Vector{ErrorProb},
+                    error_p::Vector{Prob},
                     errors::ErrorModel;
                     mutation_mult::Float64=1.0,
                     correct_mult::Float64=1.0)
@@ -72,7 +72,7 @@ function hmm_sample(sequence::DNASeq,
         del_ratio = errors.codon_deletion
     end
     final_seq = []
-    final_error_p = ErrorProb[]
+    final_error_p = Prob[]
     seqbools = Bool[]
     tbools = Bool[]
     skip = 0
@@ -142,7 +142,7 @@ end
 
 
 function sample_reference(reference::DNASeq,
-                          error_rate::ErrorProb,
+                          error_rate::Prob,
                           errors::ErrorModel)
     errors = normalize(errors)
     if errors.insertion > 0.0 || errors.deletion > 0.0
@@ -160,7 +160,7 @@ reported_error_std: standard deviation of reported phred values
 
 """
 function sample_from_template(template::DNASeq,
-                              template_error_p::Vector{ErrorProb},
+                              template_error_p::Vector{Prob},
                               errors::ErrorModel,
                               phred_scale::Float64,
                               actual_std::Float64,
@@ -178,9 +178,9 @@ function sample_from_template(template::DNASeq,
     # add noise to simulate measurement error
     d = Exponential(phred_scale)
     base_vector = exp10((-10.0 * log10(template_error_p) + rand(d)) / (-10.0))
-    jittered_error_p = jitter_phred(base_vector,
-                                    actual_std,
-                                    jitter_mult)
+    jittered_error_p = jitter_phred_domain(base_vector,
+                                           actual_std,
+                                           jitter_mult)
 
     seq, actual_error_p, sbools, tbools = hmm_sample(template,
                                                      jittered_error_p,
@@ -189,8 +189,8 @@ function sample_from_template(template::DNASeq,
                                                      correct_mult=correct_mult)
 
     # add noise to simulate quality score estimation error
-    reported_error_p = jitter_phred(actual_error_p,
-                                    reported_std)
+    reported_error_p = jitter_phred_domain(actual_error_p,
+                                           reported_std)
     phreds = p_to_phred(reported_error_p)
     return DNASeq(seq), actual_error_p, phreds, sbools, tbools
 end
@@ -198,9 +198,9 @@ end
 
 function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
                         n_diffs::Int,
-                        ref_error_rate::ErrorProb,
+                        ref_error_rate::Prob,
                         ref_errors::ErrorModel,
-                        error_rate::ErrorProb,
+                        error_rate::Prob,
                         alpha::Float64,
                         phred_scale::Float64,
                         actual_std::Float64,
@@ -227,7 +227,7 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
     template_error_p = rand(error_dist, len) * (MAX_PROB - MIN_PROB) + MIN_PROB
 
     seqs = DNASeq[]
-    actual_error_ps = Vector{ErrorProb}[]
+    actual_error_ps = Vector{Prob}[]
     phreds = Vector{Phred}[]
     seqbools = Vector{Bool}[]
     tbools = Vector{Bool}[]
@@ -277,9 +277,9 @@ seq_error_ratios: sequence error model
 
 """
 function sample(nseqs::Int, len::Int,
-                ref_error_rate::ErrorProb,
+                ref_error_rate::Prob,
                 ref_errors::ErrorModel,
-                error_rate::ErrorProb,
+                error_rate::Prob,
                 alpha::Float64,
                 phred_scale::Float64,
                 actual_std::Float64,

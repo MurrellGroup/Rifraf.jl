@@ -2,11 +2,11 @@ const MIN_PHRED = Phred(1)
 const MAX_PHRED = Phred(Int('~') - 33)
 
 """Convert error probability to PHRED score"""
-function p_to_phred(p::ErrorProb)
+function p_to_phred(p::Prob)
     return Phred(min(round(-10.0 * log10(p)), MAX_PHRED))
 end
 
-function p_to_phred(x::Vector{ErrorLogProb})
+function p_to_phred(x::Vector{LogProb})
     return Phred[p_to_phred(p) for p in x]
 end
 

@@ -19,6 +19,9 @@ export rifraf,
        reverse,
        DNASeq,
        Phred,
+       Prob,
+       LogProb,
+       Score,
        BandedArray,
        sparsecol,
        data_row,
@@ -27,9 +30,6 @@ export rifraf,
        inband,
        flip
 
-
-# keep this as a submodule. might eventually break it out into its own
-# project
 include("bandedarrays.jl")
 include("types.jl")
 include("phred.jl")

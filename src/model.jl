@@ -751,10 +751,10 @@ function recompute!(state::State, seqs::Vector{RifrafSequence},
 end
 
 
-immutable EstErrorProbs
-    sub::Array{ErrorProb, 2}
-    del::Array{ErrorProb, 1}
-    ins::Array{ErrorProb, 2}
+immutable EstProbs
+    sub::Array{Prob, 2}
+    del::Array{Prob, 1}
+    ins::Array{Prob, 2}
 end
 
 
@@ -771,7 +771,7 @@ function normalize_log_differences(sub_scores,
     ins_probs = broadcast(/, ins_exp, exp10(state_score) + sum(ins_exp, 2))
     sub_probs = pos_probs[:, 1:4]
     del_probs = pos_probs[:, 5]
-    return EstErrorProbs(sub_probs, del_probs, ins_probs)
+    return EstProbs(sub_probs, del_probs, ins_probs)
 end
 
 
@@ -839,7 +839,7 @@ function estimate_probs(state::State,
 end
 
 
-function estimate_point_probs(probs::EstErrorProbs)
+function estimate_point_probs(probs::EstProbs)
     pos_probs = hcat(probs.sub, probs.del)
     no_point_error_prob = maximum(pos_probs, 2)
     # multiple by 0.5 to avoid double counting.
@@ -938,7 +938,7 @@ function check_args(scores, reference, ref_indel_penalty, min_ref_indel_score,
 end
 
 function rifraf(seqstrings::Vector{DNASeq},
-                error_log_ps::Vector{Vector{ErrorLogProb}},
+                error_log_ps::Vector{Vector{LogProb}},
                 scores::Scores;
                 consensus::DNASeq=DNASeq(),
                 reference::DNASeq=DNASeq(),

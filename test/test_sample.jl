@@ -9,7 +9,7 @@ import Rifraf.sample_reference
 
 srand(1)
 
-@testset "Sample.jl" begin
+@testset "sample" begin
     const seq_errors = ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0)
     const ref_errors = ErrorModel(1.0, 0.0, 0.0, 1.0, 1.0)
 

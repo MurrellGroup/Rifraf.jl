@@ -36,8 +36,8 @@ end
 function move_scores(t_base::DNANucleotide,
                      s_base::DNANucleotide,
                      seq_i::Int,
-                     error_log_p::Vector{ErrorLogProb},
-                     match_log_p::Vector{MatchLogProb},
+                     error_log_p::Vector{LogProb},
+                     match_log_p::Vector{LogProb},
                      scores::Scores;
                      match_mult::Float64=0.0)
     cur_i = max(seq_i, 1)
@@ -65,12 +65,12 @@ end
 
 
 function codon_move_scores(seq_i::Int,
-                           error_log_p::Vector{ErrorProb},
+                           error_log_p::Vector{Prob},
                            scores::Scores)
     # we're moving INTO seq_i. so need previous three
     start = max(1, seq_i-2)
     stop = min(seq_i, length(error_log_p))
-    max_p = start <= stop ? maximum(error_log_p[start:stop]) : -Inf
+    max_p = start <= stop ? maximum(error_log_p[start:stop]) : Prob(-Inf)
     codon_ins_score =  max_p + scores.codon_insertion
     cur_log_p = error_log_p[max(seq_i, 1)]
     next_log_p = error_log_p[min(seq_i + 1, length(error_log_p))]
@@ -87,7 +87,7 @@ function update_helper(final_score::Score, final_move::Trace,
     prev_i, prev_j = offset_backward(move, i, j)
     rangecol = min(prev_j, size(A)[2])
     if inband(A, prev_i, rangecol)
-        score = -Inf
+        score = Score(-Inf)
         if acol < 1 || prev_j <= acol
             score = A[prev_i, prev_j] + move_score
         else
@@ -150,7 +150,7 @@ function update(A::BandedArray{Score},
                                                     newcols, A, i, j, acol,)
         end
     end
-    if final_score == -Inf
+    if final_score == Score(-Inf)
         error("new score is invalid")
     end
     if final_move == TRACE_NONE
