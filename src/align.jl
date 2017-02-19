@@ -157,8 +157,11 @@ function forward_moves(t::DNASeq, s::RifrafSequence,
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
-    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth)
-    moves = BandedArray(Trace, result.shape, s.bandwidth)
+    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
+                         initialize=false)
+    result[1, 1] = Score(0.0)
+    moves = BandedArray(Trace, result.shape, s.bandwidth,
+                        initialize=false)
     moves[1, 1] = TRACE_NONE
     nrows, ncols = size(result)
     for j = 1:ncols
@@ -186,7 +189,9 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 """
 function forward(t::DNASeq, s::RifrafSequence,
                  scores::Scores)
-    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth)
+    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
+                         initialize=false)
+    result[1, 1] = Score(0.0)
     nrows, ncols = size(result)
     for j = 1:ncols
         start, stop = row_range(result, j)

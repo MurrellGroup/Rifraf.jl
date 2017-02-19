@@ -3,63 +3,68 @@ immutable BandedArray{T} <: AbstractArray{T,2}
     data::Array{T,2}
     shape::Tuple{Int,Int}
     bandwidth::Int
+    # offsets of band
     h_offset::Int
     v_offset::Int
+    # limits for determining if [i, j] is in band
+    lower::Int
+    upper::Int
 
     function BandedArray(data::Array{T, 2}, shape::Tuple{Int, Int},
                          bandwidth::Int)
         if bandwidth < 1
-            # TODO: make unsigned
             error("bandwidth must be positive")
         end
-        drows = datarows(shape, bandwidth)
+        drows = ndatarows(shape, bandwidth)
         nrows, ncols = shape
-        h_offset = max(ncols - nrows, 0)
-        v_offset = max(nrows - ncols, 0)
-
         if size(data) != (drows, ncols)
             error("data is wrong shape")
         end
-
-        return new(data, shape, bandwidth, h_offset, v_offset)
+        h_offset = max(ncols - nrows, 0)
+        v_offset = max(nrows - ncols, 0)
+        if ncols > nrows
+            lower = nrows - ncols - bandwidth
+            upper = bandwidth
+        else
+            lower = -bandwidth
+            upper = nrows - ncols + bandwidth
+        end
+        return new(data, shape, bandwidth,
+                   h_offset, v_offset,
+                   lower, upper)
     end
-
 end
 
-function BandedArray(T::Type, shape::Tuple{Int,Int}, bandwidth::Int)
-    drows = datarows(shape, bandwidth)
-    dshape = (drows, shape[2])
-    data = zeros(T, dshape)
+function BandedArray(T::Type, shape::Tuple{Int,Int}, bandwidth::Int;
+                     initialize::Bool=true)
+    ndrows = ndatarows(shape, bandwidth)
+    if initialize
+        data = zeros(T, ndrows, shape[2])
+    else
+        data = Array(T, ndrows, shape[2])
+    end
     return BandedArray{T}(data, shape, bandwidth)
 end
 
-
-Base.size(A::BandedArray) = A.shape
-
-
-function datarows(shape::Tuple{Int,Int}, bandwidth::Int)
+function ndatarows(shape::Tuple{Int,Int}, bandwidth::Int)
     length_diff = abs(shape[1] - shape[2])
     return 2 * bandwidth + length_diff + 1
 end
 
-
-Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int) = A.data[data_row(A, i, j), j]
-
-
-Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int) = (A.data[data_row(A, i, j), j] = v)
-
-
-function sparsecol(A::BandedArray, j::Int)
-    start, stop = data_row_range(A, j)
-    return view(A.data, start:stop, j)
-end
-
+Base.size(A::BandedArray) = A.shape
 
 """The row in `data` which contains element [i, j]"""
 function data_row(A::BandedArray, i::Int, j::Int)
     return (i - j) + A.h_offset + A.bandwidth + 1
 end
 
+"""Macro to help index into `data` matching A[i, j]"""
+macro banddata(A, i, j)
+    :($A.data[data_row($A, $i, $j), $j])
+end
+
+Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int) = @banddata(A, i, j,)
+Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int) = (@banddata(A, i, j) = v)
 
 """The rows in A's column `j` that are dense"""
 function row_range(A::BandedArray, j::Int)
@@ -68,13 +73,17 @@ function row_range(A::BandedArray, j::Int)
     return start, stop
 end
 
-
 """The rows in data's column `j` that can be used"""
 function data_row_range(A::BandedArray, j::Int)
     a, b = row_range(A, j)
     return data_row(A, a, j), data_row(A, b, j)
 end
 
+"""Get a view of the in-band elements of column `j`."""
+function sparsecol(A::BandedArray, j::Int)
+    start, stop = data_row_range(A, j)
+    return view(A.data, start:stop, j)
+end
 
 """Is [i, j] in the banded region?"""
 function inband(A::BandedArray, i::Int, j::Int)
@@ -82,9 +91,9 @@ function inband(A::BandedArray, i::Int, j::Int)
     if i < 1 || j < 1 || i > nrows || j > ncols
         return false
     end
-    return 1 <= data_row(A, i, j) <= size(A.data)[1]::Int
+    k = A.bandwidth
+    return A.lower <= i- j <= A.upper
 end
-
 
 """Return a dense representation of A"""
 function Base.full{T}(A::BandedArray{T})
@@ -96,7 +105,6 @@ function Base.full{T}(A::BandedArray{T})
     end
     return result
 end
-
 
 """Reverse the rows and the columns of `A`.
 
@@ -114,4 +122,3 @@ function flip{T}(A::BandedArray{T})
     end
     return BandedArray{T}(newdata, size(A), A.bandwidth)
 end
-
