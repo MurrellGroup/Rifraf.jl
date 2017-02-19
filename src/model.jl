@@ -234,31 +234,54 @@ function all_proposals(stage::Stage,
                        sequences::Vector{RifrafSequence},
                        Amoves::Vector{BandedArray{Trace}},
                        scores::Scores,
-                       indel_correction_only::Bool)
+                       indel_correction_only::Bool,
+                       indel_seeds::Vector{Proposal}=Proposal[],
+                       seed_neighborhood::Int=CODON_LENGTH)
     len = length(consensus)
+    ins_positions = Set{Int}()
+    del_positions = Set{Int}()
+
+    for p in indel_seeds
+        if typeof(p) == Insertion
+            for idx in max(p.pos - seed_neighborhood, 0):min(p.pos + seed_neighborhood, len)
+                push!(ins_positions, idx)
+            end
+        else
+            for idx in max(p.pos - seed_neighborhood, 1):min(p.pos + seed_neighborhood, len)
+                push!(del_positions, idx)
+            end
+        end
+    end
+    do_subs = stage != STAGE_FRAME || !indel_correction_only
+    do_indels = stage == STAGE_INIT ||
+                stage == STAGE_FRAME ||
+                stage == STAGE_SCORE
+    no_seeds = length(indel_seeds) == 0
     function _it()
-        if stage != STAGE_FRAME || !indel_correction_only
-            # substitutions
-            for j in 1:len
-                for base in "ACGT"
+        if do_indels
+            for base in BASES
+                produce(Insertion(0, base))
+            end
+        end
+        for j in 1:len
+            if do_subs
+                # substitutions
+                for base in BASES
                     if consensus[j] != base
                         produce(Substitution(j, base))
                     end
                 end
             end
-        end
-        if stage == STAGE_INIT ||
-            stage == STAGE_FRAME ||
-            stage == STAGE_SCORE
-            # single indels
-            for base in "ACGT"
-                produce(Insertion(0, base))
-            end
-            for j in 1:len
-                for base in "ACGT"
-                    produce(Insertion(j, base))
+            if do_indels
+                # single indels
+                if no_seeds || j in del_positions
+                    produce(Deletion(j))
                 end
-                produce(Deletion(j))
+                if no_seeds || j in ins_positions
+                    for base in BASES
+                        produce(Insertion(j, base))
+                    end
+                end
             end
         end
     end
@@ -589,7 +612,8 @@ function get_candidate_proposals(state::State,
                                  do_alignment_proposals::Bool,
                                  do_surgery_proposals::Bool,
                                  trust_proposals::Bool,
-                                 indel_correction_only::Bool)
+                                 indel_correction_only::Bool;
+                                 indel_seeds::Vector{Proposal}=Proposal[])
     candidates = CandProposal[]
     use_ref = (state.stage == STAGE_FRAME)
 
@@ -599,7 +623,8 @@ function get_candidate_proposals(state::State,
 
     proposals = all_proposals(state.stage, state.consensus, sequences,
                               state.Amoves, scores,
-                              indel_correction_only)
+                              indel_correction_only,
+                              indel_seeds)
     if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_surgery_proposals
         do_indels = state.stage in (STAGE_INIT, STAGE_FRAME)
@@ -635,7 +660,6 @@ function get_candidate_proposals(state::State,
     end
     return candidates
 end
-
 
 function base_consensus(d::Dict{DNANucleotide, Score})
     return minimum((v, k) for (k, v) in d)[2]
@@ -703,7 +727,6 @@ function initial_state(consensus::DNASeq, seqs::Vector{RifrafSequence},
                  Bs, stage, false)
 end
 
-
 function recompute!(state::State, seqs::Vector{RifrafSequence},
                     scores::Scores, reference::RifrafSequence,
                     ref_scores::Scores, bandwidth_mult::Int,
@@ -749,7 +772,6 @@ function recompute!(state::State, seqs::Vector{RifrafSequence},
         state.score += state.A_t[end, end]
     end
 end
-
 
 immutable EstProbs
     sub::Array{Prob, 2}
@@ -950,10 +972,11 @@ function rifraf(seqstrings::Vector{DNASeq},
                                                STAGE_REFINE,
                                                STAGE_SCORE],
                 do_alignment_proposals::Bool=true,
-                do_surgery_proposals::Bool=true,
+                do_surgery_proposals::Bool=false,
                 trust_proposals::Bool=true,
-                fix_indels_stat::Bool=true,
-                skip_frame_correction::Bool=true,
+                fix_indels_stat::Bool=false,
+                seed_indels::Bool=true,
+                skip_frame_correction::Bool=false,
                 indel_correction_only::Bool=true,
                 use_ref_for_qvs::Bool=false,
                 bandwidth::Int=(3*CODON_LENGTH),
@@ -1009,6 +1032,8 @@ function rifraf(seqstrings::Vector{DNASeq},
     consensus_stages = [[] for _ in 1:(Int(typemax(Stage)) - 1)]
     cons_pstring = RifrafSequence(DNASeq(), Phred[], bandwidth)
 
+    indel_proposals = Proposal[]
+
     stage_iterations = zeros(Int, Int(typemax(Stage)) - 1)
     stage_times = zeros(Int(typemax(Stage)) - 1)
     tic()
@@ -1032,12 +1057,24 @@ function rifraf(seqstrings::Vector{DNASeq},
         end
 
         penalties_increased = false
+
+        if state.stage == STAGE_FRAME && seed_indels && length(indel_proposals) == 0
+            cons_errors = alignment_error_probs(length(state.consensus),
+                                                seqs, state.Amoves)
+            # ensure none are 0.0
+            cons_errors = [max(p, 1e-10) for p in cons_errors]
+            cons_pstring = RifrafSequence(state.consensus, log10(cons_errors), bandwidth)
+            indel_proposals = single_indel_proposals(reference, cons_pstring, ref_scores)
+        end
+
         candidates = get_candidate_proposals(state, seqs, scores, ref_pstring,
                                              ref_scores,
                                              do_alignment_proposals,
                                              do_surgery_proposals,
                                              trust_proposals,
-                                             indel_correction_only)
+                                             indel_correction_only;
+                                             indel_seeds=indel_proposals)
+        indel_proposals = Proposal[]
         recompute_As = true
         if length(candidates) == 0
             if verbose > 1
@@ -1054,13 +1091,15 @@ function rifraf(seqstrings::Vector{DNASeq},
                 state.stage = STAGE_FRAME
 
                 # fix distant single indels right away
-                if STAGE_FRAME in enabled_stages && fix_indels_stat
+                if STAGE_FRAME in enabled_stages && (seed_indels || fix_indels_stat)
                     cons_errors = alignment_error_probs(length(state.consensus),
                                                         seqs, state.Amoves)
                     # ensure none are 0.0
                     cons_errors = [max(p, 1e-10) for p in cons_errors]
                     cons_pstring = RifrafSequence(state.consensus, log10(cons_errors), bandwidth)
                     indel_proposals = single_indel_proposals(reference, cons_pstring, ref_scores)
+                end
+                if STAGE_FRAME in enabled_stages && fix_indels_stat
                     if verbose > 1
                         println(STDERR, "  fixing $(length(indel_proposals)) single indels")
                     end
@@ -1074,6 +1113,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                         end
                         push!(consensus_stages[Int(state.stage)], state.consensus)
                         state.stage = STAGE_REFINE
+                        indel_proposals = Proposal[]
                     end
                 end
                 if state.stage == STAGE_FRAME && STAGE_FRAME in enabled_stages
