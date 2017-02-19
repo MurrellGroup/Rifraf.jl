@@ -79,11 +79,11 @@ function codon_move_scores(seq_i::Int,
 end
 
 
-function update_helper(newcols::Array{Score, 2},
+function update_helper(final_score::Score, final_move::Trace,
+                       move_score::Score, move::Trace,
+                       newcols::Array{Score, 2},
                        A::BandedArray{Score},
-                       i::Int, j::Int, acol::Int,
-                       move::Trace, move_score::Score,
-                       final_score::Score, final_move::Trace)
+                       i::Int, j::Int, acol::Int)
     prev_i, prev_j = offset_backward(move, i, j)
     rangecol = min(prev_j, size(A)[2])
     if inband(A, prev_i, rangecol)
@@ -109,7 +109,8 @@ function update(A::BandedArray{Score},
                 newcols::Array{Score, 2}=Array(Score, (0, 0)),
                 acol=-1, trim=false,
                 skew_matches=false)
-    result = (-Inf, TRACE_NONE)
+    final_score = Score(-Inf)
+    final_move = TRACE_NONE
     # TODO: this cannot make mismatches preferable to codon indels
     match_mult = skew_matches ? 0.1 : 0.0
     match_score, ins_score, del_score = move_scores(t_base, s_base, i-1,
@@ -124,28 +125,38 @@ function update(A::BandedArray{Score},
     if trim && (j == size(A)[2])
         ins_score = 0.0
     end
-    result = update_helper(newcols, A, i, j, acol, TRACE_MATCH, match_score,
-                           result...)
-    result = update_helper(newcols, A, i, j, acol, TRACE_INSERT, ins_score, result...)
-    result = update_helper(newcols, A, i, j, acol, TRACE_DELETE, del_score, result...)
-    codon_ins_score, codon_del_score = codon_move_scores(i-1, pseq.error_log_p,
-                                                         scores)
+    final_score, final_move = update_helper(final_score, final_move,
+                                            match_score, TRACE_MATCH,
+                                            newcols, A, i, j, acol)
+    final_score, final_move = update_helper(final_score, final_move,
+                                            ins_score, TRACE_INSERT,
+                                            newcols, A, i, j, acol)
+    final_score, final_move = update_helper(final_score, final_move,
+                                            del_score, TRACE_DELETE,
+                                            newcols, A, i, j, acol)
 
-    if scores.codon_insertion > -Inf && i > CODON_LENGTH
-        result = update_helper(newcols, A, i, j, acol, TRACE_CODON_INSERT,
-                               codon_ins_score, result...)
+    if scores.codon_insertion > -Inf || scores.codon_deletion > -Inf
+        codon_ins_score, codon_del_score = codon_move_scores(i-1, pseq.error_log_p,
+                                                             scores)
+
+        if scores.codon_insertion > -Inf && i > CODON_LENGTH
+            final_score, final_move = update_helper(final_score, final_move,
+                                                    codon_ins_score, TRACE_CODON_INSERT,
+                                                    newcols, A, i, j, acol)
+        end
+        if scores.codon_deletion > -Inf && j > CODON_LENGTH
+            final_score, final_move = update_helper(final_score, final_move,
+                                                    codon_del_score, TRACE_CODON_DELETE,
+                                                    newcols, A, i, j, acol,)
+        end
     end
-    if scores.codon_deletion > -Inf && j > CODON_LENGTH
-        result = update_helper(newcols, A, i, j, acol, TRACE_CODON_DELETE,
-                               codon_del_score, result...)
-    end
-    if result[1] == -Inf
+    if final_score == -Inf
         error("new score is invalid")
     end
-    if result[2] == TRACE_NONE
+    if final_move == TRACE_NONE
         error("failed to find a move")
     end
-    return result
+    return final_score, final_move
 end
 
 
@@ -172,11 +183,9 @@ function forward_moves(t::DNASeq, s::RifrafSequence,
             end
             sbase = i > 1 ? s.seq[i-1] : DNA_Gap
             tbase = j > 1 ? t[j-1] : DNA_Gap
-            x = update(result, i, j, sbase, tbase,
-                       s, scores; trim=trim,
-                       skew_matches=skew_matches)
-            result[i, j] = x[1]
-            moves[i, j] = x[2]
+            result[i, j], moves[i, j] = update(result, i, j, sbase, tbase,
+                                               s, scores; trim=trim,
+                                               skew_matches=skew_matches)
         end
     end
     return result, moves
@@ -201,9 +210,8 @@ function forward(t::DNASeq, s::RifrafSequence,
             end
             sbase = i > 1 ? s.seq[i-1] : DNA_Gap
             tbase = j > 1 ? t[j-1] : DNA_Gap
-            x = update(result, i, j, sbase, tbase,
-                       s, scores)
-            result[i, j] = x[1]
+            result[i, j], _ = update(result, i, j, sbase, tbase,
+                                     s, scores)
         end
     end
     return result::BandedArray{Score}

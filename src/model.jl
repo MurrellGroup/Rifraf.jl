@@ -73,11 +73,10 @@ function score_nocodon(proposal::Proposal,
     amin, amax = row_range(A, min(new_acol, ncols))
     for i in amin:amax
         seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
-        x = update(A, i, new_acol,
-                   seq_base, proposal.base,
-                   pseq, scores;
-                   newcols=newcols, acol=acol)
-        newcols[i, 1] = x[1]
+        newcols[i, 1], _ = update(A, i, new_acol,
+                                  seq_base, proposal.base,
+                                  pseq, scores;
+                                  newcols=newcols, acol=acol)
     end
 
     # add up results
@@ -171,11 +170,10 @@ function score_proposal(proposal::Proposal,
         amin, amax = row_range(A, range_col)
         for i in amin:amax
             seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
-            x = update(A, i, acol + j,
-                       seq_base, sub_consensus[j],
-                       pseq, scores;
-                       newcols=newcols, acol=acol)
-            newcols[i, j] = x[1]
+            newcols[i, j], _ = update(A, i, acol + j,
+                                      seq_base, sub_consensus[j],
+                                      pseq, scores;
+                                      newcols=newcols, acol=acol)
         end
     end
 
