@@ -294,7 +294,7 @@ end
 end
 
 
-@testset "single_indel_proposals" begin
+@testset "single indel proposals" begin
     ref_errors = ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
     ref_scores = Scores(ref_errors)
 
