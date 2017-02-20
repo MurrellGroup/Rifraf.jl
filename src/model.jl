@@ -1243,11 +1243,9 @@ function rifraf(seqstrings::Vector{DNASeq},
             state.consensus = apply_proposals(old_consensus,
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
-            recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
-                            state.stage == STAGE_FRAME)
             recompute!(state, seqs, scores,
                        ref_pstring, ref_scores,
-                       bandwidth_mult, true, recompute_Bs, verbose,
+                       bandwidth_mult, true, false, verbose,
                        use_ref_for_qvs)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
