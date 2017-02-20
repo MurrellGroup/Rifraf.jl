@@ -55,34 +55,22 @@ function are_ambiguous(ms::Vector{Proposal})
     return !ins_good || !others_good
 end
 
-function apply_proposal(seq::DNASeq,
-                         proposal::Substitution)
-    return DNASeq(seq[1:(proposal.pos - 1)],
-                       DNASeq([proposal.base]),
-                       seq[(proposal.pos + 1):end])
+function get_proposal_base(seq::DNASeq, proposal::Substitution,
+                           last_del_pos::Int)
+    return DNASeq([proposal.base])
 end
 
-function apply_proposal(seq::DNASeq,
-                         proposal::Insertion)
-    return DNASeq(seq[1:(proposal.pos)],
-                       DNASeq([proposal.base]),
-                       seq[(proposal.pos+1):end])
+function get_proposal_base(seq::DNASeq, proposal::Insertion,
+                           last_del_pos::Int)
+    if proposal.pos > 0 && last_del_pos != proposal.pos
+        return DNASeq([seq[proposal.pos], proposal.base])
+    end
+    return DNASeq([proposal.base])
 end
 
-function apply_proposal(seq::DNASeq,
-                         proposal::Deletion)
-    return DNASeq(seq[1:(proposal.pos - 1)],
-                       seq[(proposal.pos + 1):end])
-end
-
-base_shift_dict = Dict(Insertion => 1,
-                       Deletion => -1,
-                       Substitution => 0)
-"""
-How many bases to shift proposals after this one.
-"""
-function base_shift(m::Proposal)
-    return base_shift_dict[typeof(m)]
+function get_proposal_base(seq::DNASeq, proposal::Deletion,
+                           last_del_pos)
+    return DNASeq([])
 end
 
 
@@ -94,19 +82,23 @@ function apply_proposals(seq::DNASeq,
     if are_ambiguous(proposals)
         throw(AmbiguousProposalsError())
     end
-    remaining = deepcopy(proposals)
-    while length(remaining) > 0
-        m = pop!(remaining)
-        seq = apply_proposal(seq, m)
-        shift = base_shift(m)
-        for i in 1:length(remaining)
-            m2 = remaining[i]
-            if m2.pos >= m.pos
-                remaining[i] = update_pos(m2, m2.pos + shift)
-            end
+    result = DNASeq[]
+    next = 1
+    # keep track of deletions, so an insertion following a deletion
+    # knows not to include the deleted base
+    last_del_pos = 0
+    # sort by position, making sure deletions go before insertions
+    proposals = sort(proposals, by=p->(p.pos, typeof(p) == Deletion ? 0 : 1))
+    for p in proposals
+        push!(result, seq[next:p.pos - 1])
+        push!(result, get_proposal_base(seq, p, last_del_pos))
+        next = p.pos + 1
+        if typeof(p) == Deletion
+            last_del_pos = p.pos
         end
     end
-    return seq
+    push!(result, seq[next:end])
+    return DNASeq(result...)
 end
 
 function choose_candidates(candidates::Vector{CandProposal}, min_dist::Int)

@@ -10,7 +10,7 @@ import Rifraf.sample_from_template,
        Rifraf.Substitution,
        Rifraf.Insertion,
        Rifraf.Deletion,
-       Rifraf.apply_proposal,
+       Rifraf.apply_proposals,
        Rifraf.rbase,
        Rifraf.forward,
        Rifraf.backward,
@@ -233,7 +233,7 @@ end
         bandwidth = max(5 * abs(length(template) - length(seq)), 30)
         pseq = RifrafSequence(seq, log_p, bandwidth)
 
-        new_template = apply_proposal(template, proposal)
+        new_template = apply_proposals(template, Proposal[proposal])
         Anew = forward(new_template, pseq, local_scores)
         Bnew = backward(new_template, pseq, local_scores)
         check_all_cols(Anew, Bnew, codon_moves)
@@ -244,10 +244,15 @@ end
         newcols = zeros(size(A)[1], 6)
         score = score_proposal(proposal, A, B, template, pseq,
                                local_scores, newcols)
+        if abs(score - Anew[end, end]) > 1
+            println(template)
+            println(proposal)
+            println(new_template)
+        end
         @test_approx_eq_eps score Anew[end, end] 0.1
     end
 
-    @testset "random_substitutions" begin
+    @testset "random substitutions" begin
         for i = 1:1000
             template_len = rand(30:50)
             pos = rand(1:template_len)
@@ -256,7 +261,7 @@ end
         end
     end
 
-    @testset "random_insertions" begin
+    @testset "random insertions" begin
         for i = 1:1000
             template_len = rand(30:50)
             pos = rand(0:template_len)
@@ -265,7 +270,7 @@ end
         end
     end
 
-    @testset "random_deletions" begin
+    @testset "random deletions" begin
         for i = 1:1000
             template_len = rand(30:50)
             pos = rand(1:template_len)
