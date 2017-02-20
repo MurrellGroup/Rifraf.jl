@@ -159,6 +159,31 @@ function update(A::BandedArray{Score},
     return final_score, final_move
 end
 
+"""The heart of the forward algorithm.
+
+`use_moves` determines whether moves are saved or not.
+
+"""
+macro forward(use_moves)
+    moves = :(_)
+    if use_moves
+        moves = :(moves[i, j])
+    end
+    :(for j = 1:ncols
+        start, stop = row_range(result, j)
+        for i = start:stop
+            if i == 1 && j == 1
+                continue
+            end
+            sbase = i > 1 ? s.seq[i-1] : DNA_Gap
+            tbase = j > 1 ? t[j-1] : DNA_Gap
+            result[i, j], $moves = update(result, i, j, sbase, tbase,
+                                               s, scores; trim=trim,
+                                               skew_matches=skew_matches)
+        end
+    end)
+end
+
 
 function forward_moves!(t::DNASeq, s::RifrafSequence,
                         result::BandedArray{Score},
@@ -166,36 +191,21 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
                         scores::Scores;
                         trim::Bool=false,
                         skew_matches::Bool=false)
-    # FIXME: code duplication with forward_codon(). This is done in a
-    # seperate function to keep return type stable and avoid
-    # allocating the `moves` array unnecessarily.
     new_shape = (length(s) + 1, length(t) + 1)
     resize!(result, new_shape)
     resize!(moves, new_shape)
     result[1, 1] = Score(0.0)
     moves[1, 1] = TRACE_NONE
     nrows, ncols = new_shape
-    for j = 1:ncols
-        start, stop = row_range(result, j)
-        for i = start:stop
-            if i == 1 && j == 1
-                continue
-            end
-            sbase = i > 1 ? s.seq[i-1] : DNA_Gap
-            tbase = j > 1 ? t[j-1] : DNA_Gap
-            result[i, j], moves[i, j] = update(result, i, j, sbase, tbase,
-                                               s, scores; trim=trim,
-                                               skew_matches=skew_matches)
-        end
-    end
+    @forward(true)
 end
 
 
 """Does backtracing to find best alignment."""
 function forward_moves(t::DNASeq, s::RifrafSequence,
                        scores::Scores;
-                       trim::Bool=false,
                        padding::Int=0,
+                       trim::Bool=false,
                        skew_matches::Bool=false)
     result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
                          padding=padding,
@@ -203,31 +213,22 @@ function forward_moves(t::DNASeq, s::RifrafSequence,
     moves = BandedArray(Trace, size(result), s.bandwidth,
                         padding=padding,
                         initialize=false)
-    forward_moves!(t, s, result, moves,
-                   scores, trim=trim, skew_matches=skew_matches)
+    forward_moves!(t, s, result, moves, scores,
+                   trim=trim, skew_matches=skew_matches)
     return result, moves
 end
 
 
 function forward!(t::DNASeq, s::RifrafSequence,
                  result::BandedArray{Score},
-                 scores::Scores)
+                 scores::Scores;
+                 trim::Bool=false,
+                 skew_matches::Bool=false)
     new_shape = (length(s) + 1, length(t) + 1)
     resize!(result, new_shape)
     result[1, 1] = Score(0.0)
     nrows, ncols = size(result)
-    for j = 1:ncols
-        start, stop = row_range(result, j)
-        for i = start:stop
-            if i == 1 && j == 1
-                continue
-            end
-            sbase = i > 1 ? s.seq[i-1] : DNA_Gap
-            tbase = j > 1 ? t[j-1] : DNA_Gap
-            result[i, j], _ = update(result, i, j, sbase, tbase,
-                                     s, scores)
-        end
-    end
+    @forward(false)
 end
 
 
@@ -236,11 +237,14 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
 function forward(t::DNASeq, s::RifrafSequence,
-                 scores::Scores, padding::Int=0)
+                 scores::Scores;
+                 padding::Int=0,
+                 trim::Bool=false,
+                 skew_matches::Bool=false)
     result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
                          padding=padding,
                          initialize=false)
-    forward!(t, s, result, scores)
+    forward!(t, s, result, scores, trim=trim, skew_matches=skew_matches)
     return result
 end
 
