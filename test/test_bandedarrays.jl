@@ -59,9 +59,9 @@ using Rifraf
     end
 
     @testset "flip" begin
-        m = BandedArray(Int, (5, 3), 1)
+        m = BandedArray(Int, (5, 3), 1, padding=5)
         m[1, 1] = 1
-        m = flip(m)
+        flip!(m)
         @test m[5, 3] == 1
     end
 
@@ -162,5 +162,31 @@ using Rifraf
         expected[1:4, 1] = 1
         expected[5, 3] = 2
         @test full(m) == expected
+    end
+
+    @testset "resize up within padding" begin
+        m = BandedArray(Int, (3, 3), 1, padding=10)
+        old = m.data
+        resize!(m, (5, 5))
+        @test m.data == old
+    end
+
+    @testset "resize down" begin
+        m = BandedArray(Int, (5, 5), 1, padding=0)
+        old = m.data
+        resize!(m, (3, 3))
+        @test m.data == old
+    end
+
+    @testset "resize with reallocate" begin
+        m = BandedArray(Int, (3, 3), 1, padding=5)
+        @test Rifraf.row_range(m, 1) == (1, 2)
+        old = m.data
+        resize!(m, (5, 10))
+        @test m.data != old
+        @test Rifraf.row_range(m, 1) == (1, 2)
+        @test Rifraf.row_range(m, 3) == (1, 4)
+        @test Rifraf.row_range(m, 5) == (1, 5)
+        @test Rifraf.row_range(m, 10) == (4, 5)
     end
 end

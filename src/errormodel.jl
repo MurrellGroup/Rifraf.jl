@@ -28,18 +28,6 @@ immutable Scores
     codon_deletion::Score
 end
 
-function Scores(mismatch=0.0,
-                insertion=0.0,
-                deletion=0.0,
-                codon_insertion=0.0,
-                codon_deletion=0.0)
-    return Scores(Score(mismatch),
-                  Score(insertion),
-                  Score(deletion),
-                  Score(codon_insertion),
-                  Score(codon_deletion))
-end
-
 function Scores(errors::ErrorModel;
                 mismatch=0.0,
                 insertion=0.0,

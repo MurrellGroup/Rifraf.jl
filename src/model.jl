@@ -14,6 +14,7 @@ type State
     consensus::DNASeq
     A_t::BandedArray{Score}
     B_t::BandedArray{Score}
+    Amoves_t::BandedArray{Trace}
     As::Vector{BandedArray{Score}}
     Amoves::Vector{BandedArray{Trace}}
     Bs::Vector{BandedArray{Score}}
@@ -237,6 +238,8 @@ function all_proposals(stage::Stage,
                        indel_correction_only::Bool,
                        indel_seeds::Vector{Proposal}=Proposal[],
                        seed_neighborhood::Int=CODON_LENGTH)
+    # FIXME: look into reducing allocations by not producing new
+    # instances of every possible proposal
     len = length(consensus)
     ins_positions = Set{Int}()
     del_positions = Set{Int}()
@@ -286,6 +289,25 @@ function all_proposals(stage::Stage,
         end
     end
     Task(_it)
+end
+
+
+"""Only get proposals that appear in at least one alignment"""
+function alignment_proposals(Amoves::Vector{BandedArray{Trace}},
+                             consensus::DNASeq,
+                             sequences::Vector{RifrafSequence},
+                             do_subs::Bool,
+                             do_indels::Bool)
+    result = Set{Proposal}()
+    for (Amoves, seq) in zip(Amoves, sequences)
+        moves = backtrace(Amoves)
+        for proposal in moves_to_proposals(moves, consensus, seq)
+            if (typeof(proposal) == Substitution && do_subs) || do_indels
+                push!(result, proposal)
+            end
+        end
+    end
+    return collect(result)
 end
 
 
@@ -707,7 +729,11 @@ function single_indel_proposals(reference::DNASeq,
 end
 
 
-function initial_state(consensus::DNASeq, seqs::Vector{RifrafSequence},
+function initial_state(consensus::DNASeq,
+                       seqs::Vector{RifrafSequence},
+                       ref::DNASeq,
+                       bandwidth::Int,
+                       padding::Int,
                        stage::Stage=STAGE_INIT)
     if length(consensus) == 0
         # choose highest-quality sequence
@@ -716,15 +742,40 @@ function initial_state(consensus::DNASeq, seqs::Vector{RifrafSequence},
         consensus = seqs[idx].seq
     end
 
-    A_t = BandedArray(Score, (1, 1), 1)
-    B_t = BandedArray(Score, (1, 1), 1)
+    seqlens = map(length, seqs)
+    maxlen = maximum(seqlens)
+    minlen = minimum(seqlens)
+    clen = length(consensus)
+    rlen = length(ref)
 
+    t_shape = (clen + 1, rlen + 1)
+    t_padding = max(abs(rlen - minlen), abs(rlen - maxlen)) + padding
+    if length(ref) == 0
+        t_shape = (1, 1)
+        bandwidth = 1
+        t_padding = 0
+    end
+    A_t = BandedArray(Score, t_shape, bandwidth, padding=t_padding)
+    B_t = BandedArray(Score, t_shape, bandwidth, padding=t_padding)
+    Amoves_t = BandedArray(Trace, t_shape, bandwidth, padding=t_padding)
+
+    seq_padding = padding + maxlen - minlen
     As = BandedArray{Score}[]
     Bs = BandedArray{Score}[]
     Amoves = BandedArray{Trace}[]
 
-    return State(0.0, consensus, A_t, B_t, As, Amoves,
-                 Bs, stage, false)
+    # TODO: different amounts of padding for different length sequences
+    for s in seqs
+        shape = (length(s) + 1, clen + 1)
+        push!(As, BandedArray(Score, shape, s.bandwidth, padding=seq_padding))
+        push!(Bs, BandedArray(Score, shape, s.bandwidth, padding=seq_padding))
+        push!(Amoves, BandedArray(Trace, shape, s.bandwidth, padding=seq_padding))
+    end
+
+    return State(0.0, consensus,
+                 A_t, B_t, Amoves_t,
+                 As, Amoves, Bs,
+                 stage, false)
 end
 
 function recompute!(state::State, seqs::Vector{RifrafSequence},
@@ -733,35 +784,41 @@ function recompute!(state::State, seqs::Vector{RifrafSequence},
                     recompute_As::Bool, recompute_Bs::Bool,
                     verbose::Int, use_ref_for_qvs::Bool)
     if recompute_As
-        state.As = BandedArray{Score}[]
-        state.Amoves = BandedArray{Trace}[]
-        for s in seqs
-            As, Amoves = forward_moves(state.consensus, s, scores)
+        for (i, (s, A, Amoves)) in enumerate(zip(seqs, state.As, state.Amoves))
+            forward_moves!(state.consensus, s, A, Amoves, scores)
             while band_tolerance(Amoves) < CODON_LENGTH
                 s.bandwidth *= bandwidth_mult
-                As, Amoves = forward_moves(state.consensus, s, scores)
+                newbandwidth!(A, s.bandwidth)
+                newbandwidth!(Amoves, s.bandwidth)
+                forward_moves!(state.consensus, s, A, Amoves, scores)
             end
-            push!(state.As, As)
-            push!(state.Amoves, Amoves)
         end
         if (((state.stage == STAGE_FRAME) ||
              ((state.stage == STAGE_SCORE) &&
               (use_ref_for_qvs))) &&
               (length(reference) > 0))
-            state.A_t, Amoves_t = forward_moves(state.consensus, reference, ref_scores)
-            while band_tolerance(Amoves_t) < CODON_LENGTH
+            forward_moves!(state.consensus, reference,
+                           state.A_t, state.Amoves_t,
+                           ref_scores)
+            while band_tolerance(state.Amoves_t) < CODON_LENGTH
                 reference.bandwidth *= bandwidth_mult
-                state.A_t, Amoves_t = forward_moves(state.consensus, reference, ref_scores)
+                newbandwidth!(state.A_t, reference.bandwidth)
+                newbandwidth!(state.Amoves_t, reference.bandwidth)
+                forward_moves!(state.consensus, reference,
+                               state.A_t, state.Amoves_t,
+                               ref_scores)
             end
         end
     end
     if recompute_Bs
-        state.Bs = [backward(state.consensus, s, scores) for s in seqs]
+        for (i, (s, B)) in enumerate(zip(seqs, state.Bs))
+            backward!(state.consensus, s, B, scores)
+        end
         if (((state.stage == STAGE_FRAME) ||
              ((state.stage == STAGE_SCORE) &&
               (use_ref_for_qvs))) &&
             (length(reference) > 0))
-            state.B_t = backward(state.consensus, reference, ref_scores)
+            backward!(state.consensus, reference, state.B_t, ref_scores)
         end
     end
     state.score = sum(A[end, end] for A in state.As)
@@ -979,6 +1036,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                 skip_frame_correction::Bool=false,
                 indel_correction_only::Bool=true,
                 use_ref_for_qvs::Bool=false,
+                padding::Int=(5*CODON_LENGTH),
                 bandwidth::Int=(3*CODON_LENGTH),
                 bandwidth_mult::Int=2,
                 min_dist::Int=(5 * CODON_LENGTH),
@@ -1012,7 +1070,9 @@ function rifraf(seqstrings::Vector{DNASeq},
     if verbose > 1
         println(STDERR, "computing initial alignments")
     end
-    state = initial_state(consensus, seqs, minimum(enabled_stages))
+    state = initial_state(consensus, seqs, reference,
+                          bandwidth, padding,
+                          minimum(enabled_stages))
     recompute_Bs = !(do_surgery_proposals && trust_proposals)
     recompute!(state, seqs, scores,
                ref_pstring, ref_scores,

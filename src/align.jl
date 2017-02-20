@@ -160,21 +160,21 @@ function update(A::BandedArray{Score},
 end
 
 
-"""Does backtracing to find best alignment."""
-function forward_moves(t::DNASeq, s::RifrafSequence,
-                       scores::Scores;
-                       trim::Bool=false,
-                       skew_matches::Bool=false)
+function forward_moves!(t::DNASeq, s::RifrafSequence,
+                        result::BandedArray{Score},
+                        moves::BandedArray{Trace},
+                        scores::Scores;
+                        trim::Bool=false,
+                        skew_matches::Bool=false)
     # FIXME: code duplication with forward_codon(). This is done in a
     # seperate function to keep return type stable and avoid
     # allocating the `moves` array unnecessarily.
-    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
-                         initialize=false)
+    new_shape = (length(s) + 1, length(t) + 1)
+    resize!(result, new_shape)
+    resize!(moves, new_shape)
     result[1, 1] = Score(0.0)
-    moves = BandedArray(Trace, result.shape, s.bandwidth,
-                        initialize=false)
     moves[1, 1] = TRACE_NONE
-    nrows, ncols = size(result)
+    nrows, ncols = new_shape
     for j = 1:ncols
         start, stop = row_range(result, j)
         for i = start:stop
@@ -188,18 +188,32 @@ function forward_moves(t::DNASeq, s::RifrafSequence,
                                                skew_matches=skew_matches)
         end
     end
+end
+
+
+"""Does backtracing to find best alignment."""
+function forward_moves(t::DNASeq, s::RifrafSequence,
+                       scores::Scores;
+                       trim::Bool=false,
+                       padding::Int=0,
+                       skew_matches::Bool=false)
+    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
+                         padding=padding,
+                         initialize=false)
+    moves = BandedArray(Trace, size(result), s.bandwidth,
+                        padding=padding,
+                        initialize=false)
+    forward_moves!(t, s, result, moves,
+                   scores, trim=trim, skew_matches=skew_matches)
     return result, moves
 end
 
 
-"""
-F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
-
-"""
-function forward(t::DNASeq, s::RifrafSequence,
+function forward!(t::DNASeq, s::RifrafSequence,
+                 result::BandedArray{Score},
                  scores::Scores)
-    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
-                         initialize=false)
+    new_shape = (length(s) + 1, length(t) + 1)
+    resize!(result, new_shape)
     result[1, 1] = Score(0.0)
     nrows, ncols = size(result)
     for j = 1:ncols
@@ -214,7 +228,28 @@ function forward(t::DNASeq, s::RifrafSequence,
                                      s, scores)
         end
     end
-    return result::BandedArray{Score}
+end
+
+
+"""
+F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
+
+"""
+function forward(t::DNASeq, s::RifrafSequence,
+                 scores::Scores, padding::Int=0)
+    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
+                         padding=padding,
+                         initialize=false)
+    forward!(t, s, result, scores)
+    return result
+end
+
+
+function backward!(t::DNASeq, s::RifrafSequence,
+                   result::BandedArray{Score},
+                   scores::Scores)
+    forward!(reverse(t), reverse(s), result, scores)
+    flip!(result)
 end
 
 
@@ -225,13 +260,14 @@ B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 function backward(t::DNASeq, s::RifrafSequence,
                   scores::Scores)
     result = forward(reverse(t), reverse(s), scores)
-    return flip(result)
+    flip!(result)
+    return result
 end
 
 
 function backtrace(moves::BandedArray{Trace})
     taken_moves = Trace[]
-    i, j = moves.shape
+    i, j = size(moves)
     while i > 1 || j > 1
         m = moves[i, j]
         push!(taken_moves, m)
@@ -323,10 +359,13 @@ end
 
 function align_moves(t::DNASeq, s::RifrafSequence,
                      scores::Scores;
+                     padding::Int=0,
                      trim::Bool=false,
                      skew_matches::Bool=false)
     A, Amoves = forward_moves(t, s, scores;
-                              trim=trim, skew_matches=skew_matches)
+                              padding=padding,
+                              trim=trim,
+                              skew_matches=skew_matches)
     return backtrace(Amoves)
 end
 
@@ -374,22 +413,4 @@ function moves_to_proposals(moves::Vector{Trace},
         end
     end
     return proposals
-end
-
-"""Only get proposals that appear in at least one alignment"""
-function alignment_proposals(Amoves::Vector{BandedArray{Trace}},
-                             consensus::DNASeq,
-                             sequences::Vector{RifrafSequence},
-                             do_subs::Bool,
-                             do_indels::Bool)
-    result = Set{Proposal}()
-    for (Amoves, seq) in zip(Amoves, sequences)
-        moves = backtrace(Amoves)
-        for proposal in moves_to_proposals(moves, consensus, seq)
-            if (typeof(proposal) == Substitution && do_subs) || do_indels
-                push!(result, proposal)
-            end
-        end
-    end
-    return collect(result)
 end

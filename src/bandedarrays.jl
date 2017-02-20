@@ -1,7 +1,8 @@
 """Sparse array with a band of nonzeroes."""
-immutable BandedArray{T} <: AbstractArray{T,2}
+type BandedArray{T} <: AbstractArray{T,2}
     data::Array{T,2}
-    shape::Tuple{Int,Int}
+    nrows::Int
+    ncols::Int
     bandwidth::Int
     # offsets of band
     h_offset::Int
@@ -9,49 +10,92 @@ immutable BandedArray{T} <: AbstractArray{T,2}
     # limits for determining if [i, j] is in band
     lower::Int
     upper::Int
+    # used for initial creation and resizing
+    padding::Int  # set by user
+    initialize::Bool
 
     function BandedArray(data::Array{T, 2}, shape::Tuple{Int, Int},
-                         bandwidth::Int)
+                         bandwidth::Int, padding::Int,
+                         initialize::Bool)
         if bandwidth < 1
             error("bandwidth must be positive")
         end
-        drows = ndatarows(shape, bandwidth)
         nrows, ncols = shape
-        if size(data) != (drows, ncols)
+        drows = ndatarows(nrows, ncols, bandwidth)
+        if size(data) != (drows + padding, ncols + padding)
             error("data is wrong shape")
         end
         h_offset = max(ncols - nrows, 0)
         v_offset = max(nrows - ncols, 0)
-        if ncols > nrows
-            lower = nrows - ncols - bandwidth
-            upper = bandwidth
-        else
-            lower = -bandwidth
-            upper = nrows - ncols + bandwidth
-        end
-        return new(data, shape, bandwidth,
+        lower, upper = bandlimits(nrows, ncols, bandwidth)
+        return new(data, nrows, ncols, bandwidth,
                    h_offset, v_offset,
-                   lower, upper)
+                   lower, upper, padding, initialize)
     end
 end
 
-function BandedArray(T::Type, shape::Tuple{Int,Int}, bandwidth::Int;
-                     initialize::Bool=true)
-    ndrows = ndatarows(shape, bandwidth)
-    if initialize
-        data = zeros(T, ndrows, shape[2])
+function bandlimits(nrows, ncols, bandwidth)
+    if ncols > nrows
+        lower = nrows - ncols - bandwidth
+        upper = bandwidth
     else
-        data = Array(T, ndrows, shape[2])
+        lower = -bandwidth
+        upper = nrows - ncols + bandwidth
     end
-    return BandedArray{T}(data, shape, bandwidth)
+    return lower, upper
 end
 
-function ndatarows(shape::Tuple{Int,Int}, bandwidth::Int)
-    length_diff = abs(shape[1] - shape[2])
+function BandedArray(T::Type, shape::Tuple{Int, Int}, bandwidth::Int;
+                     padding::Int=0, initialize::Bool=true)
+    nrows, ncols = shape
+    data = allocate_data(T, nrows, ncols, bandwidth, padding, initialize)
+    return BandedArray{T}(data, shape, bandwidth, padding, initialize)
+end
+
+function allocate_data(T::Type,
+                       nrows::Int, ncols::Int, bandwidth::Int,
+                       padding::Int, initialize::Bool)
+    ndrows = ndatarows(nrows, ncols, bandwidth)
+    if initialize
+        data = zeros(T, ndrows + padding, ncols + padding)
+    else
+        data = Array(T, ndrows + padding, ncols + padding)
+    end
+    return data
+end
+
+function reallocate!{T}(A::BandedArray{T})
+    # TODO: copy if requested
+    A.data = allocate_data(T, A.nrows, A.ncols, A.bandwidth, A.padding, A.initialize)
+end
+
+function Base.resize!{T}(A::BandedArray{T}, shape::Tuple{Int, Int})
+    nrows, ncols = shape
+    A.nrows = nrows
+    A.ncols = ncols
+    A.h_offset = max(ncols - nrows, 0)
+    A.v_offset = max(nrows - ncols, 0)
+    A.lower, A.upper = bandlimits(nrows, ncols, A.bandwidth)
+
+    drows, dcols = size(A.data)
+    new_ndrows = ndatarows(nrows, ncols, A.bandwidth)
+    if new_ndrows > drows || ncols > dcols
+        reallocate!(A)
+    end
+end
+
+function newbandwidth!{T}(A::BandedArray{T}, bandwidth::Int)
+    A.bandwidth = bandwidth
+    reallocate!(A)
+end
+
+"""Number of used data rows"""
+function ndatarows(nrows::Int, ncols::Int, bandwidth::Int)
+    length_diff = abs(nrows - ncols)
     return 2 * bandwidth + length_diff + 1
 end
 
-Base.size(A::BandedArray) = A.shape
+Base.size(A::BandedArray) = (A.nrows, A.ncols)
 
 """The row in `data` which contains element [i, j]"""
 function data_row(A::BandedArray, i::Int, j::Int)
@@ -112,13 +156,27 @@ If `A` has shape `m` by `n`, then element [i, j] goes to
 position [m - i, n - j].
 
 """
-function flip{T}(A::BandedArray{T})
-    newdata = similar(A.data)
-    nrows, ncols = size(A.data)
-    for j in 1:ncols
+function flip!{T}(A::BandedArray{T})
+    nrows = ndatarows(A.nrows, A.ncols, A.bandwidth)
+    ncols = size(A)[2]
+    a, b = divrem(ncols, 2)
+    for j in 1:a
         for i in 1:nrows
-            newdata[i, j] = A.data[nrows - i + 1, ncols - j + 1]
+            first = A.data[i, j]
+            second = A.data[nrows - i + 1, ncols - j + 1]
+            A.data[i, j] = second
+            A.data[nrows - i + 1, ncols - j + 1] = first
         end
     end
-    return BandedArray{T}(newdata, size(A), A.bandwidth)
+    # handle the middle column
+    if b == 1
+        c = div(nrows, 2)
+        j = a + 1
+        for i in 1:c
+            first = A.data[i, j]
+            second = A.data[nrows - i + 1, ncols - j + 1]
+            A.data[i, j] = second
+            A.data[nrows - i + 1, ncols - j + 1] = first
+        end
+    end
 end
