@@ -99,6 +99,9 @@ Base.size(A::BandedArray) = (A.nrows, A.ncols)
 
 """The row in `data` which contains element [i, j]"""
 function data_row(A::BandedArray, i::Int, j::Int)
+    if !inband(A, i, j)
+        error("[$i, $j] is not in band")
+    end
     return (i - j) + A.h_offset + A.bandwidth + 1
 end
 
@@ -113,7 +116,7 @@ Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int) = (@banddata(A, i, j) = 
 """The rows in A's column `j` that are dense"""
 function row_range(A::BandedArray, j::Int)
     start = max(1, j - A.h_offset - A.bandwidth)
-    stop = min(j + A.v_offset + A.bandwidth, size(A)[1])
+    stop = min(j + A.v_offset + A.bandwidth, A.nrows)
     return start, stop
 end
 
@@ -131,18 +134,16 @@ end
 
 """Is [i, j] in the banded region?"""
 function inband(A::BandedArray, i::Int, j::Int)
-    nrows, ncols = size(A)
-    if i < 1 || j < 1 || i > nrows || j > ncols
+    if i < 1 || j < 1 || i > A.nrows || j > A.ncols
         return false
     end
-    k = A.bandwidth
     return A.lower <= i- j <= A.upper
 end
 
 """Return a dense representation of A"""
 function Base.full{T}(A::BandedArray{T})
     result = zeros(T, size(A))
-    for j = 1:size(A)[2]
+    for j = 1:A.ncols
         start, stop = row_range(A, j)
         dstart, dstop = data_row_range(A, j)
         result[start:stop, j] = A.data[dstart:dstop, j]
@@ -158,14 +159,13 @@ position [m - i, n - j].
 """
 function flip!{T}(A::BandedArray{T})
     nrows = ndatarows(A.nrows, A.ncols, A.bandwidth)
-    ncols = size(A)[2]
-    a, b = divrem(ncols, 2)
+    a, b = divrem(A.ncols, 2)
     for j in 1:a
         for i in 1:nrows
             first = A.data[i, j]
-            second = A.data[nrows - i + 1, ncols - j + 1]
+            second = A.data[nrows - i + 1, A.ncols - j + 1]
             A.data[i, j] = second
-            A.data[nrows - i + 1, ncols - j + 1] = first
+            A.data[nrows - i + 1, A.ncols - j + 1] = first
         end
     end
     # handle the middle column
@@ -174,9 +174,9 @@ function flip!{T}(A::BandedArray{T})
         j = a + 1
         for i in 1:c
             first = A.data[i, j]
-            second = A.data[nrows - i + 1, ncols - j + 1]
+            second = A.data[nrows - i + 1, A.ncols - j + 1]
             A.data[i, j] = second
-            A.data[nrows - i + 1, ncols - j + 1] = first
+            A.data[nrows - i + 1, A.ncols - j + 1] = first
         end
     end
 end
