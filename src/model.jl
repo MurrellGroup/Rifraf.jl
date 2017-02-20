@@ -783,7 +783,14 @@ function recompute!(state::State, seqs::Vector{RifrafSequence},
                     ref_scores::Scores, bandwidth_mult::Int,
                     recompute_As::Bool, recompute_Bs::Bool,
                     verbose::Int, use_ref_for_qvs::Bool)
+    seq_padding = state.As[1].padding
     if recompute_As
+        clen = length(state.consensus)
+        for i in (length(state.As) + 1):length(seqs)
+            shape = (length(seqs[i]) + 1, clen + 1)
+            push!(state.As, BandedArray(Score, shape, seqs[i].bandwidth, padding=seq_padding))
+            push!(state.Amoves, BandedArray(Trace, shape, seqs[i].bandwidth, padding=seq_padding))
+        end
         for (i, (s, A, Amoves)) in enumerate(zip(seqs, state.As, state.Amoves))
             forward_moves!(state.consensus, s, A, Amoves, scores)
             while band_tolerance(Amoves) < CODON_LENGTH
@@ -811,6 +818,11 @@ function recompute!(state::State, seqs::Vector{RifrafSequence},
         end
     end
     if recompute_Bs
+        clen = length(state.consensus)
+        for i in (length(state.Bs) + 1):length(seqs)
+            shape = (length(seqs[i]) + 1, clen + 1)
+            push!(state.Bs, BandedArray(Score, shape, seqs[i].bandwidth, padding=seq_padding))
+        end
         for (i, (s, B)) in enumerate(zip(seqs, state.Bs))
             backward!(state.consensus, s, B, scores)
         end
@@ -1292,8 +1304,12 @@ function rifraf(seqstrings::Vector{DNASeq},
             batch < length(sequences) &&
             stage_iterations[Int(state.stage)] > 0)
             batch = min(batch + base_batch, length(sequences))
-            indices = rand(1:length(sequences), batch)
-            seqs = sequences[indices]
+            if batch < length(sequences)
+                indices = rand(1:length(sequences), batch)
+                seqs = sequences[indices]
+            else
+                seqs = sequences
+            end
             recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
                             state.stage == STAGE_FRAME)
             recompute!(state, seqs, scores,

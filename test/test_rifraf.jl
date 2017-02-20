@@ -571,7 +571,7 @@ end
 
 @testset "full model" begin
     # can't guarantee this test actually passes, since it is random
-    n_seqs = 5
+    n_seqs = 6
     len = 30
     ref_error_rate = 0.1
     ref_sample_errors = ErrorModel(8.0, 0.0, 0.0, 1.0, 1.0)
@@ -595,6 +595,7 @@ end
         seed_indels = rand([true, false])
         fix_indels_stat = rand([true, false])
         indel_correction_only = rand([true, false])
+        batch = rand([3, 6])
 
         (reference, template, template_error, reads, actual, phreds, sbools,
          tbools) = sample(n_seqs, len,
@@ -620,7 +621,7 @@ end
                                 seed_indels=seed_indels,
                                 fix_indels_stat=fix_indels_stat,
                                 indel_correction_only=indel_correction_only,
-                                bandwidth=10, min_dist=9, batch=5,
+                                bandwidth=10, min_dist=9, batch=batch,
                                 max_iters=100)
         @test result == template
     end
