@@ -189,4 +189,12 @@ using Rifraf
         @test Rifraf.row_range(m, 5) == (1, 5)
         @test Rifraf.row_range(m, 10) == (4, 5)
     end
+
+    @testset "test get and set" begin
+        default = Score(-Inf)
+        m = BandedArray(Score, (13, 11), 5, default=default)
+        m[1, 1] = Score(1.0)
+        @test m[1, 1] == Score(1.0)
+        @test m[end, 1] == default
+    end
 end

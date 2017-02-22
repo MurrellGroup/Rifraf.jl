@@ -1,3 +1,6 @@
+# TODO: finish implementing AbstractArray interface.
+# TODO: better bounds checking for getting and setting
+
 """Sparse array with a band of nonzeroes."""
 type BandedArray{T} <: AbstractArray{T,2}
     data::Array{T,2}
@@ -14,9 +17,11 @@ type BandedArray{T} <: AbstractArray{T,2}
     padding::Int  # set by user
     initialize::Bool
 
+    default::T
+
     function BandedArray(data::Array{T, 2}, shape::Tuple{Int, Int},
                          bandwidth::Int, padding::Int,
-                         initialize::Bool)
+                         initialize::Bool, default::T)
         if bandwidth < 1
             error("bandwidth must be positive")
         end
@@ -30,7 +35,7 @@ type BandedArray{T} <: AbstractArray{T,2}
         lower, upper = bandlimits(nrows, ncols, bandwidth)
         return new(data, nrows, ncols, bandwidth,
                    h_offset, v_offset,
-                   lower, upper, padding, initialize)
+                   lower, upper, padding, initialize, default)
     end
 end
 
@@ -46,10 +51,10 @@ function bandlimits(nrows, ncols, bandwidth)
 end
 
 function BandedArray(T::Type, shape::Tuple{Int, Int}, bandwidth::Int;
-                     padding::Int=0, initialize::Bool=true)
+                     padding::Int=0, initialize::Bool=true, default=zero(T))
     nrows, ncols = shape
     data = allocate_data(T, nrows, ncols, bandwidth, padding, initialize)
-    return BandedArray{T}(data, shape, bandwidth, padding, initialize)
+    return BandedArray{T}(data, shape, bandwidth, padding, initialize, default)
 end
 
 function allocate_data(T::Type,
@@ -110,8 +115,21 @@ macro banddata(A, i, j)
     :($A.data[data_row($A, $i, $j), $j])
 end
 
-Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int) = @banddata(A, i, j,)
-Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int) = (@banddata(A, i, j) = v)
+function Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int)
+    if inband(A, i, j)
+        return @banddata(A, i, j)
+    else
+        return A.default
+    end
+end
+
+function Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int)
+    if inband(A, i, j)
+        @banddata(A, i, j) = v
+    else
+        error("Cannot set out-of-band element [$i, $j].")
+    end
+end
 
 """The rows in A's column `j` that are dense"""
 function row_range(A::BandedArray, j::Int)
@@ -180,3 +198,4 @@ function flip!{T}(A::BandedArray{T})
         end
     end
 end
+
