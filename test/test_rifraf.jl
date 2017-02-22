@@ -24,7 +24,7 @@ import Rifraf.sample_from_template,
        Rifraf.recompute!,
        Rifraf.get_candidate_proposals,
        Rifraf.alignment_proposals,
-       Rifraf.surgery_proposals,
+# Rifraf.surgery_proposals,
        Rifraf.align_moves,
        Rifraf.moves_to_aligned_seqs,
        Rifraf.alignment_error_probs,
@@ -80,7 +80,7 @@ end
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
-        pseq = RifrafSequence(seq, log_p, bandwidth)
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
         A = forward(template, pseq, scores)
         # transpose because of column-major order
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
@@ -97,7 +97,7 @@ end
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
-        pseq = RifrafSequence(seq, log_p, bandwidth)
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
         B = backward(template, pseq, scores)
         expected = transpose(reshape([[lp + scores.mismatch + match,
                                        lp + scores.insertion + match, 0.0];
@@ -116,7 +116,7 @@ end
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
-        pseq = RifrafSequence(seq, log_p, bandwidth)
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
         A = forward(template, pseq, scores)
         B = backward(template, pseq, scores)
         check_all_cols(A, B, false)
@@ -134,8 +134,8 @@ end
             seq = DNASeq("GTCG")
             log_p = [-1.2, -0.8, -0.7, -1.0]
             bandwidth = 5
-            pseq = RifrafSequence(seq, log_p, bandwidth)
             local_scores = Scores(ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
+            pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
             A = forward(template, pseq, local_scores)
             B = backward(template, pseq, local_scores)
             check_all_cols(A, B, true)
@@ -146,8 +146,8 @@ end
             seq = DNASeq("GACAC")
             log_p = [-1.1, -1.1, -0.4, -1.0, -0.7]
             bandwidth = 5
-            pseq = RifrafSequence(seq, log_p, bandwidth)
             local_scores = Scores(ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
+            pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
             A = forward(template, pseq, local_scores)
             B = backward(template, pseq, local_scores)
             check_all_cols(A, B, true)
@@ -159,9 +159,9 @@ end
         seq = DNASeq("ATA")
         bandwidth = 10
         log_p = [-5.0, -1.0, -6.0]
-        pseq = RifrafSequence(seq, log_p, bandwidth)
-        A = forward(template, pseq, scores)
-        B = backward(template, pseq, scores)
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        A = forward(template, pseq)
+        B = backward(template, pseq)
         score = (inv_log10(log_p[1]) +
                  log_p[2] + scores.insertion +
                  inv_log10(log_p[3]))
@@ -174,9 +174,9 @@ end
         seq = DNASeq("GAAG")
         bandwidth = 10
         log_p = [-5.0, -2.0, -1.0, -6.0]
-        pseq = RifrafSequence(seq, log_p, bandwidth)
-        A = forward(template, pseq, scores)
-        B = backward(template, pseq, scores)
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        A = forward(template, pseq)
+        B = backward(template, pseq)
         score = (inv_log10(log_p[1]) +
                  inv_log10(log_p[2]) +
                  maximum(log_p[2:3]) + scores.deletion +
@@ -191,9 +191,9 @@ end
         seq = DNASeq("AA")
         bandwidth = 10
         log_p = [-2.0, -3.0]
-        pseq = RifrafSequence(seq, log_p, bandwidth)
-        A = forward(template, pseq, scores)
-        B = backward(template, pseq, scores)
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        A = forward(template, pseq)
+        B = backward(template, pseq)
         score = (inv_log10(log_p[1]) +
                  maximum(log_p[1:2]) + scores.deletion +
                  inv_log10(log_p[2]))
@@ -231,19 +231,18 @@ end
                                         log_reported_error_std)
         log_p = LogProb[float(q) / (-10.0) for q in phreds]
         bandwidth = max(5 * abs(length(template) - length(seq)), 30)
-        pseq = RifrafSequence(seq, log_p, bandwidth)
+        pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
 
         new_template = apply_proposals(template, Proposal[proposal])
-        Anew = forward(new_template, pseq, local_scores)
-        Bnew = backward(new_template, pseq, local_scores)
+        Anew = forward(new_template, pseq)
+        Bnew = backward(new_template, pseq)
         check_all_cols(Anew, Bnew, codon_moves)
 
-        A = forward(template, pseq, local_scores)
-        B = backward(template, pseq, local_scores)
+        A = forward(template, pseq)
+        B = backward(template, pseq)
         check_all_cols(A, B, codon_moves)
         newcols = zeros(size(A)[1], 6)
-        score = score_proposal(proposal, A, B, template, pseq,
-                               local_scores, newcols)
+        score = score_proposal(proposal, A, B, template, pseq, newcols)
         if abs(score - Anew[end, end]) > 1
             println(template)
             println(proposal)
@@ -284,18 +283,18 @@ end
     reference = DNASeq("AAAGGGTTT")
     ref_log_p = fill(log10(0.01), length(reference))
     bandwidth = 6
-    rseq = RifrafSequence(reference, ref_log_p, bandwidth)
     local_errors = Rifraf.normalize(ErrorModel(2.0, 0.5, 0.5, 1.0, 1.0))
     local_scores = Scores(local_errors)
+    rseq = RifrafSequence(reference, ref_log_p, bandwidth, local_scores)
 
     template = DNASeq("AAACCCGGGTTT")
-    @test !has_single_indels(template, rseq, local_scores)
+    @test !has_single_indels(template, rseq)
 
     template = DNASeq("AAACCCGGGTTTT")
-    @test has_single_indels(template, rseq, local_scores)
+    @test has_single_indels(template, rseq)
 
     template = DNASeq("AAA")
-    @test !has_single_indels(template, rseq, local_scores)
+    @test !has_single_indels(template, rseq)
 end
 
 
@@ -305,9 +304,9 @@ end
 
     ref = DNASeq("CGGCGATTT")
     consensus_errors = LogProb[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
-    consensus = RifrafSequence(DNASeq("CTGCCGA"), consensus_errors, 10)
+    consensus = RifrafSequence(DNASeq("CTGCCGA"), consensus_errors, 10, ref_scores)
 
-    proposals = single_indel_proposals(ref, consensus, ref_scores)
+    proposals = single_indel_proposals(ref, consensus)
     expected = [Deletion(4)]
     @test expected == proposals
 end
@@ -321,31 +320,32 @@ end
                                   do_indels::Bool=true)
         bandwidth = 6
         padding = 3
-        rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth)
         mult = 2
         errors = ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0)
         scores = Scores(errors)
         ref_errors = ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
         ref_scores = Scores(ref_errors)
 
+        rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
+
         if length(lps) == 0
             lps =  Vector{LogProb}[fill(-9.0, length(s)) for s in seqs]
         end
 
-        pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
+        pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
                                for (s, p) in zip(seqs, lps)]
         state = initial_state(consensus, pseqs, DNASeq(""), bandwidth, padding)
-        recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
+        recompute!(state, pseqs, rseq, mult, true, true, 0, false)
 
         if do_alignment
             proposals = alignment_proposals(state.Amoves, state.consensus,
                                             pseqs, do_subs, do_indels)
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
-        if do_surgery
-            proposals, deltas = surgery_proposals(state, pseqs, scores, do_subs, do_indels)
-            @test length(symdiff(Set(proposals), Set(expected))) == 0
-        end
+        # if do_surgery
+        #     proposals, deltas = surgery_proposals(state, pseqs, do_subs, do_indels)
+        #     @test length(symdiff(Set(proposals), Set(expected))) == 0
+        # end
     end
 
     @testset "fast proposals 1" begin
@@ -494,22 +494,21 @@ end
     bandwidth = 9
     padding = 3
 
-    function _test_candidate_scores(consensus, pseqs, scores, expected)
+    function _test_candidate_scores(consensus, pseqs, expected)
         ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
         state = initial_state(consensus, pseqs, DNASeq(""), bandwidth, padding)
-        rseq = RifrafSequence(DNASeq(), LogProb[], 1)
+        rseq = RifrafSequence(DNASeq(), LogProb[], 1, ref_scores)
         redo_as = true
         redo_bs = true
         use_ref = false
         mult = 2
-        recompute!(state, pseqs, scores, rseq, ref_scores, mult,
+        recompute!(state, pseqs, rseq, mult,
                    redo_as, redo_bs, 2, use_ref)
         do_alignment_proposals = true
         do_surgery_proposals = true
         trust_proposals = true
         indels_only = false
-        cands = get_candidate_proposals(state, pseqs, scores,
-                                        rseq, ref_scores,
+        cands = get_candidate_proposals(state, pseqs, rseq,
                                         do_alignment_proposals,
                                         do_surgery_proposals,
                                         trust_proposals,
@@ -527,9 +526,9 @@ end
         seqs = [DNASeq("TAT")]
         lps =  Vector{LogProb}[fill(-1.0, length(s)) for s in seqs]
 
-        pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
-                               for (s, p) in zip(seqs, lps)]
         scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
+        pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
+                               for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Substitution(2, DNA_A),
                                  sum(pseqs[1].match_log_p)),
@@ -541,7 +540,7 @@ end
                                  sum([pseqs[1].match_log_p[1],
                                       pseqs[1].error_log_p[2] + scores.insertion,
                                       pseqs[1].match_log_p[3]]))]
-        _test_candidate_scores(consensus, pseqs, scores, expected)
+        _test_candidate_scores(consensus, pseqs, expected)
     end
 
     @testset "deletion" begin
@@ -549,13 +548,13 @@ end
         seqs = [DNASeq("TT")]
         lps =  Vector{LogProb}[fill(-1.0, length(s)) for s in seqs]
 
-        pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
-                               for (s, p) in zip(seqs, lps)]
         scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
+        pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
+                               for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Deletion(3),
                                  sum(pseqs[1].match_log_p))]
-        _test_candidate_scores(consensus, pseqs, scores, expected)
+        _test_candidate_scores(consensus, pseqs, expected)
     end
 
     @testset "insertion" begin
@@ -564,13 +563,13 @@ end
         seqs = [DNASeq("TAT")]
         lps =  Vector{LogProb}[fill(-1.0, length(s)) for s in seqs]
 
-        pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
-                               for (s, p) in zip(seqs, lps)]
         scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
+        pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
+                               for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Insertion(2, DNA_A),
                                  sum(pseqs[1].match_log_p))]
-        _test_candidate_scores(consensus, pseqs, scores, expected)
+        _test_candidate_scores(consensus, pseqs, expected)
     end
 end
 
@@ -621,10 +620,10 @@ end
                                 reference=reference,
                                 ref_scores=ref_scores,
                                 do_alignment_proposals=do_alignment_proposals,
-                                do_surgery_proposals=do_surgery_proposals,
-                                trust_proposals=trust_proposals,
+                                # do_surgery_proposals=do_surgery_proposals,
+                                # trust_proposals=trust_proposals,
                                 seed_indels=seed_indels,
-                                fix_indels_stat=fix_indels_stat,
+                                # fix_indels_stat=fix_indels_stat,
                                 indel_correction_only=indel_correction_only,
                                 bandwidth=10, min_dist=9, batch=batch,
                                 max_iters=100)
@@ -649,12 +648,12 @@ end
     ref_errors = ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Scores(ref_errors)
 
-    pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
+    pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
-    probs = estimate_probs(state, pseqs, scores, rseq, scores, false)
+    recompute!(state, pseqs, rseq, mult, true, true, 0, false)
+    probs = estimate_probs(state, pseqs, rseq, false)
     @test probs.sub[1, 2] > 0.9
     @test probs.del[1] < 1e-9
     @test probs.del[3] > 0.9
@@ -677,12 +676,12 @@ end
     lps = Vector{LogProb}[[-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0],
                           [-9.0, -9.0, -9.0, -9.0, -9.0]]
-    pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
+    pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
-    probs = estimate_probs(state, pseqs, scores, rseq, scores, false)
+    recompute!(state, pseqs, rseq, mult, true, true, 0, false)
+    probs = estimate_probs(state, pseqs, rseq, false)
     @test maximum(probs.ins[1, :]) < 1e-9
     @test probs.ins[3, 4] > 0.9
 end
@@ -705,11 +704,11 @@ end
           [0.2, 0.1, 0.1],
           [0.2, 0.1, 0.1, 0.1]]
     lps = map(log10, ps)
-    pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth)
+    pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
                            for (s, p) in zip(seqs, lps)]
-    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth)
+    rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    recompute!(state, pseqs, scores, rseq, ref_scores, mult, true, true, 0, false)
+    recompute!(state, pseqs, rseq, mult, true, true, 0, false)
 
     result = alignment_error_probs(length(consensus),
                                    pseqs, state.Amoves)
@@ -727,8 +726,8 @@ end
         seq = DNASeq("AAA")
         bandwidth = 10
         log_p = [-2.0, -3.0, -3.0]
-        pseq = RifrafSequence(seq, log_p, bandwidth)
-        moves = align_moves(template, pseq, scores)
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        moves = align_moves(template, pseq)
         t, s = moves_to_aligned_seqs(moves, template, seq)
         @test t == DNASequence("ATAA")
         @test s == DNASequence("A-AA")
@@ -739,8 +738,8 @@ end
         seq = DNASeq("AAACCCTT")
         bandwidth = 10
         log_p = fill(log10(0.1), length(seq))
-        pseq = RifrafSequence(seq, log_p, bandwidth)
-        moves = align_moves(template, pseq, scores)
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        moves = align_moves(template, pseq)
         t, s = moves_to_aligned_seqs(moves, template, seq)
         @test t[end-1:end] == DNASequence("TT")
     end

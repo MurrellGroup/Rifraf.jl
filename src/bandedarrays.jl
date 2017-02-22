@@ -198,4 +198,3 @@ function flip!{T}(A::BandedArray{T})
         end
     end
 end
-

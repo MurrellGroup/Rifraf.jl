@@ -4,10 +4,13 @@ error probabilities.
 """
 type RifrafSequence
     seq::DNASeq
-    match_log_p::Vector{LogProb}
-    mismatch_log_p::Vector{LogProb}
-    ins_log_p::Vector{LogProb}
-    del_log_p::Vector{LogProb}
+    match_scores::Vector{LogProb}
+    mismatch_scores::Vector{LogProb}
+    ins_scores::Vector{LogProb}
+    del_scores::Vector{LogProb}
+    codon_ins_scores::Vector{LogProb}
+    codon_del_scores::Vector{LogProb}
+    do_codon_moves::Bool
     bandwidth::Int
 
     function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
@@ -29,16 +32,59 @@ type RifrafSequence
             bad_value = maximum(error_log_p)
             error("a log error probability is > 0: $bad_value")
         end
-        match_log_p = log10(1.0 - exp10(error_log_p))
-        mismatch_log_p = error_log_p + scores.mismatch
-        ins_log_p = error_log_p + scores.insertion
-        del_log_p = Vector{LogProb}(length(error_log_p) + 1)
-        del_log_p[1] = error_log_p[1]
-        for i=1:length(error_log_p) - 1)
-            del_log_p[i + 1] = max(error_log_p[i], error_log_p[i+1])
+        # all scores are symmetric on the ends so there are fewer
+        # branches in the alignment code
+        match_scores = Vector{LogProb}(length(error_log_p) + 2)
+        mismatch_scores = Vector{LogProb}(length(error_log_p) + 2)
+        ins_scores = Vector{LogProb}(length(error_log_p) + 2)
+        del_scores = Vector{LogProb}(length(error_log_p) + 1)
+
+        match_scores[1] = Prob(-Inf)
+        match_scores[end] = Prob(-Inf)
+        match_scores[2:end-1] = log10(1.0 - exp10(error_log_p))
+
+        mismatch_scores[1] = Prob(-Inf)
+        mismatch_scores[end] = Prob(-Inf)
+        mismatch_scores[2:end-1] = error_log_p + scores.mismatch
+
+        ins_scores[1] = Prob(-Inf)
+        ins_scores[end] = Prob(-Inf)
+        ins_scores[2:end-1] = error_log_p + scores.insertion
+
+        del_scores[1] = error_log_p[1] + scores.deletion
+        del_scores[end] = error_log_p[end] + scores.deletion
+        for i=1:(length(error_log_p) - 1)
+            del_scores[i+1] = max(error_log_p[i], error_log_p[i+1]) + scores.deletion
         end
-        del_log_[end] = error_log_p[end]
-        return new(seq, match_log_p, mismatch_log_p, ins_log_p, del_log_p, bandwidth)
+
+        do_codon_moves = false
+        codon_ins_scores = Vector{LogProb}()
+        codon_del_scores = Vector{LogProb}()
+        if scores.codon_insertion > -Inf
+            do_codon_moves = true
+            codon_ins_scores = Vector{LogProb}(length(error_log_p) + 4)
+            codon_ins_scores[1:CODON_LENGTH] = -Inf
+            codon_ins_scores[end-CODON_LENGTH+1:end] = -Inf
+            for i=2:(length(error_log_p)-1)
+               codon_ins_scores[i+2] = max(error_log_p[i - 1],
+                                           error_log_p[i],
+                                           error_log_p[i + 1]) + scores.codon_insertion
+            end
+        end
+        if scores.codon_deletion > -Inf
+            do_codon_moves = true
+            codon_del_scores = Vector{LogProb}(length(error_log_p) + 1)
+            codon_del_scores[1] = error_log_p[1] + scores.codon_deletion
+            codon_del_scores[end] = error_log_p[end] + scores.codon_deletion
+            for i=1:(length(error_log_p) - 1)
+               codon_del_scores[i+1] = max(error_log_p[i], error_log_p[i+1]) + scores.codon_deletion
+            end
+        end
+
+        return new(seq, match_scores, mismatch_scores,
+                   ins_scores, del_scores,
+                   codon_ins_scores, codon_del_scores,
+                   do_codon_moves, bandwidth)
     end
 end
 

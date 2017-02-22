@@ -4,6 +4,23 @@ const CODON_LENGTH = 3
 const BASES = DNASeq("ACGT")
 const BASEINTS = Dict(DNA_A => 1, DNA_C => 2, DNA_G => 3, DNA_T => 4)
 
+const DEBUG = false
+
+"""Only assert when DEBUG is true"""
+macro myassert(exp, msg)
+    if DEBUG
+        return :($exp && error("$msg"))
+    end
+    return :()
+end
+
+macro includeif(test, exp)
+    if test
+        return exp
+    end
+    return :()
+end
+
 
 """LogSumExp in base 10.
 

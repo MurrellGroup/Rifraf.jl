@@ -55,7 +55,6 @@ const BOFFSETS = Dict(Substitution => 2,
 function score_nocodon(proposal::Proposal,
                        A::BandedArray{Score}, B::BandedArray{Score},
                        pseq::RifrafSequence,
-                       scores::Scores,
                        newcols::Array{Score, 2})
     t = typeof(proposal)
     if t == Deletion
@@ -74,10 +73,9 @@ function score_nocodon(proposal::Proposal,
     amin, amax = row_range(A, min(new_acol, ncols))
     for i in amin:amax
         seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
-        newcols[i, 1], _ = update(A, i, new_acol,
-                                  seq_base, proposal.base,
-                                  pseq, scores;
-                                  newcols=newcols, acol=acol)
+        newcols[i, 1], _ = update_forward_newcols(A, i, new_acol,
+                                                  seq_base, proposal.base, pseq;
+                                                  newcols=newcols, acol=acol)
     end
 
     # add up results
@@ -117,13 +115,9 @@ function score_proposal(proposal::Proposal,
                         A::BandedArray{Score}, B::BandedArray{Score},
                         consensus::DNASeq,
                         pseq::RifrafSequence,
-                        scores::Scores,
                         newcols::Array{Score, 2})
-    codon_moves = (scores.codon_insertion > -Inf ||
-                   scores.codon_deletion > -Inf)
-    if !codon_moves
-        return score_nocodon(proposal, A, B,
-                             pseq, scores, newcols)
+    if !pseq.do_codon_moves
+        return score_nocodon(proposal, A, B, pseq, newcols)
     end
     t = typeof(proposal)
     # last valid column of A
@@ -171,10 +165,9 @@ function score_proposal(proposal::Proposal,
         amin, amax = row_range(A, range_col)
         for i in amin:amax
             seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
-            newcols[i, j], _ = update(A, i, acol + j,
-                                      seq_base, sub_consensus[j],
-                                      pseq, scores;
-                                      newcols=newcols, acol=acol)
+            newcols[i, j], _ = update_forward_codon_newcols(A, i, acol + j,
+                                                            seq_base, sub_consensus[j], pseq;
+                                                            newcols=newcols, acol=acol)
         end
     end
 
@@ -212,19 +205,17 @@ end
 function score_proposal(m::Proposal,
                         state::State,
                         sequences::Vector{RifrafSequence},
-                        scores::Scores,
                         use_ref::Bool,
                         reference::RifrafSequence,
-                        ref_scores::Scores,
                         newcols::Array{Score, 2})
     score = 0.0
     for si in 1:length(sequences)
         score += score_proposal(m, state.As[si], state.Bs[si], state.consensus,
-                                sequences[si], scores, newcols)
+                                sequences[si], newcols)
     end
     if use_ref
         score += score_proposal(m, state.A_t, state.B_t, state.consensus,
-                                reference, ref_scores, newcols)
+                                reference, ref_newcols)
     end
     return score
 end
@@ -234,7 +225,6 @@ function all_proposals(stage::Stage,
                        consensus::DNASeq,
                        sequences::Vector{RifrafSequence},
                        Amoves::Vector{BandedArray{Trace}},
-                       scores::Scores,
                        indel_correction_only::Bool,
                        indel_seeds::Vector{Proposal}=Proposal[],
                        seed_neighborhood::Int=CODON_LENGTH)
@@ -311,329 +301,10 @@ function alignment_proposals(Amoves::Vector{BandedArray{Trace}},
 end
 
 
-function best_surrounding_ins_bases(moves::Vector{Trace},
-                                    seq::RifrafSequence,
-                                    aln_idx::Int, seq_idx::Int)
-    # TODO: do not reallocate for each call
-    ins_bases = Dict{DNANucleotide, Score}()
-    search_idx = aln_idx - 1
-    seq_search_idx = seq_idx - 1
-    while search_idx >= 1 && moves[search_idx] == TRACE_INSERT
-        search_base = seq.seq[seq_search_idx]
-        if !haskey(ins_bases, search_base)
-            ins_bases[search_base] = -Inf
-        end
-        ins_bases[search_base] = max(ins_bases[search_base],
-                                     seq.match_log_p[seq_search_idx])
-        search_idx -= 1
-        seq_search_idx -= 1
-    end
-    search_idx = aln_idx + 1
-    seq_search_idx = seq_idx + 1
-    while search_idx <= length(moves) && moves[search_idx] == TRACE_INSERT
-        search_base = seq.seq[seq_search_idx]
-        if !haskey(ins_bases, search_base)
-            ins_bases[search_base] = -Inf
-        end
-        ins_bases[search_base] = max(ins_bases[search_base],
-                                     seq.match_log_p[seq_search_idx])
-        search_idx += 1
-        seq_search_idx += 1
-    end
-    return ins_bases
-end
-
-function surrounding_del_bases(moves::Vector{Trace},
-                               consensus::DNASeq,
-                               seq::RifrafSequence, aln_idx::Int,
-                               cons_idx::Int, seq_idx::Int)
-    result = Dict{DNANucleotide, Tuple{Score, Score}}()
-
-    search_idx = aln_idx - 1
-    cons_search_idx = cons_idx - 1
-
-    before_error_score = max(seq.error_log_p[max(seq_idx - 1, 1)],
-                             seq.error_log_p[seq_idx])
-    after_error_score = max(seq.error_log_p[seq_idx],
-                            seq.error_log_p[min(seq_idx + 1, length(seq.error_log_p))])
-    old_deletion_score = before_error_score
-    new_deletion_score = after_error_score
-    while search_idx >= 1 && moves[search_idx] == TRACE_DELETE
-        search_base = consensus[cons_search_idx]
-        result[search_base] = (old_deletion_score, new_deletion_score)
-        search_idx -= 1
-        cons_search_idx -= 1
-    end
-
-    search_idx = aln_idx + 1
-    cons_search_idx = cons_idx + 1
-
-    old_deletion_score = after_error_score
-    new_deletion_score = before_error_score
-
-    while search_idx <= length(seq) && moves[search_idx] == TRACE_DELETE
-        search_base = consensus[cons_search_idx]
-        if haskey(result, search_base)
-            prev_old, prev_new = result[search_base]
-            if new_deletion_score > prev_new
-                result[search_base] = (old_deletion_score, new_deletion_score)
-            end
-        else
-            result[search_base] = (old_deletion_score, new_deletion_score)
-        end
-        search_idx -= 1
-        cons_search_idx -= 1
-    end
-    return result
-end
-
-
-function seq_posn_scores(seq::RifrafSequence, seq_idx::Int, scores::Scores)
-    # TODO: ensure these are never used
-    match_score = -Inf
-    error_score = -Inf
-    max_error_score = max(seq.error_log_p[max(seq_idx, 1)],
-                          seq.error_log_p[min(seq_idx + 1,
-                                              length(seq.error_log_p))])
-
-    if seq_idx > 0
-        match_score = seq.match_log_p[seq_idx]
-        error_score = seq.error_log_p[seq_idx]
-    end
-    mm_score = error_score + scores.mismatch
-    ins_score = error_score + scores.insertion
-    del_score = max_error_score + scores.deletion
-
-    return match_score, error_score, mm_score, ins_score, del_score
-end
-
-
-function update_deltas(sub_deltas::Array{Score, 2},
-                       del_deltas::Array{Score, 1},
-                       ins_deltas::Array{Score, 2},
-                       consensus::DNASeq,
-                       seq::RifrafSequence, moves::Vector{Trace},
-                       scores::Scores,
-                       do_subs::Bool, do_indels::Bool)
-    # FIXME: modularize this function and test each part
-
-    # local alignment fixes:
-    # - insertions next to a matching base get pushed to end of match
-    # - deletions get pushed to the end of poly-base runs
-    # - substitutions that convert matches to mismatches try to swap
-    #   with neighboring insertions and deletions
-    # - insertions next to an eligible (mis)match get swapped
-
-    # push insertions and deletions to the end, on the fly
-    # insertions that match consensus should *keep* getting pushed
-    # deletions in a poly-base run should also get pushed
-    deletion_score = seq.error_log_p[1] + scores.deletion
-    insertion_bases = Dict{DNANucleotide, Score}(DNA_A => deletion_score,
-                                                   DNA_C => deletion_score,
-                                                   DNA_G => deletion_score,
-                                                   DNA_T => deletion_score)
-
-    del_base = DNA_Gap
-    del_idx = 0
-    pushed_del_score = -Inf
-
-    cons_idx = 0
-    seq_idx = 0
-    n_moves = length(moves)
-    prev_del_score = -Inf
-    for (aln_idx, move) in enumerate(moves)
-        cbase = DNA_Gap
-        sbase = DNA_Gap
-        if move in (TRACE_MATCH, TRACE_INSERT)
-            seq_idx += 1
-            sbase = seq.seq[seq_idx]
-        end
-        if move in (TRACE_MATCH, TRACE_DELETE)
-            cons_idx += 1
-            cbase = consensus[cons_idx]
-        end
-
-        all_scores = seq_posn_scores(seq, seq_idx, scores)
-        (match_score, error_score, mm_score, ins_score, del_score) = all_scores
-
-        if do_indels
-            if del_base != DNA_Gap && del_base != cbase
-                # handle pushed deletions
-                del_deltas[del_idx] += pushed_del_score
-                del_base = DNA_Gap
-                del_idx = 0
-                pushed_del_score = -Inf
-            end
-            if move != TRACE_INSERT
-                # handle insertions before this position.
-                for (ins_base, delta) in insertion_bases
-                    if cbase == ins_base
-                        # do nothing; keep pushing this insertion
-                    else
-                        # update `insertion_bases` with candidate
-                        # insertion after this position
-                        # this move is a mismatch, consider
-                        # swapping with prev and next insertions
-
-                        # FIXME: this is causing duplicate insertions
-                        # before and after the same base. Detect this
-                        # case and account for it.
-                        new_delta = del_score
-                        if move == TRACE_MATCH && sbase == ins_base && cbase != sbase
-                            prev_swap_delta = (del_score + match_score) - mm_score
-                            next_swap_delta = (prev_del_score + match_score) - mm_score
-                            delta = max(delta, prev_swap_delta)
-                            new_delta = max(new_delta, next_swap_delta)
-                        end
-                        ins_deltas[cons_idx, BASEINTS[ins_base]] += delta
-                        insertion_bases[ins_base] = new_delta
-                    end
-                end
-            end
-        end
-        old_match_score = (sbase == cbase ? match_score : mm_score)
-        if move == TRACE_INSERT && do_indels
-            # consider insertion proposals.
-            # push all insertion proposals to the end
-            for (baseint, new_base) in enumerate(BASES)
-                # try all insertions, converting TRACE_INSERT to (mis)match
-                sbase = seq.seq[seq_idx]
-                new_score = (sbase == new_base) ? match_score : mm_score
-                insertion_bases[new_base] = max(insertion_bases[new_base],
-                                                new_score - ins_score)
-            end
-        elseif move == TRACE_MATCH
-            # consider all substitution proposals
-            if do_subs
-                # TODO: do this on the fly
-                best_ins = best_surrounding_ins_bases(moves, seq, aln_idx, seq_idx)
-                del_bases = surrounding_del_bases(moves, consensus, seq,
-                                                  aln_idx, cons_idx, seq_idx)
-
-                for (baseint, new_base) in enumerate(BASES)
-                    if new_base == cbase
-                        continue
-                    end
-                    delta = -Inf
-
-                    if haskey(best_ins, new_base)
-                        # do substitution and align with a different insertion.
-                        # ins/match -> match/ins
-                        other_match_p = best_ins[new_base]
-                        other_error_p = log10(1.0 - exp10(other_match_p))
-
-                        old_score = other_error_p + old_match_score
-                        new_score = other_match_p + error_score
-                        delta = max(delta, new_score - old_score)
-                    end
-
-                    if sbase == new_base
-                        # proposal would help
-                        delta = max(delta, (match_score - mm_score))
-                    elseif sbase == cbase
-                        if haskey(del_bases, sbase)
-                            # del/match -> match/del
-                            # do substitution and delete this base, moving seq
-                            # base to different position
-                            old_del_score, new_del_score = del_bases[sbase]
-                            old_score = old_match_score + old_del_score
-                            new_score = match_score + new_del_score
-                            delta = max(delta, new_score - old_score)
-                        end
-                        # proposal would hurt
-                        delta = max(delta, (mm_score - match_score))
-                    else
-                        # proposal would still be a mismatch. do nothing.
-                    end
-                    if delta > -Inf
-                        sub_deltas[cons_idx, baseint] += delta
-                    end
-                end
-            end
-            # consider deleting the consensus base.
-            # This would convert (mis)match to insertion
-            del_base = cbase
-            del_idx = cons_idx
-            pushed_del_score = max(pushed_del_score,
-                                   ins_score - old_match_score)
-        elseif do_indels && move == TRACE_DELETE
-            # no reason to consider substitutions. delta = 0.
-            # consider deletion proposal. would convert deletion
-            # to no-op.
-            del_base = cbase
-            del_idx = cons_idx
-            pushed_del_score = max(pushed_del_score,
-                                   0 - del_score)
-        end
-        prev_del_score = del_score
-    end
-    if do_indels
-        # handle deletion at end
-        if del_base != DNA_Gap
-            del_deltas[end] += pushed_del_score
-        end
-
-        # handle insertions at the end
-        for (base, delta) in insertion_bases
-            ins_deltas[end, BASEINTS[base]] += delta
-        end
-    end
-end
-
-
-"""Use model surgery heuristic to get proposals with positive score deltas."""
-function surgery_proposals(state::State,
-                           sequences::Vector{RifrafSequence},
-                           scores::Scores,
-                           do_subs::Bool,
-                           do_indels::Bool)
-    sub_deltas = zeros(Score, (length(state.consensus), 4))
-    del_deltas = zeros(Score, (length(state.consensus)))
-    ins_deltas = zeros(Score, (length(state.consensus) + 1, 4))
-
-    for (seq, Amoves) in zip(sequences, state.Amoves)
-        moves = backtrace(Amoves)
-        update_deltas(sub_deltas, del_deltas, ins_deltas,
-                      state.consensus, seq, moves, scores,
-                      do_subs, do_indels)
-    end
-    # only return proposals with positive deltas
-    result = Proposal[]
-    deltas = Score[]
-    nrows, ncols = size(sub_deltas)
-    if do_subs
-        for i in 1:nrows, j in 1:ncols
-            if sub_deltas[i, j] > 0
-                push!(result, Substitution(i, BASES[j]))
-                push!(deltas, sub_deltas[i, j])
-            end
-        end
-    end
-    if do_indels
-        for i in 1:nrows
-            if del_deltas[i] > 0
-                push!(result, Deletion(i))
-                push!(deltas, del_deltas[i])
-            end
-        end
-        for i in 1:(nrows+1), j in 1:ncols
-            if ins_deltas[i, j] > 0
-                push!(result, Insertion(i - 1, BASES[j]))
-                push!(deltas, ins_deltas[i, j])
-            end
-        end
-    end
-    return result, deltas
-end
-
 function get_candidate_proposals(state::State,
                                  sequences::Vector{RifrafSequence},
-                                 scores::Scores,
                                  reference::RifrafSequence,
-                                 ref_scores::Scores,
                                  do_alignment_proposals::Bool,
-                                 do_surgery_proposals::Bool,
-                                 trust_proposals::Bool,
                                  indel_correction_only::Bool;
                                  indel_seeds::Vector{Proposal}=Proposal[])
     candidates = CandProposal[]
@@ -644,25 +315,10 @@ function get_candidate_proposals(state::State,
     newcols = zeros(Score, (nrows, CODON_LENGTH + 1))
 
     proposals = all_proposals(state.stage, state.consensus, sequences,
-                              state.Amoves, scores,
+                              state.Amoves,
                               indel_correction_only,
                               indel_seeds)
     if (state.stage == STAGE_INIT ||
-        state.stage == STAGE_REFINE) && do_surgery_proposals
-        do_indels = state.stage in (STAGE_INIT, STAGE_FRAME)
-        do_subs = true
-        if state.stage == STAGE_FRAME && indel_correction_only
-            # FIXME: this never happens
-            do_subs = false
-        end
-        proposals, deltas = surgery_proposals(state, sequences, scores, do_subs, do_indels)
-        if trust_proposals
-            for (p, d) in zip(proposals, deltas)
-                push!(candidates, CandProposal(p, state.score + d))
-            end
-            return candidates
-        end
-    elseif (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_alignment_proposals
         do_indels = state.stage in (STAGE_INIT, STAGE_FRAME)
         do_subs = true
@@ -674,8 +330,8 @@ function get_candidate_proposals(state::State,
     end
 
     for p in proposals
-        score = score_proposal(p, state, sequences, scores, use_ref,
-                               reference, ref_scores, newcols)
+        score = score_proposal(p, state, sequences, use_ref,
+                               reference, newcols)
         if score > state.score
             push!(candidates, CandProposal(p, score))
         end
@@ -689,10 +345,9 @@ end
 
 
 function has_single_indels(consensus::DNASeq,
-                           reference::RifrafSequence,
-                           ref_scores::Scores)
+                           reference::RifrafSequence)
     has_right_length = length(consensus) % CODON_LENGTH == 0
-    moves = align_moves(consensus, reference, ref_scores)
+    moves = align_moves(consensus, reference)
     result = TRACE_INSERT in moves || TRACE_DELETE in moves
     if !result && !has_right_length
         error("consensus length is not a multiple of three")
@@ -702,9 +357,8 @@ end
 
 
 function single_indel_proposals(reference::DNASeq,
-                                consensus::RifrafSequence,
-                                ref_scores::Scores)
-    moves = align_moves(reference, consensus, ref_scores;
+                                consensus::RifrafSequence)
+    moves = align_moves(reference, consensus,
                         skew_matches=true)
     results = Proposal[]
     cons_idx = 0
@@ -755,8 +409,8 @@ function initial_state(consensus::DNASeq,
         bandwidth = 1
         t_padding = 0
     end
-    A_t = BandedArray(Score, t_shape, bandwidth, padding=t_padding)
-    B_t = BandedArray(Score, t_shape, bandwidth, padding=t_padding)
+    A_t = BandedArray(Score, t_shape, bandwidth, padding=t_padding, default=-Inf)
+    B_t = BandedArray(Score, t_shape, bandwidth, padding=t_padding, default=-Inf)
     Amoves_t = BandedArray(Trace, t_shape, bandwidth, padding=t_padding)
 
     seq_padding = padding + maxlen - minlen
@@ -767,8 +421,8 @@ function initial_state(consensus::DNASeq,
     # TODO: different amounts of padding for different length sequences
     for s in seqs
         shape = (length(s) + 1, clen + 1)
-        push!(As, BandedArray(Score, shape, s.bandwidth, padding=seq_padding))
-        push!(Bs, BandedArray(Score, shape, s.bandwidth, padding=seq_padding))
+        push!(As, BandedArray(Score, shape, s.bandwidth, padding=seq_padding), default=-Inf)
+        push!(Bs, BandedArray(Score, shape, s.bandwidth, padding=seq_padding), default=-Inf)
         push!(Amoves, BandedArray(Trace, shape, s.bandwidth, padding=seq_padding))
     end
 
@@ -779,8 +433,8 @@ function initial_state(consensus::DNASeq,
 end
 
 function recompute!(state::State, seqs::Vector{RifrafSequence},
-                    scores::Scores, reference::RifrafSequence,
-                    ref_scores::Scores, bandwidth_mult::Int,
+                    reference::RifrafSequence,
+                    bandwidth_mult::Int,
                     recompute_As::Bool, recompute_Bs::Bool,
                     verbose::Int, use_ref_for_qvs::Bool)
     seq_padding = state.As[1].padding
@@ -792,12 +446,12 @@ function recompute!(state::State, seqs::Vector{RifrafSequence},
             push!(state.Amoves, BandedArray(Trace, shape, seqs[i].bandwidth, padding=seq_padding))
         end
         for (i, (s, A, Amoves)) in enumerate(zip(seqs, state.As, state.Amoves))
-            forward_moves!(state.consensus, s, A, Amoves, scores)
+            forward_moves!(state.consensus, s, A, Amoves)
             while band_tolerance(Amoves) < CODON_LENGTH
                 s.bandwidth *= bandwidth_mult
                 newbandwidth!(A, s.bandwidth)
                 newbandwidth!(Amoves, s.bandwidth)
-                forward_moves!(state.consensus, s, A, Amoves, scores)
+                forward_moves!(state.consensus, s, A, Amoves)
             end
         end
         if (((state.stage == STAGE_FRAME) ||
@@ -805,15 +459,13 @@ function recompute!(state::State, seqs::Vector{RifrafSequence},
               (use_ref_for_qvs))) &&
               (length(reference) > 0))
             forward_moves!(state.consensus, reference,
-                           state.A_t, state.Amoves_t,
-                           ref_scores)
+                           state.A_t, state.Amoves_t)
             while band_tolerance(state.Amoves_t) < CODON_LENGTH
                 reference.bandwidth *= bandwidth_mult
                 newbandwidth!(state.A_t, reference.bandwidth)
                 newbandwidth!(state.Amoves_t, reference.bandwidth)
                 forward_moves!(state.consensus, reference,
-                               state.A_t, state.Amoves_t,
-                               ref_scores)
+                               state.A_t, state.Amoves_t)
             end
         end
     end
@@ -824,13 +476,13 @@ function recompute!(state::State, seqs::Vector{RifrafSequence},
             push!(state.Bs, BandedArray(Score, shape, seqs[i].bandwidth, padding=seq_padding))
         end
         for (i, (s, B)) in enumerate(zip(seqs, state.Bs))
-            backward!(state.consensus, s, B, scores)
+            backward!(state.consensus, s, B)
         end
         if (((state.stage == STAGE_FRAME) ||
              ((state.stage == STAGE_SCORE) &&
               (use_ref_for_qvs))) &&
             (length(reference) > 0))
-            backward!(state.consensus, reference, state.B_t, ref_scores)
+            backward!(state.consensus, reference, state.B_t)
         end
     end
     state.score = sum(A[end, end] for A in state.As)
@@ -868,9 +520,7 @@ end
 
 function estimate_probs(state::State,
                         sequences::Vector{RifrafSequence},
-                        scores::Scores,
                         reference::RifrafSequence,
-                        ref_scores::Scores,
                         use_ref_for_qvs::Bool)
     # `sub_scores[i]` gives the following log probabilities
     # for `consensus[i]`: [A, C, G, T, -]
@@ -892,14 +542,11 @@ function estimate_probs(state::State,
     # do not want to penalize indels too harshly, otherwise consensus
     # appears too likely.
     # TODO: how to set scores correctly for estimating qvs?
-    qv_ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+    # qv_ref_scores = Scores(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
     for m in all_proposals(STAGE_SCORE, state.consensus, sequences,
-                           state.Amoves, scores, false)
-        score = score_proposal(m, state,
-                               sequences, scores,
-                               use_ref,
-                               reference, qv_ref_scores,
-                               newcols)
+                           state.Amoves, false)
+        score = score_proposal(m, state, sequences,
+                               use_ref, reference, newcols)
         if typeof(m) == Substitution
             sub_scores[m.pos, BASEINTS[m.base]] = score
         elseif typeof(m) == Deletion
@@ -1041,11 +688,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                                                STAGE_REFINE,
                                                STAGE_SCORE],
                 do_alignment_proposals::Bool=true,
-                do_surgery_proposals::Bool=false,
-                trust_proposals::Bool=true,
-                fix_indels_stat::Bool=false,
                 seed_indels::Bool=true,
-                skip_frame_correction::Bool=false,
                 indel_correction_only::Bool=true,
                 use_ref_for_qvs::Bool=false,
                 padding::Int=(5*CODON_LENGTH),
@@ -1061,13 +704,13 @@ function rifraf(seqstrings::Vector{DNASeq},
 
     enabled_stages = Set(enabled_stages)
 
-    sequences = RifrafSequence[RifrafSequence(s, p, bandwidth)
+    sequences = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
                         for (s, p) in zip(seqstrings, error_log_ps)]
 
     # will need to update after initial stage
     ref_error_rate = 1.0
     ref_error_log_p = fill(log10(ref_error_rate), length(reference))
-    ref_pstring = RifrafSequence(reference, ref_error_log_p, bandwidth)
+    ref_pstring = RifrafSequence(reference, bandwidth, ref_error_log_p)
 
     if batch < 0 || batch > length(sequences)
         batch = length(sequences)
@@ -1085,10 +728,8 @@ function rifraf(seqstrings::Vector{DNASeq},
     state = initial_state(consensus, seqs, reference,
                           bandwidth, padding,
                           minimum(enabled_stages))
-    recompute_Bs = !(do_surgery_proposals && trust_proposals)
-    recompute!(state, seqs, scores,
-               ref_pstring, ref_scores,
-               bandwidth_mult, true, recompute_Bs, verbose,
+    recompute!(state, seqs, ref_pstring,
+               bandwidth_mult, true, true, verbose,
                use_ref_for_qvs)
     empty_ref = length(reference) == 0
 
@@ -1102,7 +743,13 @@ function rifraf(seqstrings::Vector{DNASeq},
     n_proposals = Vector{Int}[]
     consensus_lengths = Int[length(consensus)]
     consensus_stages = [[] for _ in 1:(Int(typemax(Stage)) - 1)]
-    cons_pstring = RifrafSequence(DNASeq(), Phred[], bandwidth)
+    # flip insertions and deletions
+    cons_scores = Scores(ref_scores.mismatch,
+                         ref_scores.deletion,
+                         ref_scores.insertion,
+                         ref_scores.codon_deletion,
+                         ref_scores.codon_insertion)
+    cons_pstring = RifrafSequence(DNASeq(), Phred[], bandwidth, cons_scores)
 
     indel_proposals = Proposal[]
 
@@ -1130,20 +777,16 @@ function rifraf(seqstrings::Vector{DNASeq},
 
         penalties_increased = false
 
-        if state.stage == STAGE_FRAME && seed_indels && length(indel_proposals) == 0
+        if state.stage == STAGE_FRAME && seed_indels
             cons_errors = alignment_error_probs(length(state.consensus),
                                                 seqs, state.Amoves)
             # ensure none are 0.0
             cons_errors = [max(p, 1e-10) for p in cons_errors]
-            cons_pstring = RifrafSequence(state.consensus, log10(cons_errors), bandwidth)
-            indel_proposals = single_indel_proposals(reference, cons_pstring, ref_scores)
+            cons_pstring = RifrafSequence(state.consensus, log10(cons_errors), bandwidth, cons_scores)
+            indel_proposals = single_indel_proposals(reference, cons_pstring)
         end
-
-        candidates = get_candidate_proposals(state, seqs, scores, ref_pstring,
-                                             ref_scores,
+        candidates = get_candidate_proposals(state, seqs, ref_pstring,
                                              do_alignment_proposals,
-                                             do_surgery_proposals,
-                                             trust_proposals,
                                              indel_correction_only;
                                              indel_seeds=indel_proposals)
         indel_proposals = Proposal[]
@@ -1161,34 +804,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                     break
                 end
                 state.stage = STAGE_FRAME
-
-                # fix distant single indels right away
-                if STAGE_FRAME in enabled_stages && (seed_indels || fix_indels_stat)
-                    cons_errors = alignment_error_probs(length(state.consensus),
-                                                        seqs, state.Amoves)
-                    # ensure none are 0.0
-                    cons_errors = [max(p, 1e-10) for p in cons_errors]
-                    cons_pstring = RifrafSequence(state.consensus, log10(cons_errors), bandwidth)
-                    indel_proposals = single_indel_proposals(reference, cons_pstring, ref_scores)
-                end
-                if STAGE_FRAME in enabled_stages && fix_indels_stat
-                    if verbose > 1
-                        println(STDERR, "  fixing $(length(indel_proposals)) single indels")
-                    end
-                    if verbose > 2
-                        println(STDERR, indel_proposals)
-                    end
-                    state.consensus = apply_proposals(state.consensus, indel_proposals)
-                    if skip_frame_correction
-                        if verbose > 1
-                            println(STDERR, "  skipping straight to refinement stage")
-                        end
-                        push!(consensus_stages[Int(state.stage)], state.consensus)
-                        state.stage = STAGE_REFINE
-                        indel_proposals = Proposal[]
-                    end
-                end
-                if state.stage == STAGE_FRAME && STAGE_FRAME in enabled_stages
+                if STAGE_FRAME in enabled_stages
                     # estimate reference error rate
                     # TODO: use consensus estimated error rate here too
                     edit_dist = levenshtein(convert(String, reference),
@@ -1197,10 +813,10 @@ function rifraf(seqstrings::Vector{DNASeq},
                     # needs to be < 0.5, otherwise matches aren't rewarded at all
                     ref_error_rate = min(max(ref_error_rate, 1e-10), 0.5)
                     ref_error_log_p = fill(log10(ref_error_rate), length(reference))
-                    ref_pstring = RifrafSequence(reference, ref_error_log_p, bandwidth)
+                    ref_pstring = RifrafSequence(reference, ref_error_log_p, bandwidth, ref_scores)
                 end
             elseif state.stage == STAGE_FRAME
-                if !has_single_indels(state.consensus, ref_pstring, ref_scores)
+                if !has_single_indels(state.consensus, ref_pstring)
                     consensus_ref = state.consensus
                     state.stage = STAGE_REFINE
                 elseif (ref_scores.insertion == min_ref_indel_score ||
@@ -1219,6 +835,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                                             min_ref_indel_score),
                                         ref_scores.codon_insertion,
                                         ref_scores.codon_deletion)
+                    ref_pstring = RifrafSequence(reference, ref_error_log_p, bandwidth, ref_scores)
                     if verbose > 1
                         println(STDERR, "  alignment to reference had single indels. increasing penalty.")
                     end
@@ -1243,8 +860,7 @@ function rifraf(seqstrings::Vector{DNASeq},
             state.consensus = apply_proposals(old_consensus,
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
-            recompute!(state, seqs, scores,
-                       ref_pstring, ref_scores,
+            recompute!(state, seqs, ref_pstring,
                        bandwidth_mult, true, false, verbose,
                        use_ref_for_qvs)
             # detect if a single proposal is better
@@ -1277,11 +893,8 @@ function rifraf(seqstrings::Vector{DNASeq},
             seqs = sequences[indices]
             recompute_As = true
         end
-        recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
-                        state.stage == STAGE_FRAME)
-        recompute!(state, seqs, scores,
-                   ref_pstring, ref_scores,
-                   bandwidth_mult, recompute_As, recompute_Bs, verbose,
+        recompute!(state, seqs, ref_pstring,
+                   bandwidth_mult, recompute_As, true, verbose,
                    use_ref_for_qvs)
         if verbose > 1
             println(STDERR, "  score: $(state.score) ($(state.stage))")
@@ -1308,11 +921,8 @@ function rifraf(seqstrings::Vector{DNASeq},
             else
                 seqs = sequences
             end
-            recompute_Bs = (!(do_surgery_proposals && trust_proposals) ||
-                            state.stage == STAGE_FRAME)
-            recompute!(state, seqs, scores,
-                       ref_pstring, ref_scores,
-                       bandwidth_mult, true, recompute_Bs, verbose,
+            recompute!(state, seqs, ref_pstring,
+                       bandwidth_mult, true, true, verbose,
                        use_ref_for_qvs)
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
@@ -1340,11 +950,9 @@ function rifraf(seqstrings::Vector{DNASeq},
     if STAGE_SCORE in enabled_stages
         # FIXME: recomputing for all sequences is costly, but using batch
         # is less accurate
-        recompute!(state, seqs, scores, ref_pstring, ref_scores,
-                   bandwidth_mult, true, true, verbose,
-                   use_ref_for_qvs)
-        info["error_probs"] = estimate_probs(state, seqs, scores,
-                                             ref_pstring, ref_scores,
+        recompute!(state, seqs, ref_pstring, bandwidth_mult, true, true,
+                   verbose, use_ref_for_qvs)
+        info["error_probs"] = estimate_probs(state, seqs, ref_pstring,
                                              use_ref_for_qvs)
         info["aln_error_probs"] = alignment_error_probs(length(state.consensus),
                                                         seqs, state.Amoves)
