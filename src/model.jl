@@ -391,8 +391,7 @@ function initial_state(consensus::DNASeq,
                        stage::Stage=STAGE_INIT)
     if length(consensus) == 0
         # choose highest-quality sequence
-        idx = indmin([logsumexp10(s.error_log_p)
-                      for s in seqs])
+        idx = indmax([logsumexp10(s.match_scores) for s in seqs])
         consensus = seqs[idx].seq
     end
 
@@ -421,8 +420,8 @@ function initial_state(consensus::DNASeq,
     # TODO: different amounts of padding for different length sequences
     for s in seqs
         shape = (length(s) + 1, clen + 1)
-        push!(As, BandedArray(Score, shape, s.bandwidth, padding=seq_padding), default=-Inf)
-        push!(Bs, BandedArray(Score, shape, s.bandwidth, padding=seq_padding), default=-Inf)
+        push!(As, BandedArray(Score, shape, s.bandwidth, padding=seq_padding, default=-Inf))
+        push!(Bs, BandedArray(Score, shape, s.bandwidth, padding=seq_padding, default=-Inf))
         push!(Amoves, BandedArray(Trace, shape, s.bandwidth, padding=seq_padding))
     end
 
@@ -589,7 +588,8 @@ function estimate_point_probs(probs::EstProbs)
 end
 
 
-function base_distribution(base::DNANucleotide, lp, ilp)
+function base_distribution(base::DNANucleotide, ilp)
+    lp = log10(1.0 - exp10(match_errors))
     result = fill(lp - log10(3), 4)
     result[BASEINTS[base]] = ilp
     return result
@@ -618,8 +618,7 @@ function alignment_error_probs(tlen::Int,
             t_j = j - 1
             if move == TRACE_MATCH
                 probs[t_j, 1:4] += base_distribution(s.seq[s_i],
-                                                     s.error_log_p[s_i],
-                                                     s.match_log_p[s_i])
+                                                     s.match_scores[s_i])
             end
         end
     end
@@ -710,7 +709,7 @@ function rifraf(seqstrings::Vector{DNASeq},
     # will need to update after initial stage
     ref_error_rate = 1.0
     ref_error_log_p = fill(log10(ref_error_rate), length(reference))
-    ref_pstring = RifrafSequence(reference, bandwidth, ref_error_log_p)
+    ref_pstring = RifrafSequence(reference, ref_error_log_p, bandwidth, ref_scores)
 
     if batch < 0 || batch > length(sequences)
         batch = length(sequences)

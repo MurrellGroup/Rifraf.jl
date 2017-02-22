@@ -104,10 +104,10 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
     # fill first row
     # TODO: handle trim
     do_codon_ins = length(s.codon_ins_scores) > 0
-    for j in 2:(length(t) + 1)
+    for j in 2:min((result.h_offset + result.bandwidth), length(s) + 1)
         result[1, j] = result[1, j-1] + s.ins_scores[j]
         moves[1, j] = TRACE_INSERT
-        if do_codon && j > CODON_LENGTH
+        if do_codon_ins && j > CODON_LENGTH
             cand_score = result[1, j-CODON_LENGTH] + s.codon_ins_scores[j]
             if result[1, j] < cand_score
                 result[1, j] = cand_score
@@ -117,11 +117,11 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
     end
     # fill first column
     do_codon_del = length(s.codon_del_scores) > 0
-    for i in 2:length(s) + 1
-        result[i, 1] = result[i-1, 1] + s.del_scores[j]
+    for i in 2:min(result.v_offset + result.bandwidth, length(t) + 1)
+        result[i, 1] = result[i-1, 1] + s.del_scores[i]
         moves[i, 1] = TRACE_DELETE
-        if do_codon && i > CODON_LENGTH
-            cand_score = result[i-CODON_LENGTH, 1] + s.codon_del_scores[j]
+        if do_codon_del && i > CODON_LENGTH
+            cand_score = result[i-CODON_LENGTH, 1] + s.codon_del_scores[i]
             if result[i, 1] < cand_score
                 result[i, 1] = cand_score
                 moves[i, 1] = TRACE_CODON_DELETE
@@ -183,10 +183,10 @@ function backward!(t::DNASeq, s::RifrafSequence,
     # fill last row
     # TODO: handle trim
     do_codon_ins = length(s.codon_ins_scores) > 0
-    for j in length(t):-1:1
+    for j in 2:min((result.h_offset + result.bandwidth), length(s) + 1)
         result[end, j] = result[end, j+1] + s.ins_scores[j]
         moves[end, j] = TRACE_INSERT
-        if do_codon && j > CODON_LENGTH
+        if do_codon_ins && j > CODON_LENGTH
             cand_score = result[end, j+CODON_LENGTH] + s.codon_ins_scores[j]
             if result[end, j] < cand_score
                 result[end, j] = cand_score
@@ -196,11 +196,11 @@ function backward!(t::DNASeq, s::RifrafSequence,
     end
     # fill last column
     do_codon_del = length(s.codon_del_scores) > 0
-    for i in length(s):-1:1
-        result[i, end] = result[i+1, end] + s.del_scores[j]
+    for i in 2:min(result.v_offset + result.bandwidth, length(t) + 1)
+        result[i, end] = result[i+1, end] + s.del_scores[i]
         moves[i, end] = TRACE_DELETE
-        if do_codon && i > CODON_LENGTH
-            cand_score = result[i+CODON_LENGTH, end] + s.codon_del_scores[j]
+        if do_codon_del && i > CODON_LENGTH
+            cand_score = result[i+CODON_LENGTH, end] + s.codon_del_scores[i]
             if result[i, end] < cand_score
                 result[i, end] = cand_score
                 moves[i, end] = TRACE_CODON_DELETE
@@ -379,8 +379,8 @@ function moves_to_proposals(moves::Vector{Trace},
     for move in moves
         i, j = offset_forward(move, i, j)
 
-        score = seq.match_log_p[max(i, 1)]
-        next_score = seq.match_log_p[min(i + 1, length(seq))]
+        score = seq.match_scores[max(i, 1)]
+        next_score = seq.match_scores[min(i + 1, length(seq))]
         del_score = min(score, next_score)
 
         if move == TRACE_MATCH

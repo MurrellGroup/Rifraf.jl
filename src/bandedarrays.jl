@@ -8,8 +8,8 @@ type BandedArray{T} <: AbstractArray{T,2}
     ncols::Int
     bandwidth::Int
     # offsets of band
-    h_offset::Int
-    v_offset::Int
+    h_offset::Int  # how many more columns than rows
+    v_offset::Int  # rows than columns
     # limits for determining if [i, j] is in band
     lower::Int
     upper::Int

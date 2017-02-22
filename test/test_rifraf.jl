@@ -12,7 +12,7 @@ import Rifraf.sample_from_template,
        Rifraf.Deletion,
        Rifraf.apply_proposals,
        Rifraf.rbase,
-       Rifraf.forward,
+       Rifraf.forward_moves,
        Rifraf.backward,
        Rifraf.phred_to_log_p,
        Rifraf.equal_ranges,
@@ -81,7 +81,7 @@ end
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A = forward(template, pseq, scores)
+        A, _ = forward_moves(template, pseq)
         # transpose because of column-major order
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
                                       [lp + scores.insertion, match, match + lp + scores.deletion];
@@ -98,7 +98,7 @@ end
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        B = backward(template, pseq, scores)
+        B = backward(template, pseq)
         expected = transpose(reshape([[lp + scores.mismatch + match,
                                        lp + scores.insertion + match, 0.0];
                                       [2*lp + scores.deletion + scores.mismatch,
@@ -117,8 +117,8 @@ end
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A = forward(template, pseq, scores)
-        B = backward(template, pseq, scores)
+        A, _ = forward_moves(template, pseq)
+        B = backward(template, pseq)
         check_all_cols(A, B, false)
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
                                       [lp + scores.insertion, match, match + lp + scores.deletion];
@@ -136,8 +136,8 @@ end
             bandwidth = 5
             local_scores = Scores(ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
             pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
-            A = forward(template, pseq, local_scores)
-            B = backward(template, pseq, local_scores)
+            A, _ = forward_moves(template, pseq)
+            B = backward(template, pseq)
             check_all_cols(A, B, true)
         end
 
@@ -148,8 +148,8 @@ end
             bandwidth = 5
             local_scores = Scores(ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
             pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
-            A = forward(template, pseq, local_scores)
-            B = backward(template, pseq, local_scores)
+            A, _ = forward_moves(template, pseq)
+            B = backward(template, pseq)
             check_all_cols(A, B, true)
         end
     end
@@ -160,7 +160,7 @@ end
         bandwidth = 10
         log_p = [-5.0, -1.0, -6.0]
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A = forward(template, pseq)
+        A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
         score = (inv_log10(log_p[1]) +
                  log_p[2] + scores.insertion +
@@ -175,7 +175,7 @@ end
         bandwidth = 10
         log_p = [-5.0, -2.0, -1.0, -6.0]
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A = forward(template, pseq)
+        A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
         score = (inv_log10(log_p[1]) +
                  inv_log10(log_p[2]) +
@@ -192,7 +192,7 @@ end
         bandwidth = 10
         log_p = [-2.0, -3.0]
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A = forward(template, pseq)
+        A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
         score = (inv_log10(log_p[1]) +
                  maximum(log_p[1:2]) + scores.deletion +
@@ -234,11 +234,11 @@ end
         pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
 
         new_template = apply_proposals(template, Proposal[proposal])
-        Anew = forward(new_template, pseq)
+        Anew, _ = forward_moves(new_template, pseq)
         Bnew = backward(new_template, pseq)
         check_all_cols(Anew, Bnew, codon_moves)
 
-        A = forward(template, pseq)
+        A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
         check_all_cols(A, B, codon_moves)
         newcols = zeros(size(A)[1], 6)
@@ -531,15 +531,15 @@ end
                                for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Substitution(2, DNA_A),
-                                 sum(pseqs[1].match_log_p)),
+                                 sum(pseqs[1].match_score)),
                     CandProposal(Insertion(1, DNA_A),
-                                 sum(pseqs[1].match_log_p) + pseqs[1].error_log_p[1] + scores.deletion),
+                                 sum(pseqs[1].match_score) + lps[1][1] + scores.deletion),
                     CandProposal(Insertion(2, DNA_A),
-                                 sum(pseqs[1].match_log_p) + pseqs[1].error_log_p[2] + scores.deletion),
+                                 sum(pseqs[1].match_score) + lps[1][2] + scores.deletion),
                     CandProposal(Deletion(3),
-                                 sum([pseqs[1].match_log_p[1],
-                                      pseqs[1].error_log_p[2] + scores.insertion,
-                                      pseqs[1].match_log_p[3]]))]
+                                 sum([pseqs[1].match_score[1],
+                                      lps[1][2] + scores.insertion,
+                                      pseqs[1].match_score[3]]))]
         _test_candidate_scores(consensus, pseqs, expected)
     end
 
@@ -553,7 +553,7 @@ end
                                for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Deletion(3),
-                                 sum(pseqs[1].match_log_p))]
+                                 sum(pseqs[1].match_score))]
         _test_candidate_scores(consensus, pseqs, expected)
     end
 
@@ -568,7 +568,7 @@ end
                                for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Insertion(2, DNA_A),
-                                 sum(pseqs[1].match_log_p))]
+                                 sum(pseqs[1].match_score))]
         _test_candidate_scores(consensus, pseqs, expected)
     end
 end

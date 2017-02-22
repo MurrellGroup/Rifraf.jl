@@ -15,7 +15,7 @@ using Rifraf
         @test rseq.mismatch_scores == LogProb[-Inf; error_log_p; -Inf] + scores.mismatch
         @test rseq.ins_scores == LogProb[-Inf; error_log_p; -Inf] + scores.insertion
         @test rseq.del_scores == LogProb[-1., -1., -2., -3., -4.] + scores.deletion
-        @test rseq.codon_ins_scores == LogProb[-Inf, -Inf, -Inf, -1., -2.; -Inf, -Inf, -Inf] + scores.codon_insertion
+        @test rseq.codon_ins_scores == LogProb[-Inf, -Inf, -Inf, -1., -2., -Inf, -Inf, -Inf] + scores.codon_insertion
         @test rseq.codon_del_scores == LogProb[-1., -1., -2., -3., -4.] + scores.codon_deletion
     end
 end
