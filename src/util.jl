@@ -9,7 +9,7 @@ const DEBUG = true
 """Only assert when DEBUG is true"""
 macro myassert(exp, msg)
     if DEBUG
-        return :($exp && error("$msg"))
+        return :($exp && error($msg))
     end
     return :()
 end
