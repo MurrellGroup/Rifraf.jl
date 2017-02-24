@@ -10,7 +10,6 @@ type RifrafSequence
     del_scores::Vector{LogProb}
     codon_ins_scores::Vector{LogProb}
     codon_del_scores::Vector{LogProb}
-    do_codon_moves::Bool
     bandwidth::Int
 
     function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
@@ -49,11 +48,9 @@ type RifrafSequence
             del_scores[i+1] = max(error_log_p[i], error_log_p[i+1]) + scores.deletion
         end
 
-        do_codon_moves = false
         codon_ins_scores = Vector{LogProb}()
         codon_del_scores = Vector{LogProb}()
         if scores.codon_insertion > -Inf
-            do_codon_moves = true
             codon_ins_scores = Vector{LogProb}(length(error_log_p) - 2)
             for i=2:(length(error_log_p)-1)
                codon_ins_scores[i-1] = max(error_log_p[i - 1],
@@ -62,7 +59,6 @@ type RifrafSequence
             end
         end
         if scores.codon_deletion > -Inf
-            do_codon_moves = true
             codon_del_scores = Vector{LogProb}(length(error_log_p) + 1)
             codon_del_scores[1] = error_log_p[1] + scores.codon_deletion
             codon_del_scores[end] = error_log_p[end] + scores.codon_deletion
@@ -74,7 +70,7 @@ type RifrafSequence
         return new(seq, match_scores, mismatch_scores,
                    ins_scores, del_scores,
                    codon_ins_scores, codon_del_scores,
-                   do_codon_moves, bandwidth)
+                   bandwidth)
     end
 end
 
@@ -86,3 +82,7 @@ end
 function length(s::RifrafSequence)
     return length(s.seq)
 end
+
+do_codon_ins(s::RifrafSequence) = length(s.codon_ins_scores) > 0
+do_codon_del(s::RifrafSequence) = length(s.codon_del_scores) > 0
+do_codon_moves(s::RifrafSequence) = do_codon_ins(s) || do_codon_del(s)

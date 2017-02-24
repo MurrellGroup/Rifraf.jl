@@ -127,11 +127,11 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
 
     # fill first row
     # TODO: handle trim
-    do_codon_del = length(s.codon_ins_scores) > 0
+    docodondel = do_codon_del(s)
     for j in 2 : min((result.h_offset + result.bandwidth + 1), length(t) + 1)
         result[1, j] = result[1, j-1] + s.del_scores[1]
         moves[1, j] = TRACE_DELETE
-        if do_codon_del && j > CODON_LENGTH
+        if docodondel && j > CODON_LENGTH
             cand_score = result[1, j-CODON_LENGTH] + s.codon_del_scores[1]
             if result[1, j] < cand_score
                 result[1, j] = cand_score
@@ -140,12 +140,12 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
         end
     end
     # fill first column
-    do_codon_ins = length(s.codon_del_scores) > 0
+    docodonins = do_codon_ins(s)
     for i in 2 : min(result.v_offset + result.bandwidth + 1, length(s) + 1)
-        result[i, 1] = result[i-1, 1] + s.ins_scores[i]
+        result[i, 1] = result[i-1, 1] + s.ins_scores[i-1]
         moves[i, 1] = TRACE_INSERT
-        if do_codon_ins && i > CODON_LENGTH
-            cand_score = result[i-CODON_LENGTH, 1] + s.codon_ins_scores[i]
+        if docodonins && i > CODON_LENGTH
+            cand_score = result[i-CODON_LENGTH, 1] + s.codon_ins_scores[i-CODON_LENGTH]
             if result[i, 1] < cand_score
                 result[i, 1] = cand_score
                 moves[i, 1] = TRACE_CODON_INSERT
@@ -204,10 +204,10 @@ function backward!(t::DNASeq, s::RifrafSequence,
 
     # fill last row
     # TODO: handle trim
-    do_codon_del = length(s.codon_del_scores) > 0
+    docodondel = do_codon_ins(s)
     for j in length(t) : -1 :max(1, length(t) - result.h_offset - result.bandwidth + 1)
         result[end, j] = result[end, j+1] + s.del_scores[end]
-        if do_codon_del && j > CODON_LENGTH
+        if docodondel && j > CODON_LENGTH
             cand_score = result[end, j+CODON_LENGTH] + s.codon_del_scores[end]
             if result[end, j] < cand_score
                 result[end, j] = cand_score
@@ -215,10 +215,10 @@ function backward!(t::DNASeq, s::RifrafSequence,
         end
     end
     # fill last column
-    do_codon_ins = length(s.codon_ins_scores) > 0
+    docodonins = do_codon_ins(s)
     for i in length(s) : -1 : max(1, length(s) - result.v_offset - result.bandwidth + 1)
         result[i, end] = result[i+1, end] + s.ins_scores[i]
-        if do_codon_ins && i > CODON_LENGTH
+        if docodonins && i > CODON_LENGTH
             # FIXME: index is wrong for backward
             cand_score = result[i+CODON_LENGTH, end] + s.codon_ins_scores[i]
             if result[i, end] < cand_score

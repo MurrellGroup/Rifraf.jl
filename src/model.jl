@@ -69,10 +69,12 @@ function score_nocodon(proposal::Proposal,
     # last valid A column
     acol = proposal.pos + (t == Substitution ? 0 : 1)
     new_acol = acol + 1
-    # new base
     amin, amax = row_range(A, min(new_acol, ncols))
-    for i in amin:amax
-        seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
+    if amin == 1
+        newcols[1, 1] = A[1, acol] + pseq.del_scores[1]
+    end
+    for i in max(amin, 2):amax
+        seq_base = pseq.seq[i-1]
         newcols[i, 1], _ = update_forward_newcols(A, i, new_acol,
                                                   seq_base, proposal.base, pseq;
                                                   newcols=newcols, acol=acol)
@@ -116,7 +118,7 @@ function score_proposal(proposal::Proposal,
                         consensus::DNASeq,
                         pseq::RifrafSequence,
                         newcols::Array{Score, 2})
-    if !pseq.do_codon_moves
+    if !do_codon_moves(pseq)
         return score_nocodon(proposal, A, B, pseq, newcols)
     end
     t = typeof(proposal)
@@ -156,15 +158,27 @@ function score_proposal(proposal::Proposal,
         error("no new columns need to be recomputed.")
     end
 
+    n_new = n_bases + n_after
     sub_consensus = get_sub_consensus(proposal, consensus,
                                       next_posn, n_after)
-    n_new = n_bases + n_after
     # compute new columns
     for j in 1:n_new
         range_col = min(acol + j, ncols)
         amin, amax = row_range(A, range_col)
-        for i in amin:amax
-            seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
+        # fill elts corresponding to first row A[1, :]
+        if amin == 1
+            for j in 1:n_new
+                newcols[1, j] = (j = 1 ? A[1, acol] : newcols[1, j-1]) + pseq.del_scores[1]
+                if do_codon_del(s)
+                    cand_score = A[1, acol - CODON_LENGTH + 1] + pseq.codon_del_scores[1]
+                    if newcols[1, j] < cand_score
+                        newcols[1, j] = cand_score
+                    end
+                end
+            end
+        end
+        for i in max(amin, 2):amax
+            seq_base = pseq.seq[i-1]
             newcols[i, j], _ = update_forward_codon_newcols(A, i, acol + j,
                                                             seq_base, sub_consensus[j], pseq;
                                                             newcols=newcols, acol=acol)
@@ -589,7 +603,7 @@ end
 
 
 function base_distribution(base::DNANucleotide, ilp)
-    lp = log10(1.0 - exp10(match_errors))
+    lp = log10(1.0 - exp10(ilp))
     result = fill(lp - log10(3), 4)
     result[BASEINTS[base]] = ilp
     return result
