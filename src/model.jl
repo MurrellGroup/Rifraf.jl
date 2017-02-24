@@ -164,7 +164,7 @@ function score_proposal(proposal::Proposal,
     for j in 1:n_new
         range_col = min(acol + j, ncols)
         amin, amax = row_range(A, range_col)
-        for i in max(amin, 2):amax
+        for i in amin:amax
             seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
             newcols[i, j], _ = update_forward_codon_newcols_bandcheck(A, i, acol + j,
                                                                       seq_base, sub_consensus[j], pseq;
