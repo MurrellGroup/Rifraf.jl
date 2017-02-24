@@ -18,19 +18,6 @@ const TRACE_CODON_DELETE = Trace(5)
 # matrix = use_acol ? :(newcols) : :(A)
 # j_to_use = use_acol ? :(prev_j - acol) : :(prev_j)
 
-# TODO: version without newcol
-# TODO: get rid of inband() call
-macro update_score(move, move_score, prev_cell)
-    return quote
-        score = $prev_cell + $move_score
-        if score > final_score
-            final_score = score
-            final_move = $move
-        end
-    end
-end
-
-
 # generate 8 different versions of this function, for efficiency:
 # - forward and backward
 # - with and without codon moves
@@ -49,42 +36,66 @@ for direction in [:(forward), :(backward)]
             codon_ins_prev = use_newcols ? :(newcols[i-CODON_LENGTH, j - acol]) : parse("A[i $op CODON_LENGTH, j]")
             codon_del_prev = use_newcols ? :(newcols[i, j - acol - CODON_LENGTH]) : parse("A[i, j $op CODON_LENGTH]")
 
-            eval(quote
-                function $funcname(A::BandedArray{Score},
-                                   i::Int, j::Int,
-                                   s_base::DNANucleotide, t_base::DNANucleotide,
-                                   pseq::RifrafSequence;
-                                   newcols::Array{Score, 2}=Array(Score, 0, 0),
-                                   acol::Int=0,
-                                   match_mult::Float64=0.0)
-                    final_score = Score(-Inf)
-                    final_move = TRACE_NONE
-
-                    match_score = s_base == t_base ? pseq.match_scores[i] : pseq.mismatch_scores[i]
-                    # TODO: version without match mult
-                    if match_mult > 0.0
-                        # TODO: implement this
+            codon_block = use_codon ? quote
+                if i > CODON_LENGTH
+                    # FIXME: index is wrong for backward
+                    cur_score = $codon_ins_prev + pseq.codon_ins_scores[i]
+                    if cur_score > final_score
+                        final_score = cur_score
+                        final_move = TRACE_CODON_INSERT
                     end
-
-                    @update_score(TRACE_MATCH, match_score, $match_prev)
-                    @update_score(TRACE_INSERT, pseq.ins_scores[i], $ins_prev)
-                    @update_score(TRACE_DELETE, pseq.del_scores[i], $del_prev)
-
-                    @includeif($use_codon, begin
-                               if i > CODON_LENGTH
-                               @update_score(TRACE_CODON_INSERT, pseq.ins_scores[i], $codon_ins_prev)
-                               end
-                               if j > CODON_LENGTH
-                               @update_score(TRACE_CODON_DELETE, pseq.del_scores[i], $codon_del_prev)
-                               end
-                               end)
-
-                    @myassert(final_score == Score(-Inf), "new score is invalid")
-                    @myassert(final_move == TRACE_NONE, "failed to find a move")
-
-                    return final_score, final_move
                 end
-            end)
+                if j > CODON_LENGTH
+                    cur_score = $codon_del_prev + pseq.codon_del_scores[i]
+                    if cur_score > final_score
+                        final_score = cur_score
+                        final_move = TRACE_CODON_DELETE
+                    end
+                end
+            end : :()
+
+            eval(quote
+                 function $funcname(A::BandedArray{Score},
+                                    i::Int, j::Int,
+                                    s_base::DNANucleotide, t_base::DNANucleotide,
+                                    pseq::RifrafSequence;
+                                    newcols::Array{Score, 2}=Array(Score, 0, 0),
+                                    acol::Int=0,
+                                    match_mult::Float64=0.0)
+                 match_score = s_base == t_base ? pseq.match_scores[i] : pseq.mismatch_scores[i]
+                 # TODO: version without match mult
+                 if match_mult > 0.0
+                     # TODO: implement this
+                 end
+
+                 final_score = Score(-Inf)
+                 final_move = TRACE_NONE
+
+                 cur_score = $match_prev + match_score
+                 if cur_score > final_score
+                   final_score = cur_score
+                   final_move = TRACE_MATCH
+                 end
+
+                 cur_score = $ins_prev + pseq.ins_scores[i]
+                 if cur_score > final_score
+                   final_score = cur_score
+                   final_move = TRACE_INSERT
+                 end
+
+                 cur_score = $del_prev + pseq.del_scores[i]
+                 if cur_score > final_score
+                   final_score = cur_score
+                   final_move = TRACE_DELETE
+                 end
+
+                 $codon_block
+
+                 @myassert(final_score == Score(-Inf), "new score is invalid")
+                 @myassert(final_move == TRACE_NONE, "failed to find a move")
+                 return final_score, final_move
+                 end
+                 end)
         end
     end
 end
@@ -103,28 +114,28 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
 
     # fill first row
     # TODO: handle trim
-    do_codon_ins = length(s.codon_ins_scores) > 0
-    for j in 2:min((result.h_offset + result.bandwidth), length(s) + 1)
-        result[1, j] = result[1, j-1] + s.ins_scores[j]
-        moves[1, j] = TRACE_INSERT
-        if do_codon_ins && j > CODON_LENGTH
-            cand_score = result[1, j-CODON_LENGTH] + s.codon_ins_scores[j]
+    do_codon_del = length(s.codon_ins_scores) > 0
+    for j in 2 : min((result.h_offset + result.bandwidth + 1), length(t) + 1)
+        result[1, j] = result[1, j-1] + s.del_scores[1]
+        moves[1, j] = TRACE_DELETE
+        if do_codon_del && j > CODON_LENGTH
+            cand_score = result[1, j-CODON_LENGTH] + s.codon_del_scores[1]
             if result[1, j] < cand_score
                 result[1, j] = cand_score
-                moves[1, j] = TRACE_CODON_INSERT
+                moves[1, j] = TRACE_CODON_DELETE
             end
         end
     end
     # fill first column
-    do_codon_del = length(s.codon_del_scores) > 0
-    for i in 2:min(result.v_offset + result.bandwidth, length(t) + 1)
-        result[i, 1] = result[i-1, 1] + s.del_scores[i]
-        moves[i, 1] = TRACE_DELETE
-        if do_codon_del && i > CODON_LENGTH
-            cand_score = result[i-CODON_LENGTH, 1] + s.codon_del_scores[i]
+    do_codon_ins = length(s.codon_del_scores) > 0
+    for i in 2 : min(result.v_offset + result.bandwidth + 1, length(s) + 1)
+        result[i, 1] = result[i-1, 1] + s.ins_scores[i]
+        moves[i, 1] = TRACE_INSERT
+        if do_codon_ins && i > CODON_LENGTH
+            cand_score = result[i-CODON_LENGTH, 1] + s.codon_ins_scores[i]
             if result[i, 1] < cand_score
                 result[i, 1] = cand_score
-                moves[i, 1] = TRACE_CODON_DELETE
+                moves[i, 1] = TRACE_CODON_INSERT
             end
         end
     end
@@ -140,8 +151,8 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
 
     for j = 2:new_shape[2]
         start, stop = row_range(result, j)
-        for i = start:stop
-            sbase = s.seq[i-i]
+        for i in max(start, 2):stop
+            sbase = s.seq[i-1]
             tbase = t[j-1]
             result[i, j], moves[i, j] = update_function(result, i, j, sbase, tbase, s;
                                                         match_mult=match_mult)
@@ -176,34 +187,29 @@ function backward!(t::DNASeq, s::RifrafSequence,
                    skew_matches::Bool=false)
     new_shape = (length(s) + 1, length(t) + 1)
     resize!(result, new_shape)
-    resize!(moves, new_shape)
     result[end, end] = Score(0.0)
-    moves[end, end] = TRACE_NONE
 
     # fill last row
     # TODO: handle trim
-    do_codon_ins = length(s.codon_ins_scores) > 0
-    for j in 2:min((result.h_offset + result.bandwidth), length(s) + 1)
-        result[end, j] = result[end, j+1] + s.ins_scores[j]
-        moves[end, j] = TRACE_INSERT
-        if do_codon_ins && j > CODON_LENGTH
-            cand_score = result[end, j+CODON_LENGTH] + s.codon_ins_scores[j]
+    do_codon_del = length(s.codon_del_scores) > 0
+    for j in length(t) : -1 :max(1, length(t) - result.h_offset - result.bandwidth + 1)
+        result[end, j] = result[end, j+1] + s.del_scores[end]
+        if do_codon_del && j > CODON_LENGTH
+            cand_score = result[end, j+CODON_LENGTH] + s.codon_del_scores[end]
             if result[end, j] < cand_score
                 result[end, j] = cand_score
-                moves[end, j] = TRACE_CODON_INSERT
             end
         end
     end
     # fill last column
-    do_codon_del = length(s.codon_del_scores) > 0
-    for i in 2:min(result.v_offset + result.bandwidth, length(t) + 1)
-        result[i, end] = result[i+1, end] + s.del_scores[i]
-        moves[i, end] = TRACE_DELETE
-        if do_codon_del && i > CODON_LENGTH
-            cand_score = result[i+CODON_LENGTH, end] + s.codon_del_scores[i]
+    do_codon_ins = length(s.codon_ins_scores) > 0
+    for i in length(s) : -1 : max(1, length(s) - result.v_offset - result.bandwidth + 1)
+        result[i, end] = result[i+1, end] + s.ins_scores[i]
+        if do_codon_ins && i > CODON_LENGTH
+            # FIXME: index is wrong for backward
+            cand_score = result[i+CODON_LENGTH, end] + s.codon_ins_scores[i]
             if result[i, end] < cand_score
                 result[i, end] = cand_score
-                moves[i, end] = TRACE_CODON_DELETE
             end
         end
     end
@@ -217,13 +223,14 @@ function backward!(t::DNASeq, s::RifrafSequence,
         update_function = update_backward_codon
     end
 
-    for j = (new_shape[2]-1):1
+    second_last_col = new_shape[2] - 1
+    for j = second_last_col : -1 : 1
         start, stop = row_range(result, j)
-        for i = stop:-1:start
+        for i in start : -1 : min(stop, second_last_col)
             sbase = s.seq[i+1]
             tbase = t[j+1]
-            result[i, j], moves[i, j] = update_function(result, i, j, sbase, tbase, s;
-                                                        match_mult=match_mult)
+            result[i, j], _ = update_function(result, i, j, sbase, tbase, s;
+                                              match_mult=match_mult)
         end
     end
 end
@@ -241,9 +248,28 @@ function backward(t::DNASeq, s::RifrafSequence;
                          padding=padding,
                          initialize=false,
                          default=-Inf)
-    result = backward!(t, s, result,
-                     padding=padding, trim=trim, skew_matches=skew_matches)
+    backward!(t, s, result,
+              padding=padding, trim=trim, skew_matches=skew_matches)
     return result
+end
+
+
+const OFFSETS = ([1, 1],  # sub
+                 [1, 0],  # insertion
+                 [0, 1],  # deletion
+                 [3, 0],  # codon insertion
+                 [0, 3])  # codon deletion
+
+
+function offset_forward(move::Trace, i::Int, j::Int)
+    (a, b) = OFFSETS[move]
+    return (i + a, j + b)
+end
+
+
+function offset_backward(move::Trace, i::Int, j::Int)
+    (a, b) = OFFSETS[move]
+    return (i - a, j - b)
 end
 
 

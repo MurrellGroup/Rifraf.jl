@@ -4,7 +4,7 @@ const CODON_LENGTH = 3
 const BASES = DNASeq("ACGT")
 const BASEINTS = Dict(DNA_A => 1, DNA_C => 2, DNA_G => 3, DNA_T => 4)
 
-const DEBUG = false
+const DEBUG = true
 
 """Only assert when DEBUG is true"""
 macro myassert(exp, msg)
