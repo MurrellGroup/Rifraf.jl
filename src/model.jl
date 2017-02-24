@@ -71,14 +71,12 @@ function score_nocodon(proposal::Proposal,
     acol = proposal.pos + (t == Substitution ? 0 : 1)
     new_acol = acol + 1
     amin, amax = row_range(A, min(new_acol, ncols))
-    if amin == 1
-        newcols[1, 1] = A[1, acol] + pseq.del_scores[1]
-    end
-    for i in max(amin, 2):amax
-        seq_base = pseq.seq[i-1]
-        newcols[i, 1], _ = update_forward_newcols(A, i, new_acol,
-                                                  seq_base, proposal.base, pseq;
-                                                  newcols=newcols, acol=acol)
+    # TODO: do not use bandscheck inside
+    for i in amin:amax
+        seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
+        newcols[i, 1], _ = update_forward_newcols_bandcheck(A, i, new_acol,
+                                                            seq_base, proposal.base, pseq;
+                                                            newcols=newcols, acol=acol)
     end
 
     # add up results
@@ -166,23 +164,11 @@ function score_proposal(proposal::Proposal,
     for j in 1:n_new
         range_col = min(acol + j, ncols)
         amin, amax = row_range(A, range_col)
-        # fill elts corresponding to first row A[1, :]
-        if amin == 1
-            for jj in 1:n_new
-                newcols[1, jj] = (jj == 1 ? A[1, acol] : newcols[1, jj-1]) + pseq.del_scores[1]
-                if do_codon_del(pseq)
-                    cand_score = (jj <= CODON_LENGTH ? A[1, acol - CODON_LENGTH] : newcols[1, 1]) + pseq.codon_del_scores[1]
-                    if newcols[1, jj] < cand_score
-                        newcols[1, jj] = cand_score
-                    end
-                end
-            end
-        end
         for i in max(amin, 2):amax
-            seq_base = pseq.seq[i-1]
-            newcols[i, j], _ = update_forward_codon_newcols(A, i, acol + j,
-                                                            seq_base, sub_consensus[j], pseq;
-                                                            newcols=newcols, acol=acol)
+            seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
+            newcols[i, j], _ = update_forward_codon_newcols_bandcheck(A, i, acol + j,
+                                                                      seq_base, sub_consensus[j], pseq;
+                                                                      newcols=newcols, acol=acol)
         end
     end
 
