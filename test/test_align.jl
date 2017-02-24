@@ -13,7 +13,7 @@ import Rifraf.forward_moves,
 @testset "test forward and backward" begin
     const scores = Scores(-1.0, -1.0, -1.0, -Inf, -Inf)
 
-    @testset "perfect_forward" begin
+    @testset "perfect forward" begin
         bandwidth = 1
         template = DNASeq("AA")
         seq = DNASeq("AA")
@@ -30,7 +30,7 @@ import Rifraf.forward_moves,
         @test full(A) ≈ expected
     end
 
-    @testset "perfect_backward" begin
+    @testset "perfect backward" begin
         bandwidth = 1
         template = DNASeq("AA")
         seq = DNASeq("AA")
@@ -47,7 +47,7 @@ import Rifraf.forward_moves,
         @test full(A) ≈ expected
     end
 
-    @testset "imperfect_forward" begin
+    @testset "imperfect forward" begin
         bandwidth = 1
         template = DNASeq("AA")
         seq = DNASeq("AT")
@@ -66,7 +66,7 @@ import Rifraf.forward_moves,
         @test full(A) ≈ expected
     end
 
-    @testset "imperfect_backward" begin
+    @testset "imperfect backward" begin
         bandwidth = 1
         template = DNASeq("AA")
         seq = DNASeq("AT")
@@ -96,7 +96,7 @@ import Rifraf.forward_moves,
             @test true
         end
 
-        @testset "forward/backward agreement" begin
+        @testset "forward/backward agreement 2" begin
             template = DNASeq("GCACGGTC")
             seq = DNASeq("GACAC")
             log_p = [-1.1, -1.1, -0.4, -1.0, -0.7]
@@ -124,7 +124,7 @@ import Rifraf.forward_moves,
         @test check_all_cols(A, B, false)
     end
 
-    @testset "deletion agreement" begin
+    @testset "deletion agreement 1" begin
         template = DNASeq("GATAG")
         seq = DNASeq("GAAG")
         bandwidth = 10

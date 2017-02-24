@@ -37,8 +37,8 @@ for isforward in [true, false]
             funcname = parse("update_$direction$s1$s2")
             seq_i = isforward ? :(i-1) : :(i)
             codon_ins_i = isforward ? :(i - CODON_LENGTH) : :(i)
-            codon_ins_check = isforward ? :(i > CODON_LENGTH) : :(i < nrows - CODON_LENGTH + 1)
-            codon_del_check = isforward ? :(j > CODON_LENGTH) : :(j < ncols - CODON_LENGTH + 1)
+            codon_ins_check = isforward ? :(i > CODON_LENGTH) : :(i <= nrows - CODON_LENGTH)
+            codon_del_check = isforward ? :(j > CODON_LENGTH) : :(j <= ncols - CODON_LENGTH)
 
             # `use_newcols` is only used in the forward case, so no
             # need to do any other indexing in that case
@@ -240,7 +240,7 @@ function backward!(t::DNASeq, s::RifrafSequence,
     second_last_col = new_shape[2] - 1
     for j = second_last_col : -1 : 1
         start, stop = row_range(result, j)
-        for i in start : min(stop, second_last_row)
+        for i in min(stop, second_last_row) : -1 : start
             sbase = s.seq[i]
             tbase = t[j]
             result[i, j], _ = update_function(result, i, j, sbase, tbase, s;
