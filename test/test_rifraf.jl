@@ -3,6 +3,8 @@ using Base.Test
 
 using Rifraf
 
+include("test_utils.jl")
+
 import Rifraf.sample_from_template,
        Rifraf.random_seq,
        Rifraf.CandProposal,
@@ -35,171 +37,10 @@ import Rifraf.sample_from_template,
 srand(1234)
 
 
-function inv_log10(logvals)
-    log10(1.0 - exp10(logvals))
-end
-
-function check_all_cols(A, B, codon_moves)
-    expected = A[end, end]
-    if !(A[end, end] ≈ B[1, 1])
-        return false
-    end
-    ncols = size(A)[2]
-    # if codon_moves is true, we cannot expect every column to contain
-    # the correct score
-    # TODO: every three columns should
-    if !codon_moves
-        for j in 1:ncols
-            Acol = sparsecol(A, j)
-            Bcol = sparsecol(B, j)
-            score = maximum(Acol + Bcol)
-            if !(expected ≈ score)
-                return false
-            end
-        end
-    end
-    return A[end, end] ≈ B[1, 1]
-end
-
-
 @testset "equal_ranges" begin
     @test equal_ranges((3, 5), (4, 6)) == ((2, 3), (1, 2))
     @test equal_ranges((1, 5), (1, 2)) == ((1, 2), (1, 2))
     @test equal_ranges((1, 5), (4, 5)) == ((4, 5), (1, 2))
-end
-
-
-@testset "test forward and backward" begin
-    const errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
-    const scores = Scores(errors)
-
-    @testset "perfect_forward" begin
-        bandwidth = 1
-        template = DNASeq("AA")
-        seq = DNASeq("AA")
-        lp = -3.0
-        match = inv_log10(lp)
-        log_p = fill(lp, length(seq))
-        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
-        # transpose because of column-major order
-        expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
-                                      [lp + scores.insertion, match, match + lp + scores.deletion];
-                                      [0.0, match + lp + scores.insertion, 2 * match]],
-                                     (3, 3)))
-        @test full(A) == expected
-    end
-
-    @testset "imperfect_backward" begin
-        bandwidth = 1
-        template = DNASeq("AA")
-        seq = DNASeq("AT")
-        lp = -3.0
-        match = inv_log10(lp)
-        log_p = fill(lp, length(seq))
-        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        B = backward(template, pseq)
-        expected = transpose(reshape([[lp + scores.mismatch + match,
-                                       lp + scores.insertion + match, 0.0];
-                                      [2*lp + scores.deletion + scores.mismatch,
-                                       lp + scores.mismatch,
-                                       lp + scores.insertion];
-                                      [0.0, lp + scores.deletion, 0.0]],
-                                     (3, 3)))
-        @test full(B) == expected
-    end
-
-    @testset "imperfect_forward" begin
-        bandwidth = 1
-        template = DNASeq("AA")
-        seq = DNASeq("AT")
-        lp = -3.0
-        match = inv_log10(lp)
-        log_p = fill(lp, length(seq))
-        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
-        B = backward(template, pseq)
-        check_all_cols(A, B, false)
-        expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
-                                      [lp + scores.insertion, match, match + lp + scores.deletion];
-                                      [0.0, match + lp + scores.insertion, match + lp + scores.mismatch]],
-                                     (3, 3)))
-
-        @test full(A) == expected
-    end
-
-    @testset "forward/backward agreement" begin
-        @testset "forward/backward agreement 1" begin
-            template = DNASeq("TG")
-            seq = DNASeq("GTCG")
-            log_p = [-1.2, -0.8, -0.7, -1.0]
-            bandwidth = 5
-            local_scores = Scores(ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
-            pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
-            A, _ = forward_moves(template, pseq)
-            B = backward(template, pseq)
-            check_all_cols(A, B, true)
-        end
-
-        @testset "forward/backward agreement" begin
-            template = DNASeq("GCACGGTC")
-            seq = DNASeq("GACAC")
-            log_p = [-1.1, -1.1, -0.4, -1.0, -0.7]
-            bandwidth = 5
-            local_scores = Scores(ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
-            pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
-            A, _ = forward_moves(template, pseq)
-            B = backward(template, pseq)
-            check_all_cols(A, B, true)
-        end
-    end
-
-    @testset "insertion_agreement" begin
-        template = DNASeq("AA")
-        seq = DNASeq("ATA")
-        bandwidth = 10
-        log_p = [-5.0, -1.0, -6.0]
-        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
-        B = backward(template, pseq)
-        score = (inv_log10(log_p[1]) +
-                 log_p[2] + scores.insertion +
-                 inv_log10(log_p[3]))
-        @test A[end, end] ≈ score
-        check_all_cols(A, B, false)
-    end
-
-    @testset "deletion agreement" begin
-        template = DNASeq("GATAG")
-        seq = DNASeq("GAAG")
-        bandwidth = 10
-        log_p = [-5.0, -2.0, -1.0, -6.0]
-        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
-        B = backward(template, pseq)
-        score = (inv_log10(log_p[1]) +
-                 inv_log10(log_p[2]) +
-                 maximum(log_p[2:3]) + scores.deletion +
-                 inv_log10(log_p[3]) +
-                 inv_log10(log_p[4]))
-        @test A[end, end] ≈ score
-        check_all_cols(A, B, false)
-    end
-
-    @testset "deletion agreement 2" begin
-        template = DNASeq("ATA")
-        seq = DNASeq("AA")
-        bandwidth = 10
-        log_p = [-2.0, -3.0]
-        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
-        B = backward(template, pseq)
-        score = (inv_log10(log_p[1]) +
-                 maximum(log_p[1:2]) + scores.deletion +
-                 inv_log10(log_p[2]))
-        @test A[end, end] ≈ score
-        check_all_cols(A, B, false)
-    end
 end
 
 
@@ -236,11 +77,11 @@ end
         new_template = apply_proposals(template, Proposal[proposal])
         Anew, _ = forward_moves(new_template, pseq)
         Bnew = backward(new_template, pseq)
-        check_all_cols(Anew, Bnew, codon_moves)
+        @test check_all_cols(Anew, Bnew, codon_moves)
 
         A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
-        check_all_cols(A, B, codon_moves)
+        @test check_all_cols(A, B, codon_moves)
         newcols = zeros(size(A)[1], 6)
         score = score_proposal(proposal, A, B, template, pseq, newcols)
         if abs(score - Anew[end, end]) > 1
@@ -531,15 +372,15 @@ end
                                for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Substitution(2, DNA_A),
-                                 sum(pseqs[1].match_score)),
+                                 sum(pseqs[1].match_scores)),
                     CandProposal(Insertion(1, DNA_A),
-                                 sum(pseqs[1].match_score) + lps[1][1] + scores.deletion),
+                                 sum(pseqs[1].match_scores) + lps[1][1] + scores.deletion),
                     CandProposal(Insertion(2, DNA_A),
-                                 sum(pseqs[1].match_score) + lps[1][2] + scores.deletion),
+                                 sum(pseqs[1].match_scores) + lps[1][2] + scores.deletion),
                     CandProposal(Deletion(3),
-                                 sum([pseqs[1].match_score[1],
+                                 sum([pseqs[1].match_scores[1],
                                       lps[1][2] + scores.insertion,
-                                      pseqs[1].match_score[3]]))]
+                                      pseqs[1].match_scores[3]]))]
         _test_candidate_scores(consensus, pseqs, expected)
     end
 
@@ -553,7 +394,7 @@ end
                                for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Deletion(3),
-                                 sum(pseqs[1].match_score))]
+                                 sum(pseqs[1].match_scores))]
         _test_candidate_scores(consensus, pseqs, expected)
     end
 
@@ -568,7 +409,7 @@ end
                                for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Insertion(2, DNA_A),
-                                 sum(pseqs[1].match_score))]
+                                 sum(pseqs[1].match_scores))]
         _test_candidate_scores(consensus, pseqs, expected)
     end
 end
