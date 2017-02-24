@@ -30,13 +30,15 @@ for isforward in [true, false]
                 # so no need to generate this function
                 continue
             end
+            for do_bandcheck in [true, false]
             op = isforward ? :(-) : :(+)
             direction = isforward ? "forward" : "backward"
             s1 = use_codon ? "_codon" : ""
             s2 = use_newcols ? "_newcols" : ""
+            s3 = do_bandcheck ? "_bandcheck" : ""
             validrow = isforward ? :(i > 1) : :(i < size(A)[1])
             validcol = isforward ? :(j > 1) : :(j < size(A)[2])
-            funcname = parse("update_$direction$s1$s2")
+            funcname = parse("update_$direction$s1$s2$s3")
             seq_i = isforward ? :(i-1) : :(i)
             codon_ins_i = isforward ? :(i - CODON_LENGTH) : :(i)
             codon_ins_check = isforward ? :(i > CODON_LENGTH) : :(i <= nrows - CODON_LENGTH)
@@ -46,6 +48,9 @@ for isforward in [true, false]
             # need to do any other indexing in that case
 
             # TODO: write a view for a banded array column, so all this can be removed
+
+            # FIXME: ins/del and codon ins/del need to check inband
+
             match_prev = use_newcols ? :(j - acol > 1 ? newcols[i-1, j-acol-1] : A[i-1, j-1]) : parse("A[i $op 1, j $op 1]")
             ins_prev = use_newcols ? :(newcols[i-1, j-acol]) : parse("A[i $op 1, j]")
             del_prev = use_newcols ? :(j - acol > 1 ? newcols[i, j-acol-1] : A[i, j-1]) : parse("A[i, j $op 1]")
@@ -112,9 +117,11 @@ for isforward in [true, false]
 
                  @myassert(final_score != Score(-Inf), "new score is invalid")
                  @myassert(final_move != TRACE_NONE, "failed to find a move")
+                 println("$i, $j, $final_score, $final_move")
                  return final_score, final_move
                  end
                  end)
+            end
         end
     end
 end

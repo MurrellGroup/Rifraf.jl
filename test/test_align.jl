@@ -10,6 +10,7 @@ import Rifraf.forward_moves,
 
 
 # TODO: some codon tests
+# TODO: test all update() variants
 @testset "test forward and backward" begin
     const scores = Scores(-1.0, -1.0, -1.0, -Inf, -Inf)
 

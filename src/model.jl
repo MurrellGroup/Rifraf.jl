@@ -56,6 +56,7 @@ function score_nocodon(proposal::Proposal,
                        A::BandedArray{Score}, B::BandedArray{Score},
                        pseq::RifrafSequence,
                        newcols::Array{Score, 2})
+    flush(STDOUT)
     t = typeof(proposal)
     if t == Deletion
         # nothing to recompute
@@ -167,12 +168,12 @@ function score_proposal(proposal::Proposal,
         amin, amax = row_range(A, range_col)
         # fill elts corresponding to first row A[1, :]
         if amin == 1
-            for j in 1:n_new
-                newcols[1, j] = (j == 1 ? A[1, acol] : newcols[1, j-1]) + pseq.del_scores[1]
+            for jj in 1:n_new
+                newcols[1, jj] = (jj == 1 ? A[1, acol] : newcols[1, jj-1]) + pseq.del_scores[1]
                 if do_codon_del(pseq)
-                    cand_score = A[1, acol - CODON_LENGTH + 1] + pseq.codon_del_scores[1]
-                    if newcols[1, j] < cand_score
-                        newcols[1, j] = cand_score
+                    cand_score = (jj <= CODON_LENGTH ? A[1, acol - CODON_LENGTH] : newcols[1, 1]) + pseq.codon_del_scores[1]
+                    if newcols[1, jj] < cand_score
+                        newcols[1, jj] = cand_score
                     end
                 end
             end
