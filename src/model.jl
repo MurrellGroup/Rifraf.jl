@@ -216,7 +216,7 @@ function score_proposal(m::Proposal,
     end
     if use_ref
         score += score_proposal(m, state.A_t, state.B_t, state.consensus,
-                                reference, ref_newcols)
+                                reference, newcols)
     end
     return score
 end
