@@ -34,6 +34,8 @@ for isforward in [true, false]
             direction = isforward ? "forward" : "backward"
             s1 = use_codon ? "_codon" : ""
             s2 = use_newcols ? "_newcols" : ""
+            validrow = isforward ? :(i > 1) : :(i < size(A)[1])
+            validcol = isforward ? :(j > 1) : :(j < size(A)[2])
             funcname = parse("update_$direction$s1$s2")
             seq_i = isforward ? :(i-1) : :(i)
             codon_ins_i = isforward ? :(i - CODON_LENGTH) : :(i)
@@ -42,15 +44,16 @@ for isforward in [true, false]
 
             # `use_newcols` is only used in the forward case, so no
             # need to do any other indexing in that case
-            match_prev = use_newcols ? :(newcols[i-1, j - acol - 1]) : parse("A[i $op 1, j $op 1]")
-            ins_prev = use_newcols ? :(newcols[i-1, j - acol]) : parse("A[i $op 1, j]")
-            del_prev = use_newcols ? :(newcols[i, j - acol - 1]) : parse("A[i, j $op 1]")
+
+            # TODO: write a view for a banded array column, so all this can be removed
+            match_prev = use_newcols ? :(i > 1 ? newcols[i-1, j-acol-1] : A[i-1, j-1]) : parse("A[i $op 1, j $op 1]")
+            ins_prev = use_newcols ? :(i > 1 ? newcols[i-1, j-acol]: A[i-1, j]) : parse("A[i $op 1, j]")
+            del_prev = use_newcols ? :(newcols[i, j-acol-1]) : parse("A[i, j $op 1]")
             codon_ins_prev = use_newcols ? :(newcols[i-CODON_LENGTH, j - acol]) : parse("A[i $op CODON_LENGTH, j]")
             codon_del_prev = use_newcols ? :(newcols[i, j - acol - CODON_LENGTH]) : parse("A[i, j $op CODON_LENGTH]")
 
             codon_block = use_codon ? quote
                 if $codon_ins_check
-                    # FIXME: index is wrong for backward
                     cur_score = $codon_ins_prev + pseq.codon_ins_scores[$codon_ins_i]
                     if cur_score > final_score
                         final_score = cur_score
@@ -74,6 +77,9 @@ for isforward in [true, false]
                                     newcols::Array{Score, 2}=Array(Score, 0, 0),
                                     acol::Int=0,
                                     match_mult::Float64=0.0)
+                 @myassert($validrow, "update called on gap row")
+                 @myassert($validcol, "update called on gap column")
+
                  nrows, ncols = size(A)
                  match_score = s_base == t_base ? pseq.match_scores[$seq_i] : pseq.mismatch_scores[$seq_i]
                  # TODO: version without match mult
@@ -96,7 +102,7 @@ for isforward in [true, false]
                    final_move = TRACE_INSERT
                  end
 
-                 cur_score = $del_prev + pseq.del_scores[$seq_i]
+                 cur_score = $del_prev + pseq.del_scores[i]
                  if cur_score > final_score
                    final_score = cur_score
                    final_move = TRACE_DELETE
@@ -104,8 +110,8 @@ for isforward in [true, false]
 
                  $codon_block
 
-                 @myassert(final_score == Score(-Inf), "new score is invalid")
-                 @myassert(final_move == TRACE_NONE, "failed to find a move")
+                 @myassert(final_score != Score(-Inf), "new score is invalid")
+                 @myassert(final_move != TRACE_NONE, "failed to find a move")
                  return final_score, final_move
                  end
                  end)
@@ -207,7 +213,7 @@ function backward!(t::DNASeq, s::RifrafSequence,
     docodondel = do_codon_ins(s)
     for j in length(t) : -1 :max(1, length(t) - result.h_offset - result.bandwidth + 1)
         result[end, j] = result[end, j+1] + s.del_scores[end]
-        if docodondel && j > CODON_LENGTH
+        if docodondel && j <= new_shape[2]-CODON_LENGTH
             cand_score = result[end, j+CODON_LENGTH] + s.codon_del_scores[end]
             if result[end, j] < cand_score
                 result[end, j] = cand_score
@@ -218,8 +224,7 @@ function backward!(t::DNASeq, s::RifrafSequence,
     docodonins = do_codon_ins(s)
     for i in length(s) : -1 : max(1, length(s) - result.v_offset - result.bandwidth + 1)
         result[i, end] = result[i+1, end] + s.ins_scores[i]
-        if docodonins && i > CODON_LENGTH
-            # FIXME: index is wrong for backward
+        if docodonins && i <= new_shape[1]-CODON_LENGTH
             cand_score = result[i+CODON_LENGTH, end] + s.codon_ins_scores[i]
             if result[i, end] < cand_score
                 result[i, end] = cand_score

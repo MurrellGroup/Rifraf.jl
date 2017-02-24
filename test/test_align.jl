@@ -132,11 +132,11 @@ import Rifraf.forward_moves,
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
         A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
-        score = (inv_log10(log_p[1]) +
-                 inv_log10(log_p[2]) +
-                 maximum(log_p[2:3]) + scores.deletion +
-                 inv_log10(log_p[3]) +
-                 inv_log10(log_p[4]))
+        score = (pseq.match_scores[1] +
+                 pseq.match_scores[2] +
+                 pseq.del_scores[3] +
+                 pseq.match_scores[3] +
+                 pseq.match_scores[4])
         @test A[end, end] ≈ score
         @test check_all_cols(A, B, false)
     end
@@ -149,9 +149,9 @@ import Rifraf.forward_moves,
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
         A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
-        score = (inv_log10(log_p[1]) +
-                 maximum(log_p[1:2]) + scores.deletion +
-                 inv_log10(log_p[2]))
+        score = (pseq.match_scores[1] +
+                 pseq.del_scores[2] +
+                 pseq.match_scores[2])
         @test A[end, end] ≈ score
         @test check_all_cols(A, B, false)
     end
