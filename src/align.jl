@@ -22,14 +22,26 @@ const TRACE_CODON_DELETE = Trace(5)
 # - forward and backward
 # - with and without codon moves
 # - with and without acols
-for direction in [:(forward), :(backward)]
+for isforward in [true, false]
     for use_codon in [true, false]
         for use_newcols in [true, false]
-            op = direction == :forward ? :(-) : :(+)
+            if !isforward && use_newcols
+                # we never compute new columns in the backwards case,
+                # so no need to generate this function
+                continue
+            end
+            op = isforward ? :(-) : :(+)
+            direction = isforward ? "forward" : "backward"
             s1 = use_codon ? "_codon" : ""
             s2 = use_newcols ? "_newcols" : ""
             funcname = parse("update_$direction$s1$s2")
-            # only change op for when use_newcols is false
+            seq_i = isforward ? :(i-1) : :(i)
+            codon_ins_i = isforward ? :(i - CODON_LENGTH) : :(i)
+            codon_ins_check = isforward ? :(i > CODON_LENGTH) : :(i < nrows - CODON_LENGTH + 1)
+            codon_del_check = isforward ? :(j > CODON_LENGTH) : :(j < ncols - CODON_LENGTH + 1)
+
+            # `use_newcols` is only used in the forward case, so no
+            # need to do any other indexing in that case
             match_prev = use_newcols ? :(newcols[i-1, j - acol - 1]) : parse("A[i $op 1, j $op 1]")
             ins_prev = use_newcols ? :(newcols[i-1, j - acol]) : parse("A[i $op 1, j]")
             del_prev = use_newcols ? :(newcols[i, j - acol - 1]) : parse("A[i, j $op 1]")
@@ -37,15 +49,15 @@ for direction in [:(forward), :(backward)]
             codon_del_prev = use_newcols ? :(newcols[i, j - acol - CODON_LENGTH]) : parse("A[i, j $op CODON_LENGTH]")
 
             codon_block = use_codon ? quote
-                if i > CODON_LENGTH
+                if $codon_ins_check
                     # FIXME: index is wrong for backward
-                    cur_score = $codon_ins_prev + pseq.codon_ins_scores[i]
+                    cur_score = $codon_ins_prev + pseq.codon_ins_scores[$codon_ins_i]
                     if cur_score > final_score
                         final_score = cur_score
                         final_move = TRACE_CODON_INSERT
                     end
                 end
-                if j > CODON_LENGTH
+                if $codon_del_check
                     cur_score = $codon_del_prev + pseq.codon_del_scores[i]
                     if cur_score > final_score
                         final_score = cur_score
@@ -62,7 +74,8 @@ for direction in [:(forward), :(backward)]
                                     newcols::Array{Score, 2}=Array(Score, 0, 0),
                                     acol::Int=0,
                                     match_mult::Float64=0.0)
-                 match_score = s_base == t_base ? pseq.match_scores[i] : pseq.mismatch_scores[i]
+                 nrows, ncols = size(A)
+                 match_score = s_base == t_base ? pseq.match_scores[$seq_i] : pseq.mismatch_scores[$seq_i]
                  # TODO: version without match mult
                  if match_mult > 0.0
                      # TODO: implement this
@@ -77,13 +90,13 @@ for direction in [:(forward), :(backward)]
                    final_move = TRACE_MATCH
                  end
 
-                 cur_score = $ins_prev + pseq.ins_scores[i]
+                 cur_score = $ins_prev + pseq.ins_scores[$seq_i]
                  if cur_score > final_score
                    final_score = cur_score
                    final_move = TRACE_INSERT
                  end
 
-                 cur_score = $del_prev + pseq.del_scores[i]
+                 cur_score = $del_prev + pseq.del_scores[$seq_i]
                  if cur_score > final_score
                    final_score = cur_score
                    final_move = TRACE_DELETE
@@ -223,12 +236,13 @@ function backward!(t::DNASeq, s::RifrafSequence,
         update_function = update_backward_codon
     end
 
+    second_last_row = new_shape[1] - 1
     second_last_col = new_shape[2] - 1
     for j = second_last_col : -1 : 1
         start, stop = row_range(result, j)
-        for i in start : -1 : min(stop, second_last_col)
-            sbase = s.seq[i+1]
-            tbase = t[j+1]
+        for i in start : min(stop, second_last_row)
+            sbase = s.seq[i]
+            tbase = t[j]
             result[i, j], _ = update_function(result, i, j, sbase, tbase, s;
                                               match_mult=match_mult)
         end

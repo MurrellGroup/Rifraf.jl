@@ -30,23 +30,21 @@ import Rifraf.forward_moves,
         @test full(A) ≈ expected
     end
 
-    @testset "imperfect_backward" begin
+    @testset "perfect_backward" begin
         bandwidth = 1
         template = DNASeq("AA")
-        seq = DNASeq("AT")
+        seq = DNASeq("AA")
         lp = -3.0
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        B = backward(template, pseq)
-        expected = transpose(reshape([[lp + scores.mismatch + match,
-                                       lp + scores.insertion + match, 0.0];
-                                      [2*lp + scores.deletion + scores.mismatch,
-                                       lp + scores.mismatch,
-                                       lp + scores.insertion];
+        A = backward(template, pseq)
+        # transpose because of column-major order
+        expected = transpose(reshape([[2 * match, match + lp + scores.insertion, 0.0];
+                                      [match + lp + scores.deletion, match, lp + scores.insertion];
                                       [0.0, lp + scores.deletion, 0.0]],
                                      (3, 3)))
-        @test full(B) ≈ expected
+        @test full(A) ≈ expected
     end
 
     @testset "imperfect_forward" begin
@@ -66,6 +64,22 @@ import Rifraf.forward_moves,
                                      (3, 3)))
 
         @test full(A) ≈ expected
+    end
+
+    @testset "imperfect_backward" begin
+        bandwidth = 1
+        template = DNASeq("AA")
+        seq = DNASeq("AT")
+        lp = -3.0
+        match = inv_log10(lp)
+        log_p = fill(lp, length(seq))
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        B = backward(template, pseq)
+        expected = transpose(reshape([[lp + scores.mismatch + match, lp + scores.insertion + match, 0.0];
+                                      [2*lp + scores.deletion + scores.mismatch, lp + scores.mismatch, lp + scores.insertion];
+                                      [0.0, lp + scores.deletion, 0.0]],
+                                     (3, 3)))
+        @test full(B) ≈ expected
     end
 
     @testset "forward/backward agreement" begin

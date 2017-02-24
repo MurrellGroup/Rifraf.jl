@@ -34,22 +34,14 @@ type RifrafSequence
         end
         # all scores are symmetric on the ends so there are fewer
         # branches in the alignment code
-        match_scores = Vector{LogProb}(length(error_log_p) + 2)
-        mismatch_scores = Vector{LogProb}(length(error_log_p) + 2)
-        ins_scores = Vector{LogProb}(length(error_log_p) + 2)
+        match_scores = Vector{LogProb}(length(error_log_p))
+        mismatch_scores = Vector{LogProb}(length(error_log_p))
+        ins_scores = Vector{LogProb}(length(error_log_p))
         del_scores = Vector{LogProb}(length(error_log_p) + 1)
 
-        match_scores[1] = Prob(-Inf)
-        match_scores[end] = Prob(-Inf)
-        match_scores[2:end-1] = log10(1.0 - exp10(error_log_p))
-
-        mismatch_scores[1] = Prob(-Inf)
-        mismatch_scores[end] = Prob(-Inf)
-        mismatch_scores[2:end-1] = error_log_p + scores.mismatch
-
-        ins_scores[1] = Prob(-Inf)
-        ins_scores[end] = Prob(-Inf)
-        ins_scores[2:end-1] = error_log_p + scores.insertion
+        match_scores[:] = log10(1.0 - exp10(error_log_p))
+        mismatch_scores[:] = error_log_p + scores.mismatch
+        ins_scores[:] = error_log_p + scores.insertion
 
         del_scores[1] = error_log_p[1] + scores.deletion
         del_scores[end] = error_log_p[end] + scores.deletion
@@ -62,11 +54,9 @@ type RifrafSequence
         codon_del_scores = Vector{LogProb}()
         if scores.codon_insertion > -Inf
             do_codon_moves = true
-            codon_ins_scores = Vector{LogProb}(length(error_log_p) + 4)
-            codon_ins_scores[1:CODON_LENGTH] = -Inf
-            codon_ins_scores[end-CODON_LENGTH+1:end] = -Inf
+            codon_ins_scores = Vector{LogProb}(length(error_log_p) - 2)
             for i=2:(length(error_log_p)-1)
-               codon_ins_scores[i+2] = max(error_log_p[i - 1],
+               codon_ins_scores[i-1] = max(error_log_p[i - 1],
                                            error_log_p[i],
                                            error_log_p[i + 1]) + scores.codon_insertion
             end
