@@ -346,13 +346,9 @@ end
         recompute!(state, pseqs, rseq, mult,
                    redo_as, redo_bs, 2, use_ref)
         do_alignment_proposals = true
-        do_surgery_proposals = true
-        trust_proposals = true
         indels_only = false
         cands = get_candidate_proposals(state, pseqs, rseq,
                                         do_alignment_proposals,
-                                        do_surgery_proposals,
-                                        trust_proposals,
                                         indels_only)
         @test length(cands) == length(expected)
         if length(cands) == length(expected)

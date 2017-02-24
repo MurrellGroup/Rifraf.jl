@@ -169,7 +169,7 @@ function score_proposal(proposal::Proposal,
         if amin == 1
             for j in 1:n_new
                 newcols[1, j] = (j == 1 ? A[1, acol] : newcols[1, j-1]) + pseq.del_scores[1]
-                if do_codon_del(s)
+                if do_codon_del(pseq)
                     cand_score = A[1, acol - CODON_LENGTH + 1] + pseq.codon_del_scores[1]
                     if newcols[1, j] < cand_score
                         newcols[1, j] = cand_score
