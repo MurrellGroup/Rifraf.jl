@@ -46,11 +46,11 @@ for isforward in [true, false]
             # need to do any other indexing in that case
 
             # TODO: write a view for a banded array column, so all this can be removed
-            match_prev = use_newcols ? :(i > 1 ? newcols[i-1, j-acol-1] : A[i-1, j-1]) : parse("A[i $op 1, j $op 1]")
-            ins_prev = use_newcols ? :(i > 1 ? newcols[i-1, j-acol]: A[i-1, j]) : parse("A[i $op 1, j]")
-            del_prev = use_newcols ? :(newcols[i, j-acol-1]) : parse("A[i, j $op 1]")
+            match_prev = use_newcols ? :(j - acol > 1 ? newcols[i-1, j-acol-1] : A[i-1, j-1]) : parse("A[i $op 1, j $op 1]")
+            ins_prev = use_newcols ? :(newcols[i-1, j-acol]) : parse("A[i $op 1, j]")
+            del_prev = use_newcols ? :(j - acol > 1 ? newcols[i, j-acol-1] : A[i, j-1]) : parse("A[i, j $op 1]")
             codon_ins_prev = use_newcols ? :(newcols[i-CODON_LENGTH, j - acol]) : parse("A[i $op CODON_LENGTH, j]")
-            codon_del_prev = use_newcols ? :(newcols[i, j - acol - CODON_LENGTH]) : parse("A[i, j $op CODON_LENGTH]")
+            codon_del_prev = use_newcols ? :(j - acol - CODON_LENGTH > 0 ? newcols[i, j - acol - CODON_LENGTH] : A[i, j-CODON_LENGTH]) : parse("A[i, j $op CODON_LENGTH]")
 
             codon_block = use_codon ? quote
                 if $codon_ins_check
