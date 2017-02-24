@@ -84,7 +84,16 @@ end
         @test check_all_cols(A, B, codon_moves)
         newcols = zeros(size(A)[1], Rifraf.CODON_LENGTH + 1)
         score = score_proposal(proposal, A, B, template, pseq, newcols)
-        @test_approx_eq_eps score Anew[end, end] 0.1
+
+        if abs(score - Anew[end, end]) > 0.01
+            println("codon moves: $codon_moves")
+            println(template)
+            println(proposal)
+            println(new_template)
+            println(pseq.seq)
+        end
+
+        @test_approx_eq_eps score Anew[end, end] 0.01
     end
 
     @testset "random substitutions" begin
@@ -95,7 +104,6 @@ end
             test_random_proposal(proposal, template_len)
         end
     end
-
     @testset "random insertions" begin
         for i = 1:1000
             template_len = rand(30:50)
@@ -104,12 +112,55 @@ end
             test_random_proposal(proposal, template_len)
         end
     end
-
     @testset "random deletions" begin
         for i = 1:1000
             template_len = rand(30:50)
             pos = rand(1:template_len)
             proposal = Deletion(pos)
+            test_random_proposal(proposal, template_len)
+        end
+    end
+    @testset "random deletions at beginning" begin
+        for i = 1:10
+            template_len = rand(30:50)
+            proposal = Deletion(1)
+            test_random_proposal(proposal, template_len)
+        end
+    end
+    @testset "random deletions at end" begin
+        for i = 1:10
+            template_len = rand(30:50)
+            proposal = Deletion(template_len)
+            test_random_proposal(proposal, template_len)
+        end
+    end
+    @testset "random substitutions at beginning" begin
+        # subs at the beginning
+        for i = 1:10
+            template_len = rand(30:50)
+            proposal = Substitution(1, rbase())
+            test_random_proposal(proposal, template_len)
+        end
+    end
+    @testset "random substitutions at end" begin
+        # subs at the end
+        for i = 1:10
+            template_len = rand(30:50)
+            proposal = Substitution(template_len, rbase())
+            test_random_proposal(proposal, template_len)
+        end
+    end
+    @testset "random insertions at beginning" begin
+        for i = 1:10
+            template_len = rand(30:50)
+            proposal = Insertion(0, rbase())
+            test_random_proposal(proposal, template_len)
+        end
+    end
+    @testset "random insertions at end" begin
+        for i = 1:10
+            template_len = rand(30:50)
+            proposal = Insertion(template_len, rbase())
             test_random_proposal(proposal, template_len)
         end
     end
