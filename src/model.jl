@@ -97,11 +97,12 @@ function score_nocodon(proposal::Proposal,
 end
 
 
-function get_sub_consensus(proposal::Proposal, seq::DNASeq,
-                           next_posn::Int, n_after::Int)
+function get_consensus_substring(proposal::Proposal, seq::DNASeq,
+                                 n_after::Int)
     # next valid position in sequence after this proposal
-    t = typeof(proposal)
     pos = proposal.pos
+    next_posn = pos + 1
+    t = typeof(proposal)
     prefix = DNASeq()
     stop = min(next_posn + n_after - 1, length(seq))
     suffix = seq[next_posn:stop]
@@ -130,36 +131,28 @@ function score_proposal(proposal::Proposal,
     # last column of B to use
     last_bcol = first_bcol + CODON_LENGTH - 1
 
-    if t == Deletion
-        n_del = (t == Deletion ? 1 : CODON_LENGTH)
-        if acol == (size(A)[2] - n_del)
-            # suffix deletions do not need recomputation
-            return A[end, end - n_del]
-        end
+    if t == Deletion && acol == (size(A)[2] - 1)
+        # suffix deletions do not need recomputation
+        return A[end, end - 1]
     end
 
-    # number of bases changed/inserted
-    n_bases = (t == Deletion ? 0 : 1)
-    # number of columns after recomputed columns to also recompute.
-    n_after = CODON_LENGTH
+    nrows, ncols = size(A)
 
     # if we'd go to or past the last column of B, just recompute the
-    # rest of A
-    nrows, ncols = size(A)
+    # rest of A, including A[end, end]
     just_a = last_bcol >= ncols
-    next_posn = proposal.pos + 1
-    if just_a
-        # go to end of consensus
-        n_after = length(consensus) - next_posn + 1
-    end
 
-    if n_bases == 0 && n_after == 0
+    # number of columns after new columns to also recompute.
+    n_after = !just_a ? CODON_LENGTH : length(consensus) - proposal.pos
+
+    # number of bases changed/inserted
+    n_new_bases = (t == Deletion ? 0 : 1)
+    if n_new_bases == 0 && n_after == 0
         error("no new columns need to be recomputed.")
     end
 
-    n_new = n_bases + n_after
-    sub_consensus = get_sub_consensus(proposal, consensus,
-                                      next_posn, n_after)
+    n_new = n_new_bases + n_after
+    sub_consensus = get_consensus_substring(proposal, consensus, n_after)
     # compute new columns
     for j in 1:n_new
         range_col = min(acol + j, ncols)

@@ -49,29 +49,29 @@ for isforward in [true, false]
 
             # TODO: write a view for a banded array column, so all this can be removed
 
-            # FIXME: ins/del and codon ins/del need to check inband
-
             match_prev = use_newcols ? :(j - acol > 1 ? newcols[i-1, j-acol-1] : A[i-1, j-1]) : parse("A[i $op 1, j $op 1]")
             ins_prev = use_newcols ? :(newcols[i-1, j-acol]) : parse("A[i $op 1, j]")
             del_prev = use_newcols ? :(j - acol > 1 ? newcols[i, j-acol-1] : A[i, j-1]) : parse("A[i, j $op 1]")
             codon_ins_prev = use_newcols ? :(newcols[i-CODON_LENGTH, j - acol]) : parse("A[i $op CODON_LENGTH, j]")
             codon_del_prev = use_newcols ? :(j - acol - CODON_LENGTH > 0 ? newcols[i, j - acol - CODON_LENGTH] : A[i, j-CODON_LENGTH]) : parse("A[i, j $op CODON_LENGTH]")
 
-            matchblock = do_bandcheck ? (isforward ? :(inband(A, i-1, j-1)) : :(inband(A, i+1, j+1))) : :(true)
-            insblock = do_bandcheck ? (isforward ? :(inband(A, i-1, j)) : :(inband(A, i+1, j))) : :(true)
-            delblock = do_bandcheck ? (isforward ? :(inband(A, i, j-1)) : :(inband(A, i, j+1))) : :(true)
-            cinsblock = do_bandcheck ? (isforward ? :(inband(A, i-CODON_LENGTH, j)) : :(inband(A, i+CODON_LENGTH, j))) : :(true)
-            cdelblock = do_bandcheck ? (isforward ? :(inband(A, i, j-CODON_LENGTH)) : :(inband(A, i, j+CODON_LENGTH))) : :(true)
+            matchbandcheck = do_bandcheck ? (isforward ? :(inband(A, i-1, j-1)) : :(inband(A, i+1, j+1))) : :(true)
+
+            j_to_check = isforward ? :(min(j, size(A)[2])) : :(max(j, size(A)[2]))
+            insbandcheck = do_bandcheck ? (isforward ? :(inband(A, i-1, $j_to_check)) : :(inband(A, i+1, $j_to_check))) : :(true)
+            delbandcheck = do_bandcheck ? (isforward ? :(inband(A, i, j-1)) : :(inband(A, i, j+1))) : :(true)
+            cinsbandcheck = do_bandcheck ? (isforward ? :(inband(A, i-CODON_LENGTH, $j_to_check)) : :(inband(A, i+CODON_LENGTH, $j_to_check))) : :(true)
+            cdelbandcheck = do_bandcheck ? (isforward ? :(inband(A, i, j-CODON_LENGTH)) : :(inband(A, i, j+CODON_LENGTH))) : :(true)
 
             codon_block = use_codon ? quote
-                if $cinsblock && $codon_ins_check
+                if $cinsbandcheck && $codon_ins_check
                     cur_score = $codon_ins_prev + pseq.codon_ins_scores[$codon_ins_i]
                     if cur_score > final_score
                         final_score = cur_score
                         final_move = TRACE_CODON_INSERT
                     end
                 end
-                if $cdelblock && $codon_del_check
+                if $cdelbandcheck && $codon_del_check
                     cur_score = $codon_del_prev + pseq.codon_del_scores[i]
                     if cur_score > final_score
                         final_score = cur_score
@@ -93,7 +93,7 @@ for isforward in [true, false]
                  final_score = Score(-Inf)
                  final_move = TRACE_NONE
 
-                 if $matchblock
+                 if $matchbandcheck
                  match_score = s_base == t_base ? pseq.match_scores[$seq_i] : pseq.mismatch_scores[$seq_i]
                  # TODO: version without match mult
                  if match_mult > 0.0
@@ -107,7 +107,7 @@ for isforward in [true, false]
                  end
                  end
 
-                 if $insblock
+                 if $insbandcheck
                  cur_score = $ins_prev + pseq.ins_scores[$seq_i]
                  if cur_score > final_score
                    final_score = cur_score
@@ -115,7 +115,7 @@ for isforward in [true, false]
                  end
                  end
 
-                 if $delblock
+                 if $delbandcheck
                  cur_score = $del_prev + pseq.del_scores[i]
                  if cur_score > final_score
                    final_score = cur_score
