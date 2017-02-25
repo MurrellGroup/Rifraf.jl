@@ -190,7 +190,7 @@ end
     ref_scores = Scores(ref_errors)
 
     ref = DNASeq("CGGCGATTT")
-    consensus_errors = LogProb[-8.04822,-5.10032,-5.09486,-1.0,-2.68901,-6.52537,-5.20094]
+    consensus_errors = LogProb[-8., -8., -8., -1., -8., -10., -10.]
     consensus = RifrafSequence(DNASeq("CTGCCGA"), consensus_errors, 10, ref_scores)
 
     proposals = single_indel_proposals(ref, consensus)

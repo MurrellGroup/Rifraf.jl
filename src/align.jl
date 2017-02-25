@@ -31,14 +31,17 @@ for isforward in [true, false]
                 continue
             end
             for do_bandcheck in [true, false]
+            for skew_matches in [true, false]
+            skew_block = skew_matches ? :(match_score *= 0.99) : :()
             op = isforward ? :(-) : :(+)
             direction = isforward ? "forward" : "backward"
             s1 = use_codon ? "_codon" : ""
             s2 = use_newcols ? "_newcols" : ""
             s3 = do_bandcheck ? "_bandcheck" : ""
+            s4 = skew_matches ? "_skew" : ""
+            funcname = parse("update_$direction$s1$s2$s3$s4")
             validrow = isforward ? :(i > 1) : :(i < size(A)[1])
             validcol = isforward ? :(j > 1) : :(j < size(A)[2])
-            funcname = parse("update_$direction$s1$s2$s3")
             seq_i = isforward ? :(i-1) : :(i)
             codon_ins_i = isforward ? :(i - CODON_LENGTH) : :(i)
             codon_ins_check = isforward ? :(i > CODON_LENGTH) : :(i <= nrows - CODON_LENGTH)
@@ -86,8 +89,7 @@ for isforward in [true, false]
                                     s_base::DNANucleotide, t_base::DNANucleotide,
                                     pseq::RifrafSequence;
                                     newcols::Array{Score, 2}=Array(Score, 0, 0),
-                                    acol::Int=0,
-                                    match_mult::Float64=0.0)
+                                    acol::Int=0)
                  nrows, ncols = size(A)
 
                  final_score = Score(-Inf)
@@ -95,10 +97,7 @@ for isforward in [true, false]
 
                  if $matchbandcheck
                  match_score = s_base == t_base ? pseq.match_scores[$seq_i] : pseq.mismatch_scores[$seq_i]
-                 # TODO: version without match mult
-                 if match_mult > 0.0
-                     # TODO: implement this
-                 end
+                 $skew_block
 
                  cur_score = $match_prev + match_score
                  if cur_score > final_score
@@ -131,10 +130,20 @@ for isforward in [true, false]
                  end
                  end)
             end
+            end
         end
     end
 end
 
+function update_function(isforward, use_codon, use_newcols, do_bandcheck, skew_matches)
+    direction = isforward ? "forward" : "backward"
+    s1 = use_codon ? "_codon" : ""
+    s2 = use_newcols ? "_newcols" : ""
+    s3 = do_bandcheck ? "_bandcheck" : ""
+    s4 = skew_matches ? "_skew" : ""
+    fstring = "update_$direction$s1$s2$s3$s4"
+    return getfield(Rifraf, Symbol(fstring))
+end
 
 function forward_moves!(t::DNASeq, s::RifrafSequence,
                         result::BandedArray{Score},
@@ -147,37 +156,30 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
     result[1, 1] = Score(0.0)
     moves[1, 1] = TRACE_NONE
 
-    # TODO: handle this
-    # TODO: this cannot make mismatches preferable to codon indels
-    match_mult = skew_matches ? 0.1 : 0.0
-
     # fill first row
     # TODO: handle trim
-    update_function = do_codon_moves(s) ? update_forward_codon_bandcheck : update_forward_bandcheck
+    update_f = update_function(true, do_codon_moves(s), false, true, skew_matches)
     for j in 2 : min((result.h_offset + result.bandwidth + 1), length(t) + 1)
         i = 1
         sbase = DNA_Gap
         tbase = t[j-1]
-        result[i, j], moves[i, j] = update_function(result, i, j, sbase, tbase, s;
-                                                    match_mult=match_mult)
+        result[i, j], moves[i, j] = update_f(result, i, j, sbase, tbase, s)
     end
     # fill first column
     for i in 2 : min(result.v_offset + result.bandwidth + 1, length(s) + 1)
         j = 1
         sbase = s.seq[i-1]
         tbase = DNA_Gap
-        result[i, j], moves[i, j] = update_function(result, i, j, sbase, tbase, s;
-                                                    match_mult=match_mult)
+        result[i, j], moves[i, j] = update_f(result, i, j, sbase, tbase, s)
     end
 
-    update_function = do_codon_moves(s) ? update_forward_codon : update_forward
+    update_f = update_function(true, do_codon_moves(s), false, false, skew_matches)
     for j = 2:new_shape[2]
         start, stop = row_range(result, j)
         for i in max(start, 2):stop
             sbase = s.seq[i-1]
             tbase = t[j-1]
-            result[i, j], moves[i, j] = update_function(result, i, j, sbase, tbase, s;
-                                                        match_mult=match_mult)
+            result[i, j], moves[i, j] = update_f(result, i, j, sbase, tbase, s)
         end
     end
 end
@@ -212,29 +214,25 @@ function backward!(t::DNASeq, s::RifrafSequence,
     result[end, end] = Score(0.0)
     # TODO: handle this
     # TODO: this cannot make mismatches preferable to codon indels
-    match_mult = skew_matches ? 0.1 : 0.0
 
-    update_function = do_codon_moves(s) ? update_backward_codon_bandcheck : update_backward_bandcheck
-
+    update_f = update_function(false, do_codon_moves(s), false, true, skew_matches)
     # fill last row
     # TODO: handle trim
     for j in length(t) : -1 :max(1, length(t) - result.h_offset - result.bandwidth + 1)
         i = new_shape[1]
         sbase = DNA_Gap
         tbase = t[j]
-        result[i, j], _ = update_function(result, i, j, sbase, tbase, s;
-                                       match_mult=match_mult)
+        result[i, j], _ = update_f(result, i, j, sbase, tbase, s)
    end
     # fill last column
     for i in length(s) : -1 : max(1, length(s) - result.v_offset - result.bandwidth + 1)
         j = new_shape[2]
         sbase = s.seq[i]
         tbase = DNA_Gap
-        result[i, j], _ = update_function(result, i, j, sbase, tbase, s;
-                                          match_mult=match_mult)
+        result[i, j], _ = update_f(result, i, j, sbase, tbase, s)
     end
 
-    update_function = do_codon_moves(s) ? update_backward_codon : update_backward
+    update_f = update_function(false, do_codon_moves(s), false, false, skew_matches)
 
     second_last_row = new_shape[1] - 1
     second_last_col = new_shape[2] - 1
@@ -243,8 +241,7 @@ function backward!(t::DNASeq, s::RifrafSequence,
         for i in min(stop, second_last_row) : -1 : start
             sbase = s.seq[i]
             tbase = t[j]
-            result[i, j], _ = update_function(result, i, j, sbase, tbase, s;
-                                              match_mult=match_mult)
+            result[i, j], _ = update_f(result, i, j, sbase, tbase, s)
         end
     end
 end
@@ -344,11 +341,11 @@ function moves_to_aligned_seqs(moves::Vector{Trace},
             push!(aligned_t, t[j])
             push!(aligned_s, DNA_Gap)
         elseif move == TRACE_CODON_INSERT
-            append!(aligned_t, [DNA_Gap, DNA_Gap, DNA_Gap])
-            append!(aligned_s, [s[i-2], s[i-1], s[i]])
+            append!(aligned_t, DNASequence([DNA_Gap, DNA_Gap, DNA_Gap]))
+            append!(aligned_s, DNASequence([s[i-2], s[i-1], s[i]]))
         elseif move == TRACE_CODON_DELETE
-            append!(aligned_t, [t[j-2], t[j-1], t[j]])
-            append!(aligned_s, [DNA_Gap, DNA_Gap, DNA_Gap])
+            append!(aligned_t, DNASequence([t[j-2], t[j-1], t[j]]))
+            append!(aligned_s, DNASequence([DNA_Gap, DNA_Gap, DNA_Gap]))
         end
     end
     return aligned_t, aligned_s

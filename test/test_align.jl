@@ -156,4 +156,18 @@ import Rifraf.forward_moves,
         @test A[end, end] ≈ score
         @test check_all_cols(A, B, false)
     end
+
+    @testset "align and skew" begin
+        ref_errors = ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
+        ref_scores = Scores(ref_errors)
+
+        ref = DNASeq("CGGCGATTT")
+        consensus_errors = LogProb[-8., -8., -8., -1., -8., -10., -10.]
+        consensus = RifrafSequence(DNASeq("CTGCCGA"), consensus_errors, 10, ref_scores)
+        a, b = Rifraf.align(ref, consensus, skew_matches=true)
+        expected_a = dna"CGG-CGATTT"
+        expected_b = dna"CTGCCGA---"
+        @test a == expected_a
+        @test b == expected_b
+    end
 end
