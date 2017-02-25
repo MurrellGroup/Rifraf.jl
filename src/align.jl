@@ -55,16 +55,18 @@ function update(A::BandedArray{Score},
                 s_base::DNANucleotide, t_base::DNANucleotide,
                 pseq::RifrafSequence;
                 newcols::Array{Score, 2}=Array(Score, (0, 0)),
+                doreverse::Bool=false,
                 acol=-1, trim=false,
                 skew_matches=false)
     final_score = Score(-Inf)
     final_move = TRACE_NONE
 
     # TODO: this cannot make mismatches preferable to codon indels
-    seq_i = max(i-1, 1)
+    seq_i = doreverse? min(length(pseq), length(pseq) - (i-1) + 1) : max(i-1, 1)
+    del_i = doreverse ? length(pseq) + 1 - i + 1 : i
     match_score = (s_base == t_base) ? pseq.match_scores[seq_i] : pseq.mismatch_scores[seq_i]
     ins_score = pseq.ins_scores[seq_i]
-    del_score = pseq.del_scores[i]
+    del_score = pseq.del_scores[del_i]
 
     if skew_matches && s_base != t_base
         match_score *= 0.99
@@ -85,13 +87,17 @@ function update(A::BandedArray{Score},
 
     if do_codon_moves(pseq)
         if do_codon_ins(pseq) && i > CODON_LENGTH
+            codon_i = i - CODON_LENGTH
+            if doreverse
+                codon_i = length(pseq.codon_ins_scores) - codon_i + 1
+            end
             codon_ins_score = pseq.codon_ins_scores[i - CODON_LENGTH]
             final_score, final_move = update_helper(final_score, final_move,
                                                     codon_ins_score, TRACE_CODON_INSERT,
                                                     newcols, A, i, j, acol)
         end
         if do_codon_del(pseq) && j > CODON_LENGTH
-            codon_del_score = pseq.codon_del_scores[seq_i]
+            codon_del_score = pseq.codon_del_scores[del_i]
             final_score, final_move = update_helper(final_score, final_move,
                                                     codon_del_score, TRACE_CODON_DELETE,
                                                     newcols, A, i, j, acol,)
@@ -121,9 +127,11 @@ macro forward(use_moves)
                 if i == 1 && j == 1
                     continue
                 end
-                sbase = i > 1 ? s.seq[i-1] : DNA_Gap
-                tbase = j > 1 ? t[j-1] : DNA_Gap
+                sbase = i > 1 ? s.seq[doreverse ? length(s) - (i-1) + 1 : i-1] : DNA_Gap
+                tbase = j > 1 ? t[doreverse ? length(t) - (j-1) + 1 : j-1] : DNA_Gap
+                # TODO: handle doreverse
                 result[i, j], $moves = update(result, i, j, sbase, tbase, s;
+                                              doreverse=doreverse,
                                               trim=trim,
                                               skew_matches=skew_matches)
             end
@@ -142,6 +150,7 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
     result[1, 1] = Score(0.0)
     moves[1, 1] = TRACE_NONE
     nrows, ncols = new_shape
+    doreverse=false;
     @forward(true)
 end
 
@@ -165,6 +174,7 @@ end
 
 function forward!(t::DNASeq, s::RifrafSequence,
                   result::BandedArray{Score};
+                  doreverse=false,
                   trim::Bool=false,
                   skew_matches::Bool=false)
     new_shape = (length(s) + 1, length(t) + 1)
@@ -180,12 +190,14 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 """
 function forward(t::DNASeq, s::RifrafSequence;
                  padding::Int=0,
+                 doreverse=false,
                  trim::Bool=false,
                  skew_matches::Bool=false)
     result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
                          padding=padding,
                          initialize=false)
-    forward!(t, s, result, trim=trim, skew_matches=skew_matches)
+    forward!(t, s, result; doreverse=doreverse, trim=trim,
+             skew_matches=skew_matches)
     return result
 end
 
@@ -194,7 +206,7 @@ function backward!(t::DNASeq, s::RifrafSequence,
                    result::BandedArray{Score})
     # this actually seems faster than a dedicated backwards alignment
     # algorithm. possibly because of cache effects.
-    forward!(reverse(t), reverse(s), result)
+    forward!(t, s, result, doreverse=true)
     flip!(result)
 end
 
@@ -203,7 +215,8 @@ B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
 function backward(t::DNASeq, s::RifrafSequence)
-    result = forward(reverse(t), reverse(s))
+    # FIXME: padding!!!
+    result = forward(t, s, doreverse=true)
     flip!(result)
     return result
 end
@@ -331,29 +344,4 @@ function align(t::DNASeq, s::DNASeq, phreds::Vector{Phred},
     moves = align_moves(t, RifrafSequence(s, phreds, bandwidth, scores),
                         trim=trim, skew_matches=skew_matches)
     return moves_to_aligned_seqs(moves, t, s)
-end
-
-
-function moves_to_proposals(moves::Vector{Trace},
-                            consensus::DNASeq, seq::RifrafSequence)
-    proposals = Proposal[]
-    i, j = (0, 0)
-    for move in moves
-        i, j = offset_forward(move, i, j)
-
-        score = seq.match_scores[max(i, 1)]
-        next_score = seq.match_scores[min(i + 1, length(seq))]
-        del_score = min(score, next_score)
-
-        if move == TRACE_MATCH
-            if seq.seq[i] != consensus[j]
-                push!(proposals, Substitution(j, seq.seq[i]))
-            end
-        elseif move == TRACE_INSERT
-            push!(proposals, Insertion(j, seq.seq[i]))
-        elseif move == TRACE_DELETE
-            push!(proposals, Deletion(j))
-        end
-    end
-    return proposals
 end

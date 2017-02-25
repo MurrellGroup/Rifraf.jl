@@ -4,12 +4,12 @@ error probabilities.
 """
 type RifrafSequence
     seq::DNASeq
-    match_scores::Vector{LogProb}
-    mismatch_scores::Vector{LogProb}
-    ins_scores::Vector{LogProb}
-    del_scores::Vector{LogProb}
-    codon_ins_scores::Vector{LogProb}
-    codon_del_scores::Vector{LogProb}
+    match_scores::Vector{Score}
+    mismatch_scores::Vector{Score}
+    ins_scores::Vector{Score}
+    del_scores::Vector{Score}
+    codon_ins_scores::Vector{Score}
+    codon_del_scores::Vector{Score}
     bandwidth::Int
 
 end
@@ -24,8 +24,8 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
         error("length mismatch")
     end
     if length(seq) == 0
-        return RifrafSequence(seq, LogProb[], LogProb[], LogProb[],
-                              LogProb[], LogProb[], LogProb[], bandwidth)
+        return RifrafSequence(seq, Score[], Score[], Score[],
+                              Score[], Score[], Score[], bandwidth)
     end
     if minimum(error_log_p) == -Inf
         error("a log error probability is negative infinity")
@@ -36,10 +36,10 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
     end
     # all scores are symmetric on the ends so there are fewer
     # branches in the alignment code
-    match_scores = Vector{LogProb}(length(error_log_p))
-    mismatch_scores = Vector{LogProb}(length(error_log_p))
-    ins_scores = Vector{LogProb}(length(error_log_p))
-    del_scores = Vector{LogProb}(length(error_log_p) + 1)
+    match_scores = Vector{Score}(length(error_log_p))
+    mismatch_scores = Vector{Score}(length(error_log_p))
+    ins_scores = Vector{Score}(length(error_log_p))
+    del_scores = Vector{Score}(length(error_log_p) + 1)
 
     match_scores[:] = log10(1.0 - exp10(error_log_p))
     mismatch_scores[:] = error_log_p + scores.mismatch
@@ -51,10 +51,10 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
         del_scores[i+1] = max(error_log_p[i], error_log_p[i+1]) + scores.deletion
     end
 
-    codon_ins_scores = Vector{LogProb}()
-    codon_del_scores = Vector{LogProb}()
+    codon_ins_scores = Vector{Score}()
+    codon_del_scores = Vector{Score}()
     if scores.codon_insertion > -Inf
-        codon_ins_scores = Vector{LogProb}(length(error_log_p) - 2)
+        codon_ins_scores = Vector{Score}(length(error_log_p) - 2)
         for i=2:(length(error_log_p)-1)
             codon_ins_scores[i-1] = max(error_log_p[i - 1],
                                         error_log_p[i],
@@ -62,7 +62,7 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
         end
     end
     if scores.codon_deletion > -Inf
-        codon_del_scores = Vector{LogProb}(length(error_log_p) + 1)
+        codon_del_scores = Vector{Score}(length(error_log_p) + 1)
         codon_del_scores[1] = error_log_p[1] + scores.codon_deletion
         codon_del_scores[end] = error_log_p[end] + scores.codon_deletion
         for i=1:(length(error_log_p) - 1)
@@ -84,17 +84,6 @@ end
 do_codon_ins(s::RifrafSequence) = length(s.codon_ins_scores) > 0
 do_codon_del(s::RifrafSequence) = length(s.codon_del_scores) > 0
 do_codon_moves(s::RifrafSequence) = do_codon_ins(s) || do_codon_del(s)
-
-function Base.reverse(s::RifrafSequence)
-    return RifrafSequence(reverse(s.seq),
-                          reverse(s.match_scores),
-                          reverse(s.mismatch_scores),
-                          reverse(s.ins_scores),
-                          reverse(s.del_scores),
-                          reverse(s.codon_ins_scores),
-                          reverse(s.codon_del_scores),
-                          s.bandwidth)
-end
 
 function Base.length(s::RifrafSequence)
     return length(s.seq)

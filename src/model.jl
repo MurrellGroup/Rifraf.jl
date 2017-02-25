@@ -274,6 +274,30 @@ function all_proposals(stage::Stage,
     Task(_it)
 end
 
+function moves_to_proposals(moves::Vector{Trace},
+                            consensus::DNASeq, seq::RifrafSequence)
+    proposals = Proposal[]
+    i, j = (0, 0)
+    for move in moves
+        i, j = offset_forward(move, i, j)
+
+        score = seq.match_scores[max(i, 1)]
+        next_score = seq.match_scores[min(i + 1, length(seq))]
+        del_score = min(score, next_score)
+
+        if move == TRACE_MATCH
+            if seq.seq[i] != consensus[j]
+                push!(proposals, Substitution(j, seq.seq[i]))
+            end
+        elseif move == TRACE_INSERT
+            push!(proposals, Insertion(j, seq.seq[i]))
+        elseif move == TRACE_DELETE
+            push!(proposals, Deletion(j))
+        end
+    end
+    return proposals
+end
+
 
 """Only get proposals that appear in at least one alignment"""
 function alignment_proposals(Amoves::Vector{BandedArray{Trace}},
