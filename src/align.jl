@@ -11,138 +11,124 @@ const TRACE_DELETE       = Trace(3)
 const TRACE_CODON_INSERT = Trace(4)
 const TRACE_CODON_DELETE = Trace(5)
 
+const OFFSETS = ([1, 1],  # sub
+                 [1, 0],  # insertion
+                 [0, 1],  # deletion
+                 [3, 0],  # codon insertion
+                 [0, 3])  # codon deletion
 
-# all offsets are relative to the consensus.
-# so an insertion is a base NOT in the consensus.
 
-# matrix = use_acol ? :(newcols) : :(A)
-# j_to_use = use_acol ? :(prev_j - acol) : :(prev_j)
-
-# generate 8 different versions of this function, for efficiency:
-# - forward and backward
-# - with and without codon moves
-# - with and without acols
-for isforward in [true, false]
-    for use_codon in [true, false]
-        for use_newcols in [true, false]
-            if !isforward && use_newcols
-                # we never compute new columns in the backwards case,
-                # so no need to generate this function
-                continue
-            end
-            for do_bandcheck in [true, false]
-            for skew_matches in [true, false]
-            skew_block = skew_matches ? :(match_score *= 0.99) : :()
-            op = isforward ? :(-) : :(+)
-            direction = isforward ? "forward" : "backward"
-            s1 = use_codon ? "_codon" : ""
-            s2 = use_newcols ? "_newcols" : ""
-            s3 = do_bandcheck ? "_bandcheck" : ""
-            s4 = skew_matches ? "_skew" : ""
-            funcname = parse("update_$direction$s1$s2$s3$s4")
-            validrow = isforward ? :(i > 1) : :(i < size(A)[1])
-            validcol = isforward ? :(j > 1) : :(j < size(A)[2])
-            seq_i = isforward ? :(i-1) : :(i)
-            codon_ins_i = isforward ? :(i - CODON_LENGTH) : :(i)
-            codon_ins_check = isforward ? :(i > CODON_LENGTH) : :(i <= nrows - CODON_LENGTH)
-            codon_del_check = isforward ? :(j > CODON_LENGTH) : :(j <= ncols - CODON_LENGTH)
-
-            # `use_newcols` is only used in the forward case, so no
-            # need to do any other indexing in that case
-
-            # TODO: write a view for a banded array column, so all this can be removed
-
-            match_prev = use_newcols ? :(j - acol > 1 ? newcols[i-1, j-acol-1] : A[i-1, j-1]) : parse("A[i $op 1, j $op 1]")
-            ins_prev = use_newcols ? :(newcols[i-1, j-acol]) : parse("A[i $op 1, j]")
-            del_prev = use_newcols ? :(j - acol > 1 ? newcols[i, j-acol-1] : A[i, j-1]) : parse("A[i, j $op 1]")
-            codon_ins_prev = use_newcols ? :(newcols[i-CODON_LENGTH, j - acol]) : parse("A[i $op CODON_LENGTH, j]")
-            codon_del_prev = use_newcols ? :(j - acol - CODON_LENGTH > 0 ? newcols[i, j - acol - CODON_LENGTH] : A[i, j-CODON_LENGTH]) : parse("A[i, j $op CODON_LENGTH]")
-
-            matchbandcheck = do_bandcheck ? (isforward ? :(inband(A, i-1, j-1)) : :(inband(A, i+1, j+1))) : :(true)
-
-            j_to_check = isforward ? :(min(j, size(A)[2])) : :(max(j, size(A)[2]))
-            insbandcheck = do_bandcheck ? (isforward ? :(inband(A, i-1, $j_to_check)) : :(inband(A, i+1, $j_to_check))) : :(true)
-            delbandcheck = do_bandcheck ? (isforward ? :(inband(A, i, j-1)) : :(inband(A, i, j+1))) : :(true)
-            cinsbandcheck = do_bandcheck ? (isforward ? :(inband(A, i-CODON_LENGTH, $j_to_check)) : :(inband(A, i+CODON_LENGTH, $j_to_check))) : :(true)
-            cdelbandcheck = do_bandcheck ? (isforward ? :(inband(A, i, j-CODON_LENGTH)) : :(inband(A, i, j+CODON_LENGTH))) : :(true)
-
-            codon_block = use_codon ? quote
-                if $cinsbandcheck && $codon_ins_check
-                    cur_score = $codon_ins_prev + pseq.codon_ins_scores[$codon_ins_i]
-                    if cur_score > final_score
-                        final_score = cur_score
-                        final_move = TRACE_CODON_INSERT
-                    end
-                end
-                if $cdelbandcheck && $codon_del_check
-                    cur_score = $codon_del_prev + pseq.codon_del_scores[i]
-                    if cur_score > final_score
-                        final_score = cur_score
-                        final_move = TRACE_CODON_DELETE
-                    end
-                end
-            end : :()
-
-            eval(quote
-                 function $funcname(A::BandedArray{Score},
-                                    i::Int, j::Int,
-                                    s_base::DNANucleotide, t_base::DNANucleotide,
-                                    pseq::RifrafSequence;
-                                    newcols::Array{Score, 2}=Array(Score, 0, 0),
-                                    acol::Int=0)
-                 nrows, ncols = size(A)
-
-                 final_score = Score(-Inf)
-                 final_move = TRACE_NONE
-
-                 if $matchbandcheck
-                 match_score = s_base == t_base ? pseq.match_scores[$seq_i] : pseq.mismatch_scores[$seq_i]
-                 $skew_block
-
-                 cur_score = $match_prev + match_score
-                 if cur_score > final_score
-                   final_score = cur_score
-                   final_move = TRACE_MATCH
-                 end
-                 end
-
-                 if $insbandcheck
-                 cur_score = $ins_prev + pseq.ins_scores[$seq_i]
-                 if cur_score > final_score
-                   final_score = cur_score
-                   final_move = TRACE_INSERT
-                 end
-                 end
-
-                 if $delbandcheck
-                 cur_score = $del_prev + pseq.del_scores[i]
-                 if cur_score > final_score
-                   final_score = cur_score
-                   final_move = TRACE_DELETE
-                 end
-                 end
-
-                 $codon_block
-
-                 @myassert(final_score != Score(-Inf), "new score is invalid")
-                 @myassert(final_move != TRACE_NONE, "failed to find a move")
-                 return final_score, final_move
-                 end
-                 end)
-            end
-            end
-        end
-    end
+function offset_forward(move::Trace, i::Int, j::Int)
+    (a, b) = OFFSETS[move]
+    return (i + a, j + b)
 end
 
-function update_function(isforward, use_codon, use_newcols, do_bandcheck, skew_matches)
-    direction = isforward ? "forward" : "backward"
-    s1 = use_codon ? "_codon" : ""
-    s2 = use_newcols ? "_newcols" : ""
-    s3 = do_bandcheck ? "_bandcheck" : ""
-    s4 = skew_matches ? "_skew" : ""
-    fstring = "update_$direction$s1$s2$s3$s4"
-    return getfield(Rifraf, Symbol(fstring))
+
+function offset_backward(move::Trace, i::Int, j::Int)
+    (a, b) = OFFSETS[move]
+    return (i - a, j - b)
+end
+
+function update_helper(final_score::Score, final_move::Trace,
+                       move_score::Score, move::Trace,
+                       newcols::Array{Score, 2},
+                       A::BandedArray{Score},
+                       i::Int, j::Int, acol::Int)
+    prev_i, prev_j = offset_backward(move, i, j)
+    rangecol = min(prev_j, size(A)[2])
+    if inband(A, prev_i, rangecol)
+        score = Score(-Inf)
+        if acol < 1 || prev_j <= acol
+            score = A[prev_i, prev_j] + move_score
+        else
+            score = newcols[prev_i, prev_j - acol] + move_score
+        end
+        if score > final_score
+            return score, move
+        end
+    end
+    return final_score, final_move
+end
+
+function update(A::BandedArray{Score},
+                i::Int, j::Int,
+                s_base::DNANucleotide, t_base::DNANucleotide,
+                pseq::RifrafSequence;
+                newcols::Array{Score, 2}=Array(Score, (0, 0)),
+                acol=-1, trim=false,
+                skew_matches=false)
+    final_score = Score(-Inf)
+    final_move = TRACE_NONE
+
+    # TODO: this cannot make mismatches preferable to codon indels
+    seq_i = max(i-1, 1)
+    match_score = (s_base == t_base) ? pseq.match_scores[seq_i] : pseq.mismatch_scores[seq_i]
+    ins_score = pseq.ins_scores[seq_i]
+    del_score = pseq.del_scores[i]
+
+    if skew_matches && s_base != t_base
+        match_score *= 0.99
+    end
+    # allow terminal insertions for free
+    if trim && ((j == 1) || (j == size(A)[2]))
+        ins_score = 0.0
+    end
+    final_score, final_move = update_helper(final_score, final_move,
+                                            match_score, TRACE_MATCH,
+                                            newcols, A, i, j, acol)
+    final_score, final_move = update_helper(final_score, final_move,
+                                            ins_score, TRACE_INSERT,
+                                            newcols, A, i, j, acol)
+    final_score, final_move = update_helper(final_score, final_move,
+                                            del_score, TRACE_DELETE,
+                                            newcols, A, i, j, acol)
+
+    if do_codon_moves(pseq)
+        if do_codon_ins(pseq) && i > CODON_LENGTH
+            codon_ins_score = pseq.codon_ins_scores[i - CODON_LENGTH]
+            final_score, final_move = update_helper(final_score, final_move,
+                                                    codon_ins_score, TRACE_CODON_INSERT,
+                                                    newcols, A, i, j, acol)
+        end
+        if do_codon_del(pseq) && j > CODON_LENGTH
+            codon_del_score = pseq.codon_del_scores[seq_i]
+            final_score, final_move = update_helper(final_score, final_move,
+                                                    codon_del_score, TRACE_CODON_DELETE,
+                                                    newcols, A, i, j, acol,)
+        end
+    end
+    if final_score == Score(-Inf)
+        error("new score is invalid")
+    end
+    if final_move == TRACE_NONE
+        error("failed to find a move")
+    end
+    return final_score, final_move
+end
+
+
+"""The heart of the forward algorithm.
+
+`use_moves` determines whether moves are saved or not.
+
+"""
+macro forward(use_moves)
+    moves = use_moves ? :(moves[i, j]) : :()
+    return quote
+        for j = 1:ncols
+            start, stop = row_range(result, j)
+            for i = start:stop
+                if i == 1 && j == 1
+                    continue
+                end
+                sbase = i > 1 ? s.seq[i-1] : DNA_Gap
+                tbase = j > 1 ? t[j-1] : DNA_Gap
+                result[i, j], $moves = update(result, i, j, sbase, tbase, s;
+                                              trim=trim,
+                                              skew_matches=skew_matches)
+            end
+      end
+    end
 end
 
 function forward_moves!(t::DNASeq, s::RifrafSequence,
@@ -155,33 +141,8 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
     resize!(moves, new_shape)
     result[1, 1] = Score(0.0)
     moves[1, 1] = TRACE_NONE
-
-    # fill first row
-    # TODO: handle trim
-    update_f = update_function(true, do_codon_moves(s), false, true, skew_matches)
-    for j in 2 : min((result.h_offset + result.bandwidth + 1), length(t) + 1)
-        i = 1
-        sbase = DNA_Gap
-        tbase = t[j-1]
-        result[i, j], moves[i, j] = update_f(result, i, j, sbase, tbase, s)
-    end
-    # fill first column
-    for i in 2 : min(result.v_offset + result.bandwidth + 1, length(s) + 1)
-        j = 1
-        sbase = s.seq[i-1]
-        tbase = DNA_Gap
-        result[i, j], moves[i, j] = update_f(result, i, j, sbase, tbase, s)
-    end
-
-    update_f = update_function(true, do_codon_moves(s), false, false, skew_matches)
-    for j = 2:new_shape[2]
-        start, stop = row_range(result, j)
-        for i in max(start, 2):stop
-            sbase = s.seq[i-1]
-            tbase = t[j-1]
-            result[i, j], moves[i, j] = update_f(result, i, j, sbase, tbase, s)
-        end
-    end
+    nrows, ncols = new_shape
+    @forward(true)
 end
 
 
@@ -202,85 +163,49 @@ function forward_moves(t::DNASeq, s::RifrafSequence;
     return result, moves
 end
 
-# TODO: code duplication with forward
-# use the eval trick here too
-function backward!(t::DNASeq, s::RifrafSequence,
-                   result::BandedArray{Score};
-                   padding::Int=0,
-                   trim::Bool=false,
-                   skew_matches::Bool=false)
+function forward!(t::DNASeq, s::RifrafSequence,
+                  result::BandedArray{Score};
+                  trim::Bool=false,
+                  skew_matches::Bool=false)
     new_shape = (length(s) + 1, length(t) + 1)
     resize!(result, new_shape)
-    result[end, end] = Score(0.0)
-    # TODO: handle this
-    # TODO: this cannot make mismatches preferable to codon indels
-
-    update_f = update_function(false, do_codon_moves(s), false, true, skew_matches)
-    # fill last row
-    # TODO: handle trim
-    for j in length(t) : -1 :max(1, length(t) - result.h_offset - result.bandwidth + 1)
-        i = new_shape[1]
-        sbase = DNA_Gap
-        tbase = t[j]
-        result[i, j], _ = update_f(result, i, j, sbase, tbase, s)
-   end
-    # fill last column
-    for i in length(s) : -1 : max(1, length(s) - result.v_offset - result.bandwidth + 1)
-        j = new_shape[2]
-        sbase = s.seq[i]
-        tbase = DNA_Gap
-        result[i, j], _ = update_f(result, i, j, sbase, tbase, s)
-    end
-
-    update_f = update_function(false, do_codon_moves(s), false, false, skew_matches)
-
-    second_last_row = new_shape[1] - 1
-    second_last_col = new_shape[2] - 1
-    for j = second_last_col : -1 : 1
-        start, stop = row_range(result, j)
-        for i in min(stop, second_last_row) : -1 : start
-            sbase = s.seq[i]
-            tbase = t[j]
-            result[i, j], _ = update_f(result, i, j, sbase, tbase, s)
-        end
-    end
+    result[1, 1] = Score(0.0)
+    nrows, ncols = size(result)
+    @forward(false)
 end
 
+"""
+F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
+
+"""
+function forward(t::DNASeq, s::RifrafSequence;
+                 padding::Int=0,
+                 trim::Bool=false,
+                 skew_matches::Bool=false)
+    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
+                         padding=padding,
+                         initialize=false)
+    forward!(t, s, result, trim=trim, skew_matches=skew_matches)
+    return result
+end
+
+
+function backward!(t::DNASeq, s::RifrafSequence,
+                   result::BandedArray{Score})
+    # this actually seems faster than a dedicated backwards alignment
+    # algorithm. possibly because of cache effects.
+    forward!(reverse(t), reverse(s), result)
+    flip!(result)
+end
 
 """
 B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
-function backward(t::DNASeq, s::RifrafSequence;
-                  padding::Int=0,
-                  trim::Bool=false,
-                  skew_matches::Bool=false)
-    result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
-                         padding=padding,
-                         initialize=false,
-                         default=-Inf)
-    backward!(t, s, result,
-              padding=padding, trim=trim, skew_matches=skew_matches)
+function backward(t::DNASeq, s::RifrafSequence)
+    result = forward(reverse(t), reverse(s))
+    flip!(result)
     return result
-end
-
-
-const OFFSETS = ([1, 1],  # sub
-                 [1, 0],  # insertion
-                 [0, 1],  # deletion
-                 [3, 0],  # codon insertion
-                 [0, 3])  # codon deletion
-
-
-function offset_forward(move::Trace, i::Int, j::Int)
-    (a, b) = OFFSETS[move]
-    return (i + a, j + b)
-end
-
-
-function offset_backward(move::Trace, i::Int, j::Int)
-    (a, b) = OFFSETS[move]
-    return (i - a, j - b)
 end
 
 

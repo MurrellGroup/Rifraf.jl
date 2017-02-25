@@ -71,13 +71,11 @@ function score_nocodon(proposal::Proposal,
     acol = proposal.pos + (t == Substitution ? 0 : 1)
     new_acol = acol + 1
     amin, amax = row_range(A, min(new_acol, ncols))
-    # TODO: do not use bandscheck inside
-    update_f = update_forward_newcols_bandcheck
     for i in amin:amax
         seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
-        newcols[i, 1], _ = update_f(A, i, new_acol,
-                                    seq_base, proposal.base, pseq;
-                                    newcols=newcols, acol=acol)
+        newcols[i, 1], _ = update(A, i, new_acol,
+                                  seq_base, proposal.base, pseq;
+                                  newcols=newcols, acol=acol)
     end
 
     # add up results
@@ -155,15 +153,14 @@ function score_proposal(proposal::Proposal,
     n_new = n_new_bases + n_after
     sub_consensus = get_consensus_substring(proposal, consensus, n_after)
     # compute new columns
-    update_f = update_forward_codon_newcols_bandcheck
     for j in 1:n_new
         range_col = min(acol + j, ncols)
         amin, amax = row_range(A, range_col)
         for i in amin:amax
             seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
-            newcols[i, j], _ = update_f(A, i, acol + j,
-                                        seq_base, sub_consensus[j], pseq;
-                                        newcols=newcols, acol=acol)
+            newcols[i, j], _ = update(A, i, acol + j,
+                                      seq_base, sub_consensus[j], pseq;
+                                      newcols=newcols, acol=acol)
         end
     end
 

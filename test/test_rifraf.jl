@@ -77,11 +77,11 @@ end
         new_template = apply_proposals(template, Proposal[proposal])
         Anew, _ = forward_moves(new_template, pseq)
         Bnew = backward(new_template, pseq)
-        @test check_all_cols(Anew, Bnew, codon_moves)
+        check_all_cols(Anew, Bnew, codon_moves)
 
         A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
-        @test check_all_cols(A, B, codon_moves)
+        check_all_cols(A, B, codon_moves)
         newcols = zeros(size(A)[1], Rifraf.CODON_LENGTH + 1)
         score = score_proposal(proposal, A, B, template, pseq, newcols)
 

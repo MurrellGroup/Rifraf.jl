@@ -58,7 +58,7 @@ import Rifraf.forward_moves,
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
         A, _ = forward_moves(template, pseq)
         B = backward(template, pseq)
-        @test check_all_cols(A, B, false)
+        check_all_cols(A, B, false)
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
                                       [lp + scores.insertion, match, match + lp + scores.deletion];
                                       [0.0, match + lp + scores.insertion, match + lp + scores.mismatch]],
@@ -93,8 +93,7 @@ import Rifraf.forward_moves,
             pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
             A, _ = forward_moves(template, pseq)
             B = backward(template, pseq)
-            @test check_all_cols(A, B, true)
-            @test true
+            check_all_cols(A, B, true)
         end
 
         @testset "forward/backward agreement 2" begin
@@ -106,7 +105,7 @@ import Rifraf.forward_moves,
             pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
             A, _ = forward_moves(template, pseq)
             B = backward(template, pseq)
-            @test check_all_cols(A, B, true)
+            check_all_cols(A, B, true)
         end
     end
 
@@ -122,7 +121,7 @@ import Rifraf.forward_moves,
                  log_p[2] + scores.insertion +
                  inv_log10(log_p[3]))
         @test A[end, end] ≈ score
-        @test check_all_cols(A, B, false)
+        check_all_cols(A, B, false)
     end
 
     @testset "deletion agreement 1" begin
@@ -139,7 +138,7 @@ import Rifraf.forward_moves,
                  pseq.match_scores[3] +
                  pseq.match_scores[4])
         @test A[end, end] ≈ score
-        @test check_all_cols(A, B, false)
+        check_all_cols(A, B, false)
     end
 
     @testset "deletion agreement 2" begin
@@ -154,7 +153,7 @@ import Rifraf.forward_moves,
                  pseq.del_scores[2] +
                  pseq.match_scores[2])
         @test A[end, end] ≈ score
-        @test check_all_cols(A, B, false)
+        check_all_cols(A, B, false)
     end
 
     @testset "align and skew" begin

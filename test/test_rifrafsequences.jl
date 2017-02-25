@@ -4,6 +4,13 @@ using Rifraf
 
 
 @testset "RifrafSequence" begin
+    @testset "empty" begin
+        bandwidth = 10
+        scores = Scores(-1., -2., -3., -4., -5.)
+        rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, scores)
+        @test length(rseq) == 0
+    end
+
     @testset "scores" begin
         seq = DNASeq("ACGT")
         error_log_p = LogProb[-1., -2., -3., -4.]
