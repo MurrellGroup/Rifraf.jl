@@ -414,15 +414,7 @@ end
                                for (s, p) in zip(seqs, lps)]
 
         expected = [CandProposal(Substitution(2, DNA_A),
-                                 sum(pseqs[1].match_scores)),
-                    CandProposal(Insertion(1, DNA_A),
-                                 sum(pseqs[1].match_scores) + lps[1][1] + scores.deletion),
-                    CandProposal(Insertion(2, DNA_A),
-                                 sum(pseqs[1].match_scores) + lps[1][2] + scores.deletion),
-                    CandProposal(Deletion(3),
-                                 sum([pseqs[1].match_scores[1],
-                                      lps[1][2] + scores.insertion,
-                                      pseqs[1].match_scores[3]]))]
+                                 sum(pseqs[1].match_scores))]
         _test_candidate_scores(consensus, pseqs, expected)
     end
 
@@ -474,7 +466,7 @@ end
     seq_errors = ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0)
     seq_scores = Scores(seq_errors)
 
-    @testset "full model $i" for i in 1:10
+    @testset "full model $i" for i in 1:100
         use_ref = rand([true, false])
         do_alignment_proposals = rand([true, false])
         do_surgery_proposals = rand([true, false])
