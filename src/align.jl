@@ -61,9 +61,11 @@ function update(A::BandedArray{Score},
     final_score = Score(-Inf)
     final_move = TRACE_NONE
 
+    nrows, ncols = size(A)
+    seqlen = length(pseq)
     # TODO: this cannot make mismatches preferable to codon indels
-    seq_i = doreverse? min(length(pseq), length(pseq) - (i-1) + 1) : max(i-1, 1)
-    del_i = doreverse ? length(pseq) + 1 - i + 1 : i
+    seq_i = doreverse? min(seqlen, seqlen - (i-1) + 1) : max(i-1, 1)
+    del_i = doreverse ? nrows - i + 1 : i
     match_score = (s_base == t_base) ? pseq.match_scores[seq_i] : pseq.mismatch_scores[seq_i]
     ins_score = pseq.ins_scores[seq_i]
     del_score = pseq.del_scores[del_i]
@@ -72,7 +74,7 @@ function update(A::BandedArray{Score},
         match_score *= 0.99
     end
     # allow terminal insertions for free
-    if trim && ((j == 1) || (j == size(A)[2]))
+    if trim && ((j == 1) || (j == ncols))
         ins_score = 0.0
     end
     final_score, final_move = update_helper(final_score, final_move,
@@ -222,6 +224,22 @@ function backward(t::DNASeq, s::RifrafSequence)
 end
 
 
+function backtrace_indices(moves::BandedArray{Trace};
+                           start::Tuple{Int, Int}=(0, 0))
+    result = Tuple{Int, Int}[]
+    i, j = start
+    if i == 0 || j == 0
+        i, j = size(moves)
+    end
+    while i > 1 || j > 1
+        m = moves[i, j]
+        i, j = offset_backward(m, i, j)
+        push!(result, (i, j))
+    end
+    return reverse(result)
+end
+
+
 function backtrace(moves::BandedArray{Trace})
     taken_moves = Trace[]
     i, j = size(moves)
@@ -290,7 +308,7 @@ function moves_to_aligned_seqs(moves::Vector{Trace},
 end
 
 
-""" Compute index vector mapping from position in `t` to position in
+"""Compute index vector mapping from position in `t` to position in
 `s`.
 
 """
