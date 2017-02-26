@@ -91,7 +91,7 @@ function update(A::BandedArray{Score},
             if doreverse
                 codon_i = length(pseq.codon_ins_scores) - codon_i + 1
             end
-            codon_ins_score = pseq.codon_ins_scores[i - CODON_LENGTH]
+            codon_ins_score = pseq.codon_ins_scores[codon_i]
             final_score, final_move = update_helper(final_score, final_move,
                                                     codon_ins_score, TRACE_CODON_INSERT,
                                                     newcols, A, i, j, acol)
