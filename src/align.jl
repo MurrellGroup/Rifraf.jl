@@ -192,11 +192,12 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 """
 function forward(t::DNASeq, s::RifrafSequence;
                  padding::Int=0,
-                 doreverse=false,
+                 doreverse::Bool=false,
                  trim::Bool=false,
                  skew_matches::Bool=false)
     result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
                          padding=padding,
+                         default=-Inf,
                          initialize=false)
     forward!(t, s, result; doreverse=doreverse, trim=trim,
              skew_matches=skew_matches)
@@ -217,7 +218,6 @@ B[i, j] is the log probability of aligning s[i:end] to t[j:end].
 
 """
 function backward(t::DNASeq, s::RifrafSequence)
-    # FIXME: padding!!!
     result = forward(t, s, doreverse=true)
     flip!(result)
     return result

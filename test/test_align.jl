@@ -5,7 +5,8 @@ using Rifraf
 
 include("test_utils.jl")
 
-import Rifraf.forward_moves,
+import Rifraf.forward,
+       Rifraf.forward_moves,
        Rifraf.backward
 
 
@@ -22,13 +23,17 @@ import Rifraf.forward_moves,
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
+        A = forward(template, pseq)
         # transpose because of column-major order
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
                                       [lp + scores.insertion, match, match + lp + scores.deletion];
                                       [0.0, match + lp + scores.insertion, 2 * match]],
                                      (3, 3)))
         @test full(A) ≈ expected
+
+        A2, _ = forward_moves(template, pseq)
+        @test full(A2) ≈ full(A)
+
     end
 
     @testset "perfect backward" begin
@@ -56,8 +61,9 @@ import Rifraf.forward_moves,
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
+        A = forward(template, pseq)
         B = backward(template, pseq)
+        display(A)
         check_all_cols(A, B, false)
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
                                       [lp + scores.insertion, match, match + lp + scores.deletion];
@@ -65,6 +71,10 @@ import Rifraf.forward_moves,
                                      (3, 3)))
 
         @test full(A) ≈ expected
+
+        A2, _ = forward_moves(template, pseq)
+        @test full(A2) ≈ full(A)
+
     end
 
     @testset "imperfect backward" begin
@@ -91,9 +101,12 @@ import Rifraf.forward_moves,
             bandwidth = 5
             local_scores = Scores(ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
             pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
-            A, _ = forward_moves(template, pseq)
+            A = forward(template, pseq)
             B = backward(template, pseq)
             check_all_cols(A, B, true)
+
+            A2, _ = forward_moves(template, pseq)
+            @test full(A) == full(A2)
         end
 
         @testset "forward/backward agreement 2" begin
@@ -103,9 +116,12 @@ import Rifraf.forward_moves,
             bandwidth = 5
             local_scores = Scores(ErrorModel(2.0, 1.0, 1.0, 3.0, 3.0))
             pseq = RifrafSequence(seq, log_p, bandwidth, local_scores)
-            A, _ = forward_moves(template, pseq)
+            A = forward(template, pseq)
             B = backward(template, pseq)
             check_all_cols(A, B, true)
+
+            A2, _ = forward_moves(template, pseq)
+            @test full(A) == full(A2)
         end
     end
 
@@ -115,13 +131,16 @@ import Rifraf.forward_moves,
         bandwidth = 10
         log_p = [-5.0, -1.0, -6.0]
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
+        A = forward(template, pseq)
         B = backward(template, pseq)
         score = (inv_log10(log_p[1]) +
                  log_p[2] + scores.insertion +
                  inv_log10(log_p[3]))
         @test A[end, end] ≈ score
         check_all_cols(A, B, false)
+
+        A2, _ = forward_moves(template, pseq)
+        @test full(A) == full(A2)
     end
 
     @testset "deletion agreement 1" begin
@@ -130,7 +149,7 @@ import Rifraf.forward_moves,
         bandwidth = 10
         log_p = [-5.0, -2.0, -1.0, -6.0]
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
+        A = forward(template, pseq)
         B = backward(template, pseq)
         score = (pseq.match_scores[1] +
                  pseq.match_scores[2] +
@@ -139,6 +158,9 @@ import Rifraf.forward_moves,
                  pseq.match_scores[4])
         @test A[end, end] ≈ score
         check_all_cols(A, B, false)
+
+        A2, _ = forward_moves(template, pseq)
+        @test full(A) == full(A2)
     end
 
     @testset "deletion agreement 2" begin
@@ -147,13 +169,16 @@ import Rifraf.forward_moves,
         bandwidth = 10
         log_p = [-2.0, -3.0]
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A, _ = forward_moves(template, pseq)
+        A = forward(template, pseq)
         B = backward(template, pseq)
         score = (pseq.match_scores[1] +
                  pseq.del_scores[2] +
                  pseq.match_scores[2])
         @test A[end, end] ≈ score
         check_all_cols(A, B, false)
+
+        A2, _ = forward_moves(template, pseq)
+        @test full(A) == full(A2)
     end
 
     @testset "align and skew" begin

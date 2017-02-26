@@ -76,15 +76,18 @@ end
 
         new_template = apply_proposals(template, Proposal[proposal])
         new_template_error_p = Prob[0.1 for i=1:length(new_template)]
-        Anew, _ = forward_moves(new_template, pseq)
+
+        Anew = Rifraf.forward(new_template, pseq)
         Bnew = backward(new_template, pseq)
         check_all_cols(Anew, Bnew, codon_moves)
 
-        A = forward(template, pseq)
+        A = Rifraf.forward(template, pseq)
         B = backward(template, pseq)
         check_all_cols(A, B, codon_moves)
+
         newcols = zeros(size(A)[1], Rifraf.CODON_LENGTH + 1)
         score = score_proposal(proposal, A, B, template, pseq, newcols)
+
         @test score ≈ Anew[end, end]
     end
 
