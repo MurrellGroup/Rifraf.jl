@@ -26,7 +26,7 @@ import Rifraf.sample_from_template,
        Rifraf.recompute!,
        Rifraf.get_candidate_proposals,
        Rifraf.alignment_proposals,
-# Rifraf.surgery_proposals,
+       Rifraf.surgery_proposals,
        Rifraf.align_moves,
        Rifraf.moves_to_aligned_seqs,
        Rifraf.alignment_error_probs,
@@ -193,6 +193,44 @@ end
     @test expected == proposals
 end
 
+@testset "surgery helpers" begin
+    @testset "surrounding insertions" begin
+        moves = [Rifraf.TRACE_INSERT,
+                 Rifraf.TRACE_MATCH,
+                 Rifraf.TRACE_INSERT]
+        scores = Scores(ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0))
+
+        # Will want to make the base with higher error prob the insertion
+        # so should pick 1st
+        seq = RifrafSequence(DNASeq("TAT"), LogProb[-1.0, -2.0, -3.0], 10, scores)
+        aln_idx = 2
+        seq_idx = 2
+        result = Rifraf.best_surrounding_ins_bases(moves, seq, aln_idx, seq_idx)
+        @test length(result) == 1
+        @test first(keys(result)) == DNA_T
+        @test result[DNA_T] == (seq.match_scores[3], seq.ins_scores[3])
+    end
+
+    @testset "surrounding deletions" begin
+        moves = [Rifraf.TRACE_MATCH,
+                 Rifraf.TRACE_DELETE,
+                 Rifraf.TRACE_MATCH,
+                 Rifraf.TRACE_DELETE,
+                 Rifraf.TRACE_MATCH]
+        scores = Scores(ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0))
+
+        # gap will want to move towards base with higher log error prob (-1.0)
+        consensus = DNASeq("ATGTA")
+        seq = RifrafSequence(DNASeq("ATA"), LogProb[-2.0, -10.0, -1.0], 10, scores)
+        aln_idx = 3
+        cons_idx = 3
+        seq_idx = 2
+        result = Rifraf.surrounding_del_bases(moves, consensus, seq, aln_idx, cons_idx, seq_idx)
+        @test length(result) == 1
+        @test first(keys(result)) == DNA_T
+        @test result[DNA_T] == (seq.del_scores[2], seq.del_scores[3])
+    end
+end
 
 @testset "fast proposals" begin
     function _test_fast_proposals(consensus, seqs, lps, expected;
@@ -224,10 +262,10 @@ end
                                             pseqs, do_subs, do_indels)
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
-        # if do_surgery
-        #     proposals, deltas = surgery_proposals(state, pseqs, do_subs, do_indels)
-        #     @test length(symdiff(Set(proposals), Set(expected))) == 0
-        # end
+        if do_surgery
+            proposals, deltas = surgery_proposals(state, pseqs, do_subs, do_indels)
+            @test length(symdiff(Set(proposals), Set(expected))) == 0
+        end
     end
 
     @testset "fast proposals 1" begin
@@ -387,9 +425,11 @@ end
         recompute!(state, pseqs, rseq, mult,
                    redo_as, redo_bs, 2, use_ref)
         do_alignment_proposals = true
+        do_surgery_proposals = false
         indels_only = false
         cands = get_candidate_proposals(state, pseqs, rseq,
                                         do_alignment_proposals,
+                                        do_surgery_proposals,
                                         indels_only)
         @test length(cands) == length(expected)
         if length(cands) == length(expected)
