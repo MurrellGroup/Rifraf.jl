@@ -485,16 +485,16 @@ end
 
 @testset "full model" begin
     # can't guarantee this test actually passes, since it is random
-    n_seqs = 6
+    n_seqs = 5
     len = 30
     ref_error_rate = 0.1
     ref_sample_errors = ErrorModel(8.0, 0.0, 0.0, 1.0, 1.0)
     ref_errors = ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Scores(ref_errors)
 
-    template_error_mean = 0.01
+    template_error_rate = 0.005
     template_alpha = 1.0
-    phred_scale = 3.0
+    phred_scale = 1.5
     log_seq_actual_std = 3.0
     log_seq_reported_std = 0.3
 
@@ -505,17 +505,21 @@ end
         use_ref = rand([true, false])
         do_alignment_proposals = rand([true, false])
         do_surgery_proposals = rand([true, false])
-        trust_proposals = rand([true, false])
         seed_indels = rand([true, false])
-        fix_indels_stat = rand([true, false])
         indel_correction_only = rand([true, false])
         batch = rand([3, 6])
+
+        if do_alignment_proposals && do_surgery_proposals
+            # we care more about testing the version more likely
+            # to converge to the true value
+            do_surgery_proposals = false
+        end
 
         (reference, template, template_error, reads, actual, phreds, sbools,
          tbools) = sample(n_seqs, len,
                           ref_error_rate,
                           ref_sample_errors,
-                          template_error_mean,
+                          template_error_rate,
                           template_alpha,
                           phred_scale,
                           log_seq_actual_std,
@@ -530,10 +534,8 @@ end
                                 reference=reference,
                                 ref_scores=ref_scores,
                                 do_alignment_proposals=do_alignment_proposals,
-                                # do_surgery_proposals=do_surgery_proposals,
-                                # trust_proposals=trust_proposals,
+                                do_surgery_proposals=do_surgery_proposals,
                                 seed_indels=seed_indels,
-                                # fix_indels_stat=fix_indels_stat,
                                 indel_correction_only=indel_correction_only,
                                 bandwidth=10, min_dist=9, batch=batch,
                                 max_iters=100)
@@ -625,32 +627,4 @@ end
     indices = sortperm(result)
     expected = [4, 3, 2, 1]
     @test indices == expected
-end
-
-@testset "align" begin
-    const errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
-    const scores = Scores(errors)
-
-    @testset "align 1" begin
-        template = DNASeq("ATAA")
-        seq = DNASeq("AAA")
-        bandwidth = 10
-        log_p = [-2.0, -3.0, -3.0]
-        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        moves = align_moves(template, pseq)
-        t, s = moves_to_aligned_seqs(moves, template, seq)
-        @test t == DNASequence("ATAA")
-        @test s == DNASequence("A-AA")
-    end
-
-    @testset "align 2" begin
-        template = DNASeq("AACCTT")
-        seq = DNASeq("AAACCCTT")
-        bandwidth = 10
-        log_p = fill(log10(0.1), length(seq))
-        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        moves = align_moves(template, pseq)
-        t, s = moves_to_aligned_seqs(moves, template, seq)
-        @test t[end-1:end] == DNASequence("TT")
-    end
 end

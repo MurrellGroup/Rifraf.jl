@@ -180,6 +180,34 @@ import Rifraf.forward,
         A2, _ = forward_moves(template, pseq)
         @test full(A) == full(A2)
     end
+end
+
+@testset "alignment"
+    const errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
+    const scores = Scores(errors)
+
+    @testset "align 1" begin
+        template = DNASeq("ATAA")
+        seq = DNASeq("AAA")
+        bandwidth = 10
+        log_p = [-2.0, -3.0, -3.0]
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        moves = align_moves(template, pseq)
+        t, s = moves_to_aligned_seqs(moves, template, seq)
+        @test t == DNASequence("ATAA")
+        @test s == DNASequence("A-AA")
+    end
+
+    @testset "align 2" begin
+        template = DNASeq("AACCTT")
+        seq = DNASeq("AAACCCTT")
+        bandwidth = 10
+        log_p = fill(log10(0.1), length(seq))
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        moves = align_moves(template, pseq)
+        t, s = moves_to_aligned_seqs(moves, template, seq)
+        @test t[end-1:end] == DNASequence("TT")
+    end
 
     @testset "align and skew" begin
         ref_errors = ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
