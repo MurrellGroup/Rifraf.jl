@@ -1,4 +1,5 @@
 using Bio.Seq
+using Iterators
 using Base.Test
 
 using Rifraf
@@ -501,45 +502,48 @@ end
     seq_errors = ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0)
     seq_scores = Scores(seq_errors)
 
-    @testset "full model $i" for i in 1:100
-        use_ref = rand([true, false])
-        do_alignment_proposals = rand([true, false])
-        do_surgery_proposals = rand([true, false])
-        seed_indels = rand([true, false])
-        indel_correction_only = rand([true, false])
-        batch = rand([3, 6])
+    @testset "full model" begin
+        for (use_ref,
+             do_alignment_proposals,
+             do_surgery_proposals,
+             seed_indels,
+             indel_correction_only,
+             batch) in product([true, false],
+                               [true, false],
+                               [true, false],
+                               [true, false],
+                               [true, false],
+                               [3, 6])
 
-        if do_alignment_proposals && do_surgery_proposals
-            # we care more about testing the version more likely
-            # to converge to the true value
-            do_surgery_proposals = false
+            if do_alignment_proposals && do_surgery_proposals
+                continue
+            end
+
+            (reference, template, template_error, reads, actual, phreds, sbools,
+             tbools) = sample(n_seqs, len,
+                              ref_error_rate,
+                              ref_sample_errors,
+                              template_error_rate,
+                              template_alpha,
+                              phred_scale,
+                              log_seq_actual_std,
+                              log_seq_reported_std,
+                              seq_errors)
+            if !use_ref
+                reference = DNASeq()
+            end
+
+            result, _ = rifraf(reads,
+                               phreds, seq_scores;
+                               reference=reference,
+                               ref_scores=ref_scores,
+                               do_alignment_proposals=do_alignment_proposals,
+                               do_surgery_proposals=do_surgery_proposals,
+                               seed_indels=seed_indels,
+                               indel_correction_only=indel_correction_only,
+                               batch=batch)
+            @test result == template
         end
-
-        (reference, template, template_error, reads, actual, phreds, sbools,
-         tbools) = sample(n_seqs, len,
-                          ref_error_rate,
-                          ref_sample_errors,
-                          template_error_rate,
-                          template_alpha,
-                          phred_scale,
-                          log_seq_actual_std,
-                          log_seq_reported_std,
-                          seq_errors)
-        if !use_ref
-            reference = DNASeq()
-        end
-
-        (result, info) = rifraf(reads,
-                                phreds, seq_scores;
-                                reference=reference,
-                                ref_scores=ref_scores,
-                                do_alignment_proposals=do_alignment_proposals,
-                                do_surgery_proposals=do_surgery_proposals,
-                                seed_indels=seed_indels,
-                                indel_correction_only=indel_correction_only,
-                                bandwidth=10, min_dist=9, batch=batch,
-                                max_iters=100)
-        @test result == template
     end
 end
 
