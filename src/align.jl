@@ -37,11 +37,10 @@ function update_helper(final_score::Score, final_move::Trace,
     prev_i, prev_j = offset_backward(move, i, j)
     rangecol = min(prev_j, size(A)[2])
     if inband(A, prev_i, rangecol)
-        score = Score(-Inf)
-        if acol < 1 || prev_j <= acol
-            score = A[prev_i, prev_j] + move_score
+        score = if acol < 1 || prev_j <= acol
+            A[prev_i, prev_j] + move_score
         else
-            score = newcols[prev_i, prev_j - acol] + move_score
+            newcols[prev_i, prev_j - acol] + move_score
         end
         if score > final_score
             return score, move

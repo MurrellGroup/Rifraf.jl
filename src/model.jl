@@ -99,15 +99,15 @@ end
 function get_consensus_substring(proposal::Proposal, seq::DNASeq,
                                  n_after::Int)
     # next valid position in sequence after this proposal
+    prefix = if typeof(proposal) in (Substitution, Insertion)
+        DNASeq([proposal.base])
+    else
+        DNASeq()
+    end
     pos = proposal.pos
     next_posn = pos + 1
-    t = typeof(proposal)
-    prefix = DNASeq()
     stop = min(next_posn + n_after - 1, length(seq))
     suffix = seq[next_posn:stop]
-    if t in (Substitution, Insertion)
-        prefix = DNASeq([proposal.base])
-    end
     return DNASeq(prefix, suffix)
 end
 
@@ -648,10 +648,6 @@ function get_candidate_proposals(state::State,
     nrows = max(maxlen, length(reference)) + 1
     newcols = zeros(Score, (nrows, CODON_LENGTH + 1))
 
-    proposals = all_proposals(state.stage, state.consensus, sequences,
-                              state.Amoves,
-                              indel_correction_only,
-                              indel_seeds)
     if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_surgery_proposals
         do_indels = state.stage in (STAGE_INIT, STAGE_FRAME)
@@ -665,7 +661,10 @@ function get_candidate_proposals(state::State,
             push!(candidates, CandProposal(p, state.score + d))
         end
         return candidates
-    elseif (state.stage == STAGE_INIT ||
+    end
+
+    # multi-line ternary
+    proposals = if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_alignment_proposals
         do_indels = state.stage in (STAGE_INIT, STAGE_FRAME)
         do_subs = true
@@ -674,6 +673,11 @@ function get_candidate_proposals(state::State,
         end
         proposals = alignment_proposals(state.Amoves, state.consensus,
                                         sequences, do_subs, do_indels)
+    else
+        all_proposals(state.stage, state.consensus, sequences,
+                      state.Amoves,
+                      indel_correction_only,
+                      indel_seeds)
     end
 
     for p in proposals
