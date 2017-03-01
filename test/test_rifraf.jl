@@ -237,7 +237,6 @@ end
     function _test_fast_proposals(consensus, seqs, lps, expected;
                                   do_alignment::Bool=true,
                                   do_surgery::Bool=true,
-                                  do_subs::Bool=true,
                                   do_indels::Bool=true)
         bandwidth = 6
         padding = 3
@@ -260,11 +259,11 @@ end
 
         if do_alignment
             proposals = alignment_proposals(state.Amoves, state.consensus,
-                                            pseqs, do_subs, do_indels)
+                                            pseqs, do_indels)
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
         if do_surgery
-            proposals, deltas = surgery_proposals(state, pseqs, do_subs, do_indels)
+            proposals, deltas = surgery_proposals(state, pseqs, do_indels)
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
     end
@@ -359,7 +358,7 @@ end
         expected = [Substitution(1, DNA_C)]
         _test_fast_proposals(consensus, seqs, lps, expected,
                              do_alignment=false, do_surgery=true,
-                             do_subs=true, do_indels=false)
+                             do_indels=false)
     end
 
     @testset "test fast proposals converged" begin
@@ -390,7 +389,7 @@ end
     # no indels, because this happened during refinement
     _test_fast_proposals(consensus, seqs, lps, expected,
                          do_alignment=false, do_surgery=true,
-                         do_subs=true, do_indels=false)
+                         do_indels=false)
 end
 @testset "test fast proposals insertion/mismatch swap" begin
     # inserting 'T' after position 5 should swap with G/T
@@ -407,7 +406,7 @@ end
                 Insertion(6, DNA_T)]
     _test_fast_proposals(consensus, seqs, lps, expected,
                          do_alignment=false, do_surgery=true,
-                         do_subs=true, do_indels=true)
+                         do_indels=true)
 end
 end
 

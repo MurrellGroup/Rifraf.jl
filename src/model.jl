@@ -303,13 +303,12 @@ end
 function alignment_proposals(Amoves::Vector{BandedArray{Trace}},
                              consensus::DNASeq,
                              sequences::Vector{RifrafSequence},
-                             do_subs::Bool,
                              do_indels::Bool)
     result = Set{Proposal}()
     for (Amoves, seq) in zip(Amoves, sequences)
         moves = backtrace(Amoves)
         for proposal in moves_to_proposals(moves, consensus, seq)
-            if (typeof(proposal) == Substitution && do_subs) || do_indels
+            if do_indels || typeof(proposal) == Substitution
                 push!(result, proposal)
             end
         end
@@ -588,12 +587,12 @@ end
 """Use model surgery heuristic to get proposals with positive score deltas."""
 function surgery_proposals(state::State,
                            sequences::Vector{RifrafSequence},
-                           do_subs::Bool,
                            do_indels::Bool)
     sub_deltas = zeros(Score, (length(state.consensus), 4))
     del_deltas = zeros(Score, (length(state.consensus)))
     ins_deltas = zeros(Score, (length(state.consensus) + 1, 4))
 
+    do_subs = true
     for (seq, Amoves) in zip(sequences, state.Amoves)
         moves = backtrace(Amoves)
         update_deltas(sub_deltas, del_deltas, ins_deltas,
@@ -650,13 +649,8 @@ function get_candidate_proposals(state::State,
 
     if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_surgery_proposals
-        do_indels = state.stage in (STAGE_INIT, STAGE_FRAME)
-        do_subs = true
-        if state.stage == STAGE_FRAME && indel_correction_only
-            # FIXME: this never happens
-            do_subs = false
-        end
-        proposals, deltas = surgery_proposals(state, sequences, do_subs, do_indels)
+        do_indels = state.stage == STAGE_INIT
+        proposals, deltas = surgery_proposals(state, sequences, do_indels)
         for (p, d) in zip(proposals, deltas)
             push!(candidates, CandProposal(p, state.score + d))
         end
@@ -666,13 +660,9 @@ function get_candidate_proposals(state::State,
     # multi-line ternary
     proposals = if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_alignment_proposals
-        do_indels = state.stage in (STAGE_INIT, STAGE_FRAME)
-        do_subs = true
-        if state.stage == STAGE_FRAME && indel_correction_only
-            do_subs = false
-        end
+        do_indels = state.stage == STAGE_INIT
         proposals = alignment_proposals(state.Amoves, state.consensus,
-                                        sequences, do_subs, do_indels)
+                                        sequences, do_indels)
     else
         all_proposals(state.stage, state.consensus, sequences,
                       state.Amoves,
