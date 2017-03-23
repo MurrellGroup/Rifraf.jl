@@ -56,7 +56,6 @@ function score_nocodon(proposal::Proposal,
                        A::BandedArray{Score}, B::BandedArray{Score},
                        pseq::RifrafSequence,
                        newcols::Array{Score, 2})
-    flush(STDOUT)
     t = typeof(proposal)
     if t == Deletion
         # nothing to recompute
