@@ -24,7 +24,7 @@ import Rifraf.sample_from_template,
        Rifraf.has_single_indels,
        Rifraf.score_proposal,
        Rifraf.single_indel_proposals,
-       Rifraf.recompute!,
+       Rifraf.realign!,
        Rifraf.get_candidate_proposals,
        Rifraf.alignment_proposals,
        Rifraf.surgery_proposals,
@@ -32,7 +32,6 @@ import Rifraf.sample_from_template,
        Rifraf.moves_to_aligned_seqs,
        Rifraf.alignment_error_probs,
        Rifraf.Prob,
-       Rifraf.LogProb,
        Rifraf.LogProb
 
 srand(1234)
@@ -255,7 +254,7 @@ end
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
                                for (s, p) in zip(seqs, lps)]
         state = initial_state(consensus, pseqs, DNASeq(""), bandwidth, padding)
-        recompute!(state, pseqs, rseq, mult, true, true, 0, false)
+        realign!(state, pseqs, rseq, mult, true, true, 0, false)
 
         if do_alignment
             proposals = alignment_proposals(state.Amoves, state.consensus,
@@ -422,7 +421,7 @@ end
         redo_bs = true
         use_ref = false
         mult = 2
-        recompute!(state, pseqs, rseq, mult,
+        realign!(state, pseqs, rseq, mult,
                    redo_as, redo_bs, 2, use_ref)
         do_alignment_proposals = true
         do_surgery_proposals = false
@@ -487,19 +486,22 @@ end
     # can't guarantee this test actually passes, since it is random
     n_seqs = 5
     len = 30
-    ref_error_rate = 0.1
+
     ref_sample_errors = ErrorModel(8.0, 0.0, 0.0, 1.0, 1.0)
     ref_errors = ErrorModel(8.0, 0.1, 0.1, 1.0, 1.0)
     ref_scores = Scores(ref_errors)
 
-    template_error_rate = 0.005
-    template_alpha = 1.0
-    phred_scale = 1.5
-    log_seq_actual_std = 3.0
-    log_seq_reported_std = 0.3
-
     seq_errors = ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0)
     seq_scores = Scores(seq_errors)
+
+    sample_params = Dict(:ref_error_rate => 0.1,
+                         :ref_errors => ref_sample_errors,
+                         :error_rate => 0.005,
+                         :alpha => 1.0,
+                         :phred_scale => 1.5,
+                         :actual_std => 3.0,
+                         :reported_std => 0.3,
+                         :seq_errors => seq_errors)
 
     @testset "full model" begin
         for (use_ref,
@@ -519,15 +521,7 @@ end
             end
 
             (reference, template, template_error, reads, actual, phreds, sbools,
-             tbools) = sample(n_seqs, len,
-                              ref_error_rate,
-                              ref_sample_errors,
-                              template_error_rate,
-                              template_alpha,
-                              phred_scale,
-                              log_seq_actual_std,
-                              log_seq_reported_std,
-                              seq_errors)
+             tbools) = sample(n_seqs, len; sample_params...)
             if !use_ref
                 reference = DNASeq()
             end
@@ -567,7 +561,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    recompute!(state, pseqs, rseq, mult, true, true, 0, false)
+    realign!(state, pseqs, rseq, mult, true, true, 0, false)
     probs = estimate_probs(state, pseqs, rseq, false)
     @test probs.sub[1, 2] > 0.9
     @test probs.del[1] < 1e-9
@@ -595,7 +589,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    recompute!(state, pseqs, rseq, mult, true, true, 0, false)
+    realign!(state, pseqs, rseq, mult, true, true, 0, false)
     probs = estimate_probs(state, pseqs, rseq, false)
     @test maximum(probs.ins[1, :]) < 1e-9
     @test probs.ins[3, 4] > 0.9
@@ -623,7 +617,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    recompute!(state, pseqs, rseq, mult, true, true, 0, false)
+    realign!(state, pseqs, rseq, mult, true, true, 0, false)
 
     result = alignment_error_probs(length(consensus),
                                    pseqs, state.Amoves)

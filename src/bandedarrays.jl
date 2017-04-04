@@ -155,7 +155,7 @@ function inband(A::BandedArray, i::Int, j::Int)
     if i < 1 || j < 1 || i > A.nrows || j > A.ncols
         return false
     end
-    return A.lower <= i- j <= A.upper
+    return A.lower <= i - j <= A.upper
 end
 
 """Return a dense representation of A"""

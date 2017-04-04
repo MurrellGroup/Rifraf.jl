@@ -173,6 +173,28 @@ function forward_moves(t::DNASeq, s::RifrafSequence;
     return result, moves
 end
 
+"""Alignment with smart bandwidth detection.
+
+Detect scores bad enough to suggest the optimal alignment is outside
+the banded region. Expands bandwidth and retries, up to max bandwidth.
+
+"""
+function forward_moves_band!(c::DNASeq,
+                             s::RifrafSequence,
+                             A::BandedArray{Score},
+                             Amoves::BandedArray{Trace};
+                             bandwidth_mult::Int=2,
+                             trim::Bool=false,
+                             skew_matches::Bool=false)
+    forward_moves!(c, s, A, Amoves; trim=trim, skew_matches=skew_matches)
+    while band_tolerance(Amoves) < CODON_LENGTH
+        s.bandwidth *= bandwidth_mult
+        newbandwidth!(A, s.bandwidth)
+        newbandwidth!(Amoves, s.bandwidth)
+        forward_moves!(c, s, A, Amoves)
+    end
+end
+
 function forward!(t::DNASeq, s::RifrafSequence,
                   result::BandedArray{Score};
                   doreverse=false,

@@ -1,6 +1,6 @@
 @enum(Stage,
-      STAGE_INIT=1,  # no reference; all proposals
-      STAGE_FRAME=2,  # reference; indel proposals
+      STAGE_INIT=1,    # no reference; all proposals
+      STAGE_FRAME=2,   # reference; indel proposals
       STAGE_REFINE=3,  # no reference; substitutions
       STAGE_SCORE=4)
 
@@ -771,48 +771,40 @@ function initial_state(consensus::DNASeq,
                  stage, false)
 end
 
-function recompute!(state::State, seqs::Vector{RifrafSequence},
-                    reference::RifrafSequence,
-                    bandwidth_mult::Int,
-                    recompute_As::Bool, recompute_Bs::Bool,
-                    verbose::Int, use_ref_for_qvs::Bool)
+function realign!(state::State, seqs::Vector{RifrafSequence},
+                  reference::RifrafSequence,
+                  bandwidth_mult::Int,
+                  realign_As::Bool, realign_Bs::Bool,
+                  verbose::Int, use_ref_for_qvs::Bool)
     seq_padding = state.As[1].padding
-    if recompute_As
+    if realign_As
         clen = length(state.consensus)
         for i in (length(state.As) + 1):length(seqs)
             shape = (length(seqs[i]) + 1, clen + 1)
-            push!(state.As, BandedArray(Score, shape, seqs[i].bandwidth, padding=seq_padding))
-            push!(state.Amoves, BandedArray(Trace, shape, seqs[i].bandwidth, padding=seq_padding))
+            push!(state.As, BandedArray(Score, shape, seqs[i].bandwidth,
+                                        padding=seq_padding))
+            push!(state.Amoves, BandedArray(Trace, shape, seqs[i].bandwidth,
+                                            padding=seq_padding))
         end
         for (i, (s, A, Amoves)) in enumerate(zip(seqs, state.As, state.Amoves))
-            forward_moves!(state.consensus, s, A, Amoves)
-            while band_tolerance(Amoves) < CODON_LENGTH
-                s.bandwidth *= bandwidth_mult
-                newbandwidth!(A, s.bandwidth)
-                newbandwidth!(Amoves, s.bandwidth)
-                forward_moves!(state.consensus, s, A, Amoves)
-            end
+            forward_moves_band!(state.consensus, s, A, Amoves,
+                                bandwidth_mult=bandwidth_mult)
         end
         if (((state.stage == STAGE_FRAME) ||
              ((state.stage == STAGE_SCORE) &&
               (use_ref_for_qvs))) &&
               (length(reference) > 0))
-            forward_moves!(state.consensus, reference,
-                           state.A_t, state.Amoves_t)
-            while band_tolerance(state.Amoves_t) < CODON_LENGTH
-                reference.bandwidth *= bandwidth_mult
-                newbandwidth!(state.A_t, reference.bandwidth)
-                newbandwidth!(state.Amoves_t, reference.bandwidth)
-                forward_moves!(state.consensus, reference,
-                               state.A_t, state.Amoves_t)
-            end
+            forward_moves_band!(state.consensus, reference,
+                                state.A_t, state.Amoves_t,
+                                bandwidth_mult=bandwidth_mult)
         end
     end
-    if recompute_Bs
+    if realign_Bs
         clen = length(state.consensus)
         for i in (length(state.Bs) + 1):length(seqs)
             shape = (length(seqs[i]) + 1, clen + 1)
-            push!(state.Bs, BandedArray(Score, shape, seqs[i].bandwidth, padding=seq_padding))
+            push!(state.Bs, BandedArray(Score, shape, seqs[i].bandwidth,
+                                        padding=seq_padding))
         end
         for (i, (s, B)) in enumerate(zip(seqs, state.Bs))
             backward!(state.consensus, s, B)
@@ -1068,9 +1060,9 @@ function rifraf(seqstrings::Vector{DNASeq},
     state = initial_state(consensus, seqs, reference,
                           bandwidth, padding,
                           minimum(enabled_stages))
-    recompute!(state, seqs, ref_pstring,
-               bandwidth_mult, true, true, verbose,
-               use_ref_for_qvs)
+    realign!(state, seqs, ref_pstring,
+             bandwidth_mult, true, true, verbose,
+             use_ref_for_qvs)
     empty_ref = length(reference) == 0
 
     if verbose > 1
@@ -1131,7 +1123,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                                              indel_correction_only;
                                              indel_seeds=indel_proposals)
         indel_proposals = Proposal[]
-        recompute_As = true
+        realign_As = true
         if length(candidates) == 0
             if verbose > 1
                 println(STDERR, "  no candidates found")
@@ -1201,9 +1193,9 @@ function rifraf(seqstrings::Vector{DNASeq},
             state.consensus = apply_proposals(old_consensus,
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
-            recompute!(state, seqs, ref_pstring,
-                       bandwidth_mult, true, false, verbose,
-                       use_ref_for_qvs)
+            realign!(state, seqs, ref_pstring,
+                     bandwidth_mult, true, false, verbose,
+                     use_ref_for_qvs)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
             if length(chosen_cands) > 1 &&
@@ -1220,8 +1212,8 @@ function rifraf(seqstrings::Vector{DNASeq},
                                                   Proposal[c.proposal
                                                            for c in chosen_cands])
             else
-                # no need to recompute unless batch changes
-                recompute_As = false
+                # no need to realign unless batch changes
+                realign_As = false
             end
             proposal_counts = [length(filter(c -> (typeof(c.proposal) == t),
                                              chosen_cands))
@@ -1232,11 +1224,11 @@ function rifraf(seqstrings::Vector{DNASeq},
         if batch < length(sequences)
             indices = rand(1:length(sequences), batch)
             seqs = sequences[indices]
-            recompute_As = true
+            realign_As = true
         end
-        recompute!(state, seqs, ref_pstring,
-                   bandwidth_mult, recompute_As, true, verbose,
-                   use_ref_for_qvs)
+        realign!(state, seqs, ref_pstring,
+                 bandwidth_mult, realign_As, true, verbose,
+                 use_ref_for_qvs)
         if verbose > 1
             println(STDERR, "  score: $(state.score) ($(state.stage))")
         end
@@ -1262,9 +1254,9 @@ function rifraf(seqstrings::Vector{DNASeq},
             else
                 seqs = sequences
             end
-            recompute!(state, seqs, ref_pstring,
-                       bandwidth_mult, true, true, verbose,
-                       use_ref_for_qvs)
+            realign!(state, seqs, ref_pstring,
+                     bandwidth_mult, true, true, verbose,
+                     use_ref_for_qvs)
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
             end
@@ -1291,8 +1283,8 @@ function rifraf(seqstrings::Vector{DNASeq},
     if STAGE_SCORE in enabled_stages
         # FIXME: recomputing for all sequences is costly, but using batch
         # is less accurate
-        recompute!(state, seqs, ref_pstring, bandwidth_mult, true, true,
-                   verbose, use_ref_for_qvs)
+        realign!(state, seqs, ref_pstring, bandwidth_mult, true, true,
+                 verbose, use_ref_for_qvs)
         info["error_probs"] = estimate_probs(state, seqs, ref_pstring,
                                              use_ref_for_qvs)
         info["aln_error_probs"] = alignment_error_probs(length(state.consensus),
