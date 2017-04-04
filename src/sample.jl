@@ -41,7 +41,6 @@ function jitter_phred_domain(x::Vector{Prob},
     return result
 end
 
-
 function hmm_sample(sequence::DNASeq,
                     error_p::Vector{Prob},
                     errors::ErrorModel)
@@ -126,7 +125,6 @@ function hmm_sample(sequence::DNASeq,
     return DNASeq(final_seq), final_error_p, seqbools, tbools
 end
 
-
 function sample_reference(reference::DNASeq,
                           error_rate::Prob,
                           errors::ErrorModel)
@@ -139,12 +137,6 @@ function sample_reference(reference::DNASeq,
     return template
 end
 
-"""
-template_error_p: vector of per-base error rates
-actual_error_std: standard deviation of true phred values
-reported_error_std: standard deviation of reported phred values
-
-"""
 function sample_from_template(template::DNASeq,
                               template_error_p::Vector{Prob},
                               errors::ErrorModel,
@@ -172,17 +164,15 @@ function sample_from_template(template::DNASeq,
     return DNASeq(seq), actual_error_p, phreds, sbools, tbools
 end
 
-
-function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
-                        n_diffs::Int,
-                        ref_error_rate::Prob,
-                        ref_errors::ErrorModel,
-                        error_rate::Prob,
-                        alpha::Float64,
-                        phred_scale::Float64,
-                        actual_std::Float64,
-                        reported_std::Float64,
-                        seq_errors::ErrorModel)
+function sample_mixture(nseqs::Tuple{Int, Int}, len::Int, n_diffs::Int;
+                        ref_error_rate::Prob=0.1,
+                        ref_errors::ErrorModel=ErrorModel(10, 0, 0, 1, 0),
+                        error_rate::Prob=0.01,
+                        alpha::Float64=0.1,
+                        phred_scale::Float64=1.5,
+                        actual_std::Float64=3.0,
+                        reported_std::Float64=1.0,
+                        seq_errors::ErrorModel=ErrorModel(1, 5, 5))
     if len % 3 != 0
         error("Reference length must be a multiple of three")
     end
@@ -228,25 +218,25 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int,
 
 end
 
-function sample(nseqs::Int, len::Int,
-                ref_error_rate::Prob,
-                ref_errors::ErrorModel,
-                error_rate::Prob,
-                alpha::Float64,
-                phred_scale::Float64,
-                actual_std::Float64,
-                reported_std::Float64,
-                seq_errors::ErrorModel)
+function sample(nseqs::Int, len::Int;
+                ref_error_rate::Prob=0.1,
+                ref_errors::ErrorModel=ErrorModel(10, 0, 0, 1, 0),
+                error_rate::Prob=0.01,
+                alpha::Float64=0.1,
+                phred_scale::Float64=1.5,
+                actual_std::Float64=3.0,
+                reported_std::Float64=1.0,
+                seq_errors::ErrorModel=ErrorModel(1, 5, 5))
     (ref, templates, t_p, seqs, actual,
-     phreds, cb, db) = sample_mixture((nseqs, 0), len, 0,
-                                      ref_error_rate,
-                                      ref_errors,
-                                      error_rate,
-                                      alpha,
-                                      phred_scale,
-                                      actual_std,
-                                      reported_std,
-                                      seq_errors)
+     phreds, cb, db) = sample_mixture((nseqs, 0), len, 0;
+                                      ref_error_rate=ref_error_rate,
+                                      ref_errors=ref_errors,
+                                      error_rate=error_rate,
+                                      alpha=alpha,
+                                      phred_scale=phred_scale,
+                                      actual_std=actual_std,
+                                      reported_std=reported_std,
+                                      seq_errors=seq_errors)
     return ref, templates[1], t_p, seqs, actual, phreds, cb, db
 end
 
