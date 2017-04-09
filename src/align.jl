@@ -17,12 +17,10 @@ const OFFSETS = ([1, 1],  # sub
                  [3, 0],  # codon insertion
                  [0, 3])  # codon deletion
 
-
 function offset_forward(move::Trace, i::Int, j::Int)
     (a, b) = OFFSETS[move]
     return (i + a, j + b)
 end
-
 
 function offset_backward(move::Trace, i::Int, j::Int)
     (a, b) = OFFSETS[move]
@@ -113,7 +111,6 @@ function update(A::BandedArray{Score},
     return final_score, final_move
 end
 
-
 """The heart of the forward algorithm.
 
 `use_moves` determines whether moves are saved or not.
@@ -154,7 +151,6 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
     doreverse=false;
     @forward(true)
 end
-
 
 """Does backtracing to find best alignment."""
 function forward_moves(t::DNASeq, s::RifrafSequence;
@@ -225,7 +221,6 @@ function forward(t::DNASeq, s::RifrafSequence;
     return result
 end
 
-
 function backward!(t::DNASeq, s::RifrafSequence,
                    result::BandedArray{Score})
     # this actually seems faster than a dedicated backwards alignment
@@ -244,7 +239,6 @@ function backward(t::DNASeq, s::RifrafSequence)
     return result
 end
 
-
 function backtrace_indices(moves::BandedArray{Trace};
                            start::Tuple{Int, Int}=(0, 0))
     result = Tuple{Int, Int}[]
@@ -260,7 +254,6 @@ function backtrace_indices(moves::BandedArray{Trace};
     return reverse(result)
 end
 
-
 function backtrace(moves::BandedArray{Trace})
     taken_moves = Trace[]
     i, j = size(moves)
@@ -271,7 +264,6 @@ function backtrace(moves::BandedArray{Trace})
     end
     return reverse(taken_moves)
 end
-
 
 function band_tolerance(Amoves::BandedArray{Trace})
     nrows, ncols = size(Amoves)
@@ -300,7 +292,6 @@ function band_tolerance(Amoves::BandedArray{Trace})
     return dist
 end
 
-
 function moves_to_aligned_seqs(moves::Vector{Trace},
                                t::DNASeq, s::DNASeq)
     aligned_t = DNASequence()
@@ -328,7 +319,6 @@ function moves_to_aligned_seqs(moves::Vector{Trace},
     return aligned_t, aligned_s
 end
 
-
 """Compute index vector mapping from position in `t` to position in
 `s`.
 
@@ -352,7 +342,6 @@ function moves_to_indices(moves::Vector{Trace},
     return result
 end
 
-
 function align_moves(t::DNASeq, s::RifrafSequence;
                      padding::Int=0,
                      trim::Bool=false,
@@ -364,7 +353,6 @@ function align_moves(t::DNASeq, s::RifrafSequence;
     return backtrace(Amoves)
 end
 
-
 function align(t::DNASeq, s::RifrafSequence;
                trim::Bool=false,
                skew_matches::Bool=false)
@@ -373,7 +361,6 @@ function align(t::DNASeq, s::RifrafSequence;
                         skew_matches=skew_matches)
     return moves_to_aligned_seqs(moves, t, s.seq)
 end
-
 
 function align(t::DNASeq, s::DNASeq, phreds::Vector{Phred},
                scores::Scores,
