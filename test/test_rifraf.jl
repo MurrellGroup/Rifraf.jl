@@ -262,7 +262,8 @@ end
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
         if do_surgery
-            proposals, deltas = surgery_proposals(state, pseqs, do_indels)
+            cands = surgery_proposals(state, pseqs, do_indels)
+            proposals = Proposal[c.proposal for c in cands]
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
     end

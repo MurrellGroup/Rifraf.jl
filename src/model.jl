@@ -599,32 +599,31 @@ function surgery_proposals(state::State,
                       do_subs, do_indels)
     end
     # only return proposals with positive deltas
-    result = Proposal[]
-    deltas = Score[]
+    result = CandProposal[]
     nrows, ncols = size(sub_deltas)
     if do_subs
         for i in 1:nrows, j in 1:ncols
-            if sub_deltas[i, j] > 0
-                push!(result, Substitution(i, BASES[j]))
-                push!(deltas, sub_deltas[i, j])
+            if sub_deltas[i, j] > 0.0
+                push!(result, CandProposal(Substitution(i, BASES[j]),
+                                           state.score + sub_deltas[i, j]))
             end
         end
     end
     if do_indels
         for i in 1:nrows
-            if del_deltas[i] > 0
-                push!(result, Deletion(i))
-                push!(deltas, del_deltas[i])
+            if del_deltas[i] > 0.0
+                push!(result, CandProposal(Deletion(i),
+                                           state.score + del_deltas[i]))
             end
         end
         for i in 1:(nrows+1), j in 1:ncols
-            if ins_deltas[i, j] > 0
-                push!(result, Insertion(i - 1, BASES[j]))
-                push!(deltas, ins_deltas[i, j])
+            if ins_deltas[i, j] > 0.0
+                push!(result, CandProposal(Insertion(i - 1, BASES[j]),
+                                           state.score + ins_deltas[i, j]))
             end
         end
     end
-    return result, deltas
+    return result
 end
 
 
@@ -639,7 +638,6 @@ function get_candidate_proposals(state::State,
         # TODO: allow both and merge
         error("cannot do both alignment and surgery proposals")
     end
-    candidates = CandProposal[]
     use_ref = (state.stage == STAGE_FRAME)
 
     maxlen = maximum(length(s) for s in sequences)
@@ -649,27 +647,22 @@ function get_candidate_proposals(state::State,
     if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_surgery_proposals
         do_indels = state.stage == STAGE_INIT
-        # TODO: return CandProposals
-        proposals, deltas = surgery_proposals(state, sequences, do_indels)
-        for (p, d) in zip(proposals, deltas)
-            push!(candidates, CandProposal(p, state.score + d))
-        end
-        return candidates
+        return surgery_proposals(state, sequences, do_indels)
     end
 
     # multi-line ternary
     proposals = if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_alignment_proposals
         do_indels = state.stage == STAGE_INIT
-        proposals = alignment_proposals(state.Amoves, state.consensus,
-                                        sequences, do_indels)
+        alignment_proposals(state.Amoves, state.consensus,
+                            sequences, do_indels)
     else
         all_proposals(state.stage, state.consensus, sequences,
-                      state.Amoves,
-                      indel_correction_only,
+                      state.Amoves, indel_correction_only,
                       indel_seeds)
     end
 
+    candidates = CandProposal[]
     for p in proposals
         score = score_proposal(p, state, sequences, use_ref,
                                reference, newcols)
