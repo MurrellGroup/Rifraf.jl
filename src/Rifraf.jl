@@ -29,7 +29,8 @@ export rifraf,
        data_row_range,
        inband,
        flip!,
-       newbandwidth!
+       newbandwidth!,
+       align
 
 include("bandedarrays.jl")
 include("types.jl")

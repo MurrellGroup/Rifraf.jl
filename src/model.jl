@@ -649,6 +649,7 @@ function get_candidate_proposals(state::State,
     if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_surgery_proposals
         do_indels = state.stage == STAGE_INIT
+        # TODO: return CandProposals
         proposals, deltas = surgery_proposals(state, sequences, do_indels)
         for (p, d) in zip(proposals, deltas)
             push!(candidates, CandProposal(p, state.score + d))

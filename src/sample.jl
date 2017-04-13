@@ -215,7 +215,6 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int, n_diffs::Int;
             DNASeq[DNASeq(t) for t in templates],
             template_error_p, seqs, actual_error_ps, phreds,
             seqbools, tbools)
-
 end
 
 function sample(nseqs::Int, len::Int;

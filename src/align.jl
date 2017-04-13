@@ -127,7 +127,6 @@ macro forward(use_moves)
                 end
                 sbase = i > 1 ? s.seq[doreverse ? length(s) - (i-1) + 1 : i-1] : DNA_Gap
                 tbase = j > 1 ? t[doreverse ? length(t) - (j-1) + 1 : j-1] : DNA_Gap
-                # TODO: handle doreverse
                 result[i, j], $moves = update(result, i, j, sbase, tbase, s;
                                               doreverse=doreverse,
                                               trim=trim,
@@ -354,9 +353,11 @@ function align_moves(t::DNASeq, s::RifrafSequence;
 end
 
 function align(t::DNASeq, s::RifrafSequence;
+               padding::Int=0,
                trim::Bool=false,
                skew_matches::Bool=false)
     moves = align_moves(t, s;
+                        padding=padding,
                         trim=trim,
                         skew_matches=skew_matches)
     return moves_to_aligned_seqs(moves, t, s.seq)
@@ -365,9 +366,25 @@ end
 function align(t::DNASeq, s::DNASeq, phreds::Vector{Phred},
                scores::Scores,
                bandwidth::Int;
+               padding::Int=0,
                trim::Bool=false,
                skew_matches::Bool=false)
     moves = align_moves(t, RifrafSequence(s, phreds, bandwidth, scores),
+                        padding=padding,
                         trim=trim, skew_matches=skew_matches)
     return moves_to_aligned_seqs(moves, t, s)
+end
+
+function align_score(t::DNASeq, s::DNASeq, phreds::Vector{Phred},
+                     scores::Scores,
+                     bandwidth::Int;
+                     padding::Int=0,
+                     trim::Bool=false,
+                     skew_matches::Bool=false)
+    A, Amoves = forward_moves(t, RifrafSequence(s, phreds, bandwidth, scores);
+                              padding=padding,
+                              trim=trim,
+                              skew_matches=skew_matches)
+    moves = backtrace(Amoves)
+    return moves_to_aligned_seqs(moves, t, s), A[end, end]
 end
