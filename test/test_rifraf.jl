@@ -25,9 +25,9 @@ import Rifraf.sample_from_template,
        Rifraf.score_proposal,
        Rifraf.single_indel_proposals,
        Rifraf.realign!,
-       Rifraf.get_candidate_proposals,
+       Rifraf.get_candidates,
        Rifraf.alignment_proposals,
-       Rifraf.surgery_proposals,
+       Rifraf.surgery_candidates,
        Rifraf.align_moves,
        Rifraf.moves_to_aligned_seqs,
        Rifraf.alignment_error_probs,
@@ -262,7 +262,7 @@ end
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
         if do_surgery
-            cands = surgery_proposals(state, pseqs, do_indels)
+            cands = surgery_candidates(state, pseqs, do_indels)
             proposals = Proposal[c.proposal for c in cands]
             @test length(symdiff(Set(proposals), Set(expected))) == 0
         end
@@ -427,10 +427,10 @@ end
         do_alignment_proposals = true
         do_surgery_proposals = false
         indels_only = false
-        cands = get_candidate_proposals(state, pseqs, rseq,
-                                        do_alignment_proposals,
-                                        do_surgery_proposals,
-                                        indels_only)
+        cands = get_candidates(state, pseqs, rseq,
+                               do_alignment_proposals,
+                               do_surgery_proposals,
+                               indels_only)
         @test length(cands) == length(expected)
         if length(cands) == length(expected)
             cand_scores = sort([c.score for c in cands])

@@ -584,9 +584,9 @@ function update_deltas(sub_deltas::Array{Score, 2},
 end
 
 """Use model surgery heuristic to get proposals with positive score deltas."""
-function surgery_proposals(state::State,
-                           sequences::Vector{RifrafSequence},
-                           do_indels::Bool)
+function surgery_candidates(state::State,
+                            sequences::Vector{RifrafSequence},
+                            do_indels::Bool)
     sub_deltas = zeros(Score, (length(state.consensus), 4))
     del_deltas = zeros(Score, (length(state.consensus)))
     ins_deltas = zeros(Score, (length(state.consensus) + 1, 4))
@@ -626,14 +626,13 @@ function surgery_proposals(state::State,
     return result
 end
 
-
-function get_candidate_proposals(state::State,
-                                 sequences::Vector{RifrafSequence},
-                                 reference::RifrafSequence,
-                                 do_alignment_proposals::Bool,
-                                 do_surgery_proposals::Bool,
-                                 indel_correction_only::Bool;
-                                 indel_seeds::Vector{Proposal}=Proposal[])
+function get_candidates(state::State,
+                        sequences::Vector{RifrafSequence},
+                        reference::RifrafSequence,
+                        do_alignment_proposals::Bool,
+                        do_surgery_proposals::Bool,
+                        indel_correction_only::Bool;
+                        indel_seeds::Vector{Proposal}=Proposal[])
     if do_alignment_proposals && do_surgery_proposals
         # TODO: allow both and merge
         error("cannot do both alignment and surgery proposals")
@@ -647,7 +646,7 @@ function get_candidate_proposals(state::State,
     if (state.stage == STAGE_INIT ||
         state.stage == STAGE_REFINE) && do_surgery_proposals
         do_indels = state.stage == STAGE_INIT
-        return surgery_proposals(state, sequences, do_indels)
+        return surgery_candidates(state, sequences, do_indels)
     end
 
     # multi-line ternary
@@ -676,7 +675,6 @@ end
 function base_consensus(d::Dict{DNANucleotide, Score})
     return minimum((v, k) for (k, v) in d)[2]
 end
-
 
 function has_single_indels(consensus::DNASeq,
                            reference::RifrafSequence)
@@ -1111,11 +1109,11 @@ function rifraf(seqstrings::Vector{DNASeq},
             cons_pstring = RifrafSequence(state.consensus, log10(cons_errors), bandwidth, cons_scores)
             indel_proposals = single_indel_proposals(reference, cons_pstring)
         end
-        candidates = get_candidate_proposals(state, seqs, ref_pstring,
-                                             do_alignment_proposals,
-                                             do_surgery_proposals,
-                                             indel_correction_only;
-                                             indel_seeds=indel_proposals)
+        candidates = get_candidates(state, seqs, ref_pstring,
+                                    do_alignment_proposals,
+                                    do_surgery_proposals,
+                                    indel_correction_only;
+                                    indel_seeds=indel_proposals)
         indel_proposals = Proposal[]
         realign_As = true
         if length(candidates) == 0
