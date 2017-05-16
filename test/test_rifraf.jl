@@ -254,7 +254,7 @@ end
         pseqs = RifrafSequence[RifrafSequence(s, p, bandwidth, scores)
                                for (s, p) in zip(seqs, lps)]
         state = initial_state(consensus, pseqs, DNASeq(""), bandwidth, padding)
-        realign!(state, pseqs, rseq, mult, true, true, 0, false)
+        realign!(state, pseqs, rseq, true, true, 0, false)
 
         if do_alignment
             proposals = alignment_proposals(state.Amoves, state.consensus,
@@ -422,7 +422,7 @@ end
         redo_bs = true
         use_ref = false
         mult = 2
-        realign!(state, pseqs, rseq, mult,
+        realign!(state, pseqs, rseq,
                    redo_as, redo_bs, 2, use_ref)
         do_alignment_proposals = true
         do_surgery_proposals = false
@@ -562,7 +562,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    realign!(state, pseqs, rseq, mult, true, true, 0, false)
+    realign!(state, pseqs, rseq, true, true, 0, false)
     probs = estimate_probs(state, pseqs, rseq, false)
     @test probs.sub[1, 2] > 0.9
     @test probs.del[1] < 1e-9
@@ -590,7 +590,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    realign!(state, pseqs, rseq, mult, true, true, 0, false)
+    realign!(state, pseqs, rseq, true, true, 0, false)
     probs = estimate_probs(state, pseqs, rseq, false)
     @test maximum(probs.ins[1, :]) < 1e-9
     @test probs.ins[3, 4] > 0.9
@@ -618,7 +618,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     rseq = RifrafSequence(DNASeq(), LogProb[], bandwidth, ref_scores)
     state = initial_state(consensus, pseqs, rseq.seq, bandwidth, padding)
-    realign!(state, pseqs, rseq, mult, true, true, 0, false)
+    realign!(state, pseqs, rseq, true, true, 0, false)
 
     result = alignment_error_probs(length(consensus),
                                    pseqs, state.Amoves)

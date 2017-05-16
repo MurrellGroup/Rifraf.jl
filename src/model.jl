@@ -765,7 +765,6 @@ end
 
 function realign!(state::State, seqs::Vector{RifrafSequence},
                   reference::RifrafSequence,
-                  bandwidth_mult::Int,
                   realign_As::Bool, realign_Bs::Bool,
                   verbose::Int, use_ref_for_qvs::Bool)
     seq_padding = state.As[1].padding
@@ -779,16 +778,14 @@ function realign!(state::State, seqs::Vector{RifrafSequence},
                                             padding=seq_padding))
         end
         for (i, (s, A, Amoves)) in enumerate(zip(seqs, state.As, state.Amoves))
-            forward_moves_band!(state.consensus, s, A, Amoves,
-                                bandwidth_mult=bandwidth_mult)
+            forward_moves!(state.consensus, s, A, Amoves)
         end
         if (((state.stage == STAGE_FRAME) ||
              ((state.stage == STAGE_SCORE) &&
               (use_ref_for_qvs))) &&
               (length(reference) > 0))
-            forward_moves_band!(state.consensus, reference,
-                                state.A_t, state.Amoves_t,
-                                bandwidth_mult=bandwidth_mult)
+            forward_moves!(state.consensus, reference,
+                           state.A_t, state.Amoves_t)
         end
     end
     if realign_Bs
@@ -1017,7 +1014,6 @@ function rifraf(seqstrings::Vector{DNASeq},
                 use_ref_for_qvs::Bool=false,
                 padding::Int=(5*CODON_LENGTH),
                 bandwidth::Int=(3*CODON_LENGTH),
-                bandwidth_mult::Int=2,
                 min_dist::Int=(5 * CODON_LENGTH),
                 batch::Int=10,
                 batch_threshold::Float64=0.05,
@@ -1053,7 +1049,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                           bandwidth, padding,
                           minimum(enabled_stages))
     realign!(state, seqs, ref_pstring,
-             bandwidth_mult, true, true, verbose,
+             true, true, verbose,
              use_ref_for_qvs)
     empty_ref = length(reference) == 0
 
@@ -1186,7 +1182,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                                               Proposal[c.proposal
                                                        for c in chosen_cands])
             realign!(state, seqs, ref_pstring,
-                     bandwidth_mult, true, false, verbose,
+                     true, false, verbose,
                      use_ref_for_qvs)
             # detect if a single proposal is better
             # note: this may not always be correct, because score_proposal() is not exact
@@ -1219,7 +1215,7 @@ function rifraf(seqstrings::Vector{DNASeq},
             realign_As = true
         end
         realign!(state, seqs, ref_pstring,
-                 bandwidth_mult, realign_As, true, verbose,
+                 realign_As, true, verbose,
                  use_ref_for_qvs)
         if verbose > 1
             println(STDERR, "  score: $(state.score) ($(state.stage))")
@@ -1247,7 +1243,7 @@ function rifraf(seqstrings::Vector{DNASeq},
                 seqs = sequences
             end
             realign!(state, seqs, ref_pstring,
-                     bandwidth_mult, true, true, verbose,
+                     true, true, verbose,
                      use_ref_for_qvs)
             if verbose > 1
                 println(STDERR, "  increased batch size to $batch. new score: $(state.score)")
@@ -1275,7 +1271,7 @@ function rifraf(seqstrings::Vector{DNASeq},
     if STAGE_SCORE in enabled_stages
         # FIXME: recomputing for all sequences is costly, but using batch
         # is less accurate
-        realign!(state, seqs, ref_pstring, bandwidth_mult, true, true,
+        realign!(state, seqs, ref_pstring, true, true,
                  verbose, use_ref_for_qvs)
         info["error_probs"] = estimate_probs(state, seqs, ref_pstring,
                                              use_ref_for_qvs)
