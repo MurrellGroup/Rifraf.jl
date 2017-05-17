@@ -3,12 +3,14 @@ module Rifraf
 using Bio.Seq
 using Distributions
 using Levenshtein
+using Parameters
 
 import Base.length
 import Base.reverse
 
 
 export rifraf,
+       RifrafParams,
        ErrorModel,
        Scores,
        normalize,

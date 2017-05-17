@@ -11,7 +11,6 @@ type RifrafSequence
     codon_ins_scores::Vector{Score}
     codon_del_scores::Vector{Score}
     bandwidth::Int
-
 end
 
 function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
@@ -24,8 +23,7 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
         error("length mismatch")
     end
     if length(seq) == 0
-        return RifrafSequence(seq, Score[], Score[], Score[],
-                              Score[], Score[], Score[], bandwidth)
+        return RifrafSequence()
     end
     if minimum(error_log_p) == -Inf
         error("a log error probability is negative infinity")
@@ -76,9 +74,22 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
                           bandwidth)
 end
 
+"""Given PHRED scores instead of log error rates."""
 function RifrafSequence(seq::DNASeq, phreds::Vector{Int8}, bandwidth::Int, scores::Scores)
     error_log_p = phred_to_log_p(phreds)
     return RifrafSequence(seq, error_log_p, bandwidth, scores)
+end
+
+"""Update scores for the given sequence."""
+function RifrafSequence(seq::RifrafSequence, scores::Scores)
+    error_log_p = loq10(1.0 - exp10(seq.match_log_p))
+    return RifrafSequence(seq, error_log_p, seq.bandwidth, scores)
+end
+
+"""Empty sequence"""
+function RifrafSequence()
+    RifrafSequence(DNASeq(), Score[], Score[], Score[],
+                   Score[], Score[], Score[], 0)
 end
 
 do_codon_ins(s::RifrafSequence) = length(s.codon_ins_scores) > 0

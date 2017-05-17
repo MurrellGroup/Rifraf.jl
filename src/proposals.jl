@@ -26,7 +26,7 @@ function update_pos(p::Deletion, pos)
     return Deletion(pos)
 end
 
-immutable CandProposal
+immutable ScoredProposal
     proposal::Proposal
     score::Score
 end
@@ -101,8 +101,8 @@ function apply_proposals(seq::DNASeq,
     return DNASeq(result...)
 end
 
-function choose_candidates(candidates::Vector{CandProposal}, min_dist::Int)
-    final_cands = CandProposal[]
+function choose_candidates(candidates::Vector{ScoredProposal}, min_dist::Int)
+    final_cands = ScoredProposal[]
     posns = Set{Int}()
     for c in sort(candidates, by=(c) -> c.score, rev=true)
         if any(Bool[(abs(c.proposal.pos - p) < min_dist) for p in posns])
