@@ -27,6 +27,7 @@ end
     indel_correction_only::Bool = true
     use_ref_for_qvs::Bool = false
     bandwidth::Int = (3*CODON_LENGTH)
+    bandwidth_pvalue::Float64 = 0.01
     min_dist::Int = (5 * CODON_LENGTH)
     batch_size::Int = 10
     batch_threshold::Float64 = 0.05
@@ -108,6 +109,9 @@ function score_nocodon(proposal::Proposal,
                        A::BandedArray{Score}, B::BandedArray{Score},
                        pseq::RifrafSequence,
                        newcols::Array{Score, 2})
+    if size(A)[1] != length(pseq) + 1
+        error("wrong size array")
+    end
     t = typeof(proposal)
     if t == Deletion
         # nothing to recompute
@@ -511,49 +515,88 @@ function rescore!(state::RifrafState, use_ref_for_qvs::Bool)
     end
 end
 
-"""Do forward and backward alignments, and compute scores"""
-function realign!(state::RifrafState, use_ref_for_qvs::Bool;
-                  verbose::Int=0)
+"""Forward alignment with bandwidth checking.
+
+If the number of errors is greater than the `1 - pvalue` right tail of
+a Poisson with `μ = seq.error_rate`, increase bandwidth.
+
+"""
+function smart_forward_moves!(consensus::DNASeq, seq::RifrafSequence,
+                              A::BandedArray{Score},
+                              B::BandedArray{Score},
+                              Amoves::BandedArray{Trace},
+                              pvalue::Float64)
+    max_bandwidth = min(seq.bandwidth * 2 ^ 5, length(consensus), length(seq))
+    if seq.bandwidth_fixed
+        max_bandwidth = seq.bandwidth
+    end
+    n_errors = typemax(Int)
+    old_n_errors = typemax(Int)
+    while true
+        forward_moves!(consensus, seq, A, Amoves)
+        if seq.bandwidth_fixed || seq.bandwidth >= max_bandwidth
+            break
+        end
+        old_n_errors = n_errors
+        n_errors = count_errors(Amoves, consensus, seq.seq)
+        threshold = cquantile(Poisson(seq.est_n_errors), pvalue)
+        if n_errors > threshold && n_errors < old_n_errors
+            seq.bandwidth = min(seq.bandwidth * 2, max_bandwidth)
+            newbandwidth!(A, seq.bandwidth)
+            newbandwidth!(B, seq.bandwidth)
+            newbandwidth!(Amoves, seq.bandwidth)
+        else
+            break
+        end
+    end
+    seq.bandwidth_fixed = true
+end
+
+"""Do forward and backward alignments, and compute scores.
+
+Do smart bandwidth updating.
+
+"""
+function realign!(state::RifrafState, params::RifrafParams)
     seqs = state.batch_seqs
     shape = (state.maxlen + 1, state.maxlen + 1)
+    # add new arrays, in case batch size increased
+    for i in (length(state.As) + 1):length(seqs)
+        push!(state.As, BandedArray(Score, shape, seqs[i].bandwidth))
+        push!(state.Bs, BandedArray(Score, shape, seqs[i].bandwidth))
+        push!(state.Amoves, BandedArray(Trace, shape, seqs[i].bandwidth))
+    end
+
     if state.realign_As
-        if verbose >= 2
+        if params.verbose >= 2
             println("    realigning As")
         end
-        # add new alignments, in case batch size increased
-        for i in (length(state.As) + 1):length(seqs)
-            push!(state.As, BandedArray(Score, shape, seqs[i].bandwidth))
-            push!(state.Amoves, BandedArray(Trace, shape, seqs[i].bandwidth))
+        for (s, A, B, Amoves) in zip(seqs, state.As, state.Bs, state.Amoves)
+            smart_forward_moves!(state.consensus, s, A, B, Amoves,
+                                 params.bandwidth_pvalue)
         end
-        for (s, A, Amoves) in zip(seqs, state.As, state.Amoves)
-            forward_moves!(state.consensus, s, A, Amoves)
-        end
-        if use_ref(state.reference, state.stage, use_ref_for_qvs)
-            forward_moves!(state.consensus, state.reference,
-                           state.A_ref, state.Amoves_ref)
+        if use_ref(state.reference, state.stage, params.use_ref_for_qvs)
+            smart_forward_moves!(state.consensus, state.reference,
+                                 state.A_ref, state.B_ref, state.Amoves_ref,
+                                 params.bandwidth_pvalue)
         end
     end
     if state.realign_Bs
-        if verbose >= 2
+        if params.verbose >= 2
             println("    realigning Bs")
-        end
-        # add new alignments, in case batch size increased
-        for i in (length(state.Bs) + 1):length(seqs)
-            push!(state.Bs, BandedArray(Score, shape, seqs[i].bandwidth))
         end
         for (s, B) in zip(seqs, state.Bs)
             backward!(state.consensus, s, B)
         end
-        if use_ref(state.reference, state.stage, use_ref_for_qvs)
+        if use_ref(state.reference, state.stage, params.use_ref_for_qvs)
             backward!(state.consensus, state.reference, state.B_ref)
         end
     end
 end
 
-function realign_rescore!(state::RifrafState, use_ref_for_qvs::Bool;
-                          verbose::Int=0)
-    realign!(state, use_ref_for_qvs, verbose=verbose)
-    rescore!(state, use_ref_for_qvs)
+function realign_rescore!(state::RifrafState, params::RifrafParams)
+    realign!(state, params)
+    rescore!(state, params.use_ref_for_qvs)
 end
 
 """convert per-proposal log differences to a per-base error rate"""
@@ -735,7 +778,7 @@ function handle_candidates!(candidates::Vector{ScoredProposal},
                                                for c in chosen_cands])
     state.realign_As = true
     state.realign_Bs = false
-    realign_rescore!(state, params.use_ref_for_qvs, verbose=params.verbose)
+    realign_rescore!(state, params)
     # detect if a single proposal is better
     # note: this may not always be correct, because score_proposal() is not exact
     if length(chosen_cands) > 1 &&
@@ -892,7 +935,7 @@ function check_score!(state::RifrafState, params::RifrafParams,
         resample!(state, verbose=params.verbose)
         state.realign_As = true
         state.realign_Bs = true
-        realign_rescore!(state, params.use_ref_for_qvs, verbose=params.verbose)
+        realign_rescore!(state, params)
         if params.verbose >= 2
             println(STDERR, "    new score: $(state.score)")
         end
@@ -949,7 +992,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
         if params.verbose >= 2
             println("  step: realign and rescore")
         end
-        realign_rescore!(state, params.use_ref_for_qvs, verbose=params.verbose)
+        realign_rescore!(state, params)
 
         if params.verbose >= 2
             println("  step: check score")
@@ -994,7 +1037,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
         # is less accurate
         state.realign_As = true
         state.realign_Bs = true
-        realign_rescore!(state, params.use_ref_for_qvs, verbose=params.verbose)
+        realign_rescore!(state, params)
         result.error_probs = estimate_probs(state, params.use_ref_for_qvs)
         result.aln_error_probs = alignment_error_probs(length(state.consensus),
                                                      state.batch_seqs, state.Amoves)

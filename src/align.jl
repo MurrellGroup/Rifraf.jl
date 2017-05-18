@@ -142,6 +142,8 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
                         trim::Bool=false,
                         skew_matches::Bool=false)
     new_shape = (length(s) + 1, length(t) + 1)
+    newbandwidth!(result, s.bandwidth)
+    newbandwidth!(moves, s.bandwidth)
     resize!(result, new_shape)
     resize!(moves, new_shape)
     result[1, 1] = Score(0.0)
@@ -169,6 +171,7 @@ function forward!(t::DNASeq, s::RifrafSequence,
                   trim::Bool=false,
                   skew_matches::Bool=false)
     new_shape = (length(s) + 1, length(t) + 1)
+    newbandwidth!(result, s.bandwidth)
     resize!(result, new_shape)
     result[1, 1] = Score(0.0)
     nrows, ncols = size(result)
@@ -232,6 +235,13 @@ function backtrace(moves::BandedArray{Trace})
         i, j = offset_backward(m, i, j)
     end
     return reverse(taken_moves)
+end
+
+function count_errors(arr::BandedArray{Trace},
+                      t::DNASeq, s::DNASeq)
+    moves = backtrace(arr)
+    a, b = moves_to_aligned_seqs(moves, t, s)
+    return sum([1 for (x, y) in zip(a, b) if x != y])
 end
 
 function band_tolerance(Amoves::BandedArray{Trace})

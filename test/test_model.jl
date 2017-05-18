@@ -207,7 +207,7 @@ end
                                for (s, p) in zip(seqs, lps)]
         state = initial_state(consensus, pseqs, DNASeq(), params)
         resample!(state)
-        realign_rescore!(state, false)
+        realign_rescore!(state, RifrafParams())
 
         proposals = alignment_proposals(state.Amoves, state.consensus,
                                         pseqs, do_indels)
@@ -272,7 +272,7 @@ end
     function _test_candidate_scores(consensus, pseqs, expected)
         state = initial_state(consensus, pseqs, DNASeq(), params)
         resample!(state)
-        realign_rescore!(state, false)
+        realign_rescore!(state, RifrafParams())
         cands = get_candidates(state, params)
         @test length(cands) == length(expected)
         if length(cands) == length(expected)
@@ -396,7 +396,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     state = initial_state(consensus, pseqs, DNASeq(), params)
     resample!(state)
-    realign_rescore!(state, false)
+    realign_rescore!(state, RifrafParams())
     probs = estimate_probs(state, false)
     @test probs.sub[1, 2] > 0.9
     @test probs.del[1] < 1e-9
@@ -420,7 +420,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     state = initial_state(consensus, pseqs, DNASeq(), params)
     resample!(state)
-    realign_rescore!(state, false)
+    realign_rescore!(state, RifrafParams())
     probs = estimate_probs(state, false)
     @test maximum(probs.ins[1, :]) < 1e-9
     @test probs.ins[3, 4] > 0.9
@@ -444,7 +444,7 @@ end
                            for (s, p) in zip(seqs, lps)]
     state = initial_state(consensus, pseqs, DNASeq(), params)
     resample!(state)
-    realign_rescore!(state, false)
+    realign_rescore!(state, RifrafParams())
 
     result = alignment_error_probs(length(consensus),
                                    pseqs, state.Amoves)
