@@ -4,6 +4,7 @@ error probabilities.
 """
 type RifrafSequence
     seq::DNASeq
+    error_log_p::Vector{LogProb}
     match_scores::Vector{Score}
     mismatch_scores::Vector{Score}
     ins_scores::Vector{Score}
@@ -68,7 +69,8 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
         end
     end
 
-    return RifrafSequence(seq, match_scores, mismatch_scores,
+    return RifrafSequence(seq, error_log_p,
+                          match_scores, mismatch_scores,
                           ins_scores, del_scores,
                           codon_ins_scores, codon_del_scores,
                           bandwidth)
@@ -82,13 +84,12 @@ end
 
 """Update scores for the given sequence."""
 function RifrafSequence(seq::RifrafSequence, scores::Scores)
-    error_log_p = log10(1.0 - exp10(seq.match_log_p))
-    return RifrafSequence(seq, error_log_p, seq.bandwidth, scores)
+    return RifrafSequence(seq.seq, seq.error_log_p, seq.bandwidth, scores)
 end
 
 """Empty sequence"""
 function RifrafSequence()
-    RifrafSequence(DNASeq(), Score[], Score[], Score[],
+    RifrafSequence(DNASeq(), LogProb[], Score[], Score[], Score[],
                    Score[], Score[], Score[], 0)
 end
 

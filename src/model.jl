@@ -32,6 +32,12 @@ end
     batch_size::Int = 10
     batch_threshold::Float64 = 0.05
     max_iters::Int = 100
+
+    # verbosity level
+    # 0: nothing
+    # 1: print iteration and score
+    # 2: also print step within each iteration
+    # 3: also print full consensus sequence
     verbose::Int = 0
 end
 
@@ -825,10 +831,14 @@ function rescore!(state::RifrafState, use_ref_for_qvs::Bool)
 end
 
 """Do forward and backward alignments, and compute scores"""
-function realign!(state::RifrafState, use_ref_for_qvs::Bool)
+function realign!(state::RifrafState, use_ref_for_qvs::Bool;
+                  verbose::Int=0)
     seqs = state.batch_seqs
     shape = (state.maxlen + 1, state.maxlen + 1)
     if state.realign_As
+        if verbose >= 2
+            println("    realigning As")
+        end
         # add new alignments, in case batch size increased
         for i in (length(state.As) + 1):length(seqs)
             push!(state.As, BandedArray(Score, shape, seqs[i].bandwidth))
@@ -843,6 +853,9 @@ function realign!(state::RifrafState, use_ref_for_qvs::Bool)
         end
     end
     if state.realign_Bs
+        if verbose >= 2
+            println("    realigning Bs")
+        end
         # add new alignments, in case batch size increased
         for i in (length(state.Bs) + 1):length(seqs)
             push!(state.Bs, BandedArray(Score, shape, seqs[i].bandwidth))
@@ -856,8 +869,9 @@ function realign!(state::RifrafState, use_ref_for_qvs::Bool)
     end
 end
 
-function realign_rescore!(state::RifrafState, use_ref_for_qvs::Bool)
-    realign!(state, use_ref_for_qvs)
+function realign_rescore!(state::RifrafState, use_ref_for_qvs::Bool;
+                          verbose::Int=0)
+    realign!(state, use_ref_for_qvs, verbose=verbose)
     rescore!(state, use_ref_for_qvs)
 end
 
@@ -1032,25 +1046,22 @@ function handle_candidates!(candidates::Vector{ScoredProposal},
                             params::RifrafParams)
     old_consensus = state.consensus
     chosen_cands = choose_candidates(candidates, params.min_dist)
-    if params.verbose > 1
-        println(STDERR, "  found $(length(candidates)) candidates")
-    end
-    if params.verbose > 1
-        println(STDERR, "  filtered to $(length(chosen_cands)) candidates")
+    if params.verbose >= 2
+        println(STDERR, "    found $(length(candidates)) candidates; filtered to $(length(chosen_cands))")
     end
     state.consensus = apply_proposals(old_consensus,
                                       Proposal[c.proposal
                                                for c in chosen_cands])
     state.realign_As = true
     state.realign_Bs = false
-    realign_rescore!(state, params.use_ref_for_qvs)
+    realign_rescore!(state, params.use_ref_for_qvs, verbose=params.verbose)
     # detect if a single proposal is better
     # note: this may not always be correct, because score_proposal() is not exact
     if length(chosen_cands) > 1 &&
         (state.score < chosen_cands[1].score ||
          isapprox(state.score, chosen_cands[1].score))
-        if params.verbose > 1
-            println(STDERR, "  rejecting multiple candidates in favor of best")
+        if params.verbose >= 2
+            println(STDERR, "    rejecting multiple candidates in favor of best")
         end
         chosen_cands = ScoredProposal[chosen_cands[1]]
         state.consensus = apply_proposals(old_consensus,
@@ -1068,8 +1079,8 @@ end
 
 function finish_stage!(state::RifrafState,
                        params::RifrafParams)
-    if params.verbose > 1
-        println(STDERR, "  no candidates found. finishing $(state.stage).")
+    if params.verbose >= 2
+        println(STDERR, "    no candidates found in $(state.stage).")
     end
     if state.stage == STAGE_INIT
         if length(state.reference) == 0 || !(STAGE_FRAME in params.enabled_stages)
@@ -1094,8 +1105,8 @@ function finish_stage!(state::RifrafState,
             state.stage = STAGE_REFINE
         elseif (state.ref_scores.insertion == params.min_ref_indel_score ||
                 state.ref_scores.deletion == params.min_ref_indel_score)
-            if params.verbose > 1
-                println(STDERR, "  NOTE: alignment had single indels but indel scores already minimized.")
+            if params.verbose >= 2
+                println(STDERR, "    NOTE: alignment had single indels but indel scores already minimized.")
             end
             state.stage = STAGE_REFINE
         else
@@ -1109,14 +1120,14 @@ function finish_stage!(state::RifrafState,
                                       state.ref_scores.codon_insertion,
                                       state.ref_scores.codon_deletion)
             state.reference = RifrafSequence(state.reference, state.ref_scores)
-            if params.verbose > 1
-                println(STDERR, "  NOTE: alignment to reference had single indels. increasing penalty.")
+            if params.verbose >= 2
+                println(STDERR, "    NOTE: alignment to reference had single indels. increasing penalty.")
             end
         end
     elseif state.stage == STAGE_REFINE
         state.converged = true
     else
-        error("invalid stage: $(state.stage)")
+        error("  invalid stage: $(state.stage)")
     end
 end
 
@@ -1151,10 +1162,18 @@ function resample(data, batch_size)
     end
 end
 
-function resample!(state::RifrafState)
+function resample!(state::RifrafState; verbose::Int=0)
     state.batch_seqs = resample(state.sequences, state.batch_size)
-    if state.batch_size < length(state.sequences)
+    did_sample = state.batch_size < length(state.sequences)
+    if did_sample
         state.realign_As = true
+    end
+    if verbose >= 2
+        if did_sample
+            println("    sampled $(state.batch_size) new sequences")
+        else
+            println("    sampled all sequences")
+        end
     end
 end
 
@@ -1166,12 +1185,16 @@ realign again.
 """
 function check_score!(state::RifrafState, params::RifrafParams,
                       old_score::Float64)
+    if params.verbose >= 2
+        println(STDERR, "    score: $(state.score)")
+    end
+
     if (state.score < old_score &&
         !state.penalties_increased &&
         state.batch_size == length(state.sequences) &&
         state.stage_iterations[Int(state.stage)] > 1)
-        if params.verbose > 1
-            println(STDERR, "  WARNING: not using batches, but score decreased.")
+        if params.verbose >= 2
+            println(STDERR, "    WARNING: not using batches, but score decreased.")
         end
     end
     if ((state.score - old_score) / old_score > params.batch_threshold &&
@@ -1182,12 +1205,15 @@ function check_score!(state::RifrafState, params::RifrafParams,
         # realigning only the new ones
         state.batch_size = min(state.batch_size + state.base_batch_size,
                                length(state.sequences))
-        resample!(state)
+        if params.verbose >= 2
+            println(STDERR, "    NOTE: increased batch size to $(state.batch_size).")
+        end
+        resample!(state, verbose=params.verbose)
         state.realign_As = true
         state.realign_Bs = true
-        realign_rescore!(state, params.use_ref_for_qvs)
-        if params.verbose > 1
-            println(STDERR, "  NOTE: increased batch size to $(batch_size). new score: $(state.score)")
+        realign_rescore!(state, params.use_ref_for_qvs, verbose=params.verbose)
+        if params.verbose >= 2
+            println(STDERR, "    new score: $(state.score)")
         end
     end
 
@@ -1224,27 +1250,33 @@ function rifraf(dnaseqs::Vector{DNASeq},
         state.stage_iterations[Int(state.stage)] += 1
         push!(consensus_stages[Int(state.stage)], state.consensus)
 
-        if params.verbose > 1
-            println(STDERR, "iteration $i : $(state.stage)")
+        if params.verbose >= 1
+            println(STDERR, "iteration $i : $(state.stage) : $(state.score)")
         end
-        if params.verbose > 2
+        if params.verbose >= 3
             println(STDERR, "  consensus: $(state.consensus)")
-        elseif params.verbose > 1
+        elseif params.verbose >= 2
             println(STDERR, "  consensus length: $(length(state.consensus))")
         end
 
         # resample sequences, realign, and possibly adjust batch size
-        resample!(state)
-        state.realign_Bs = true
-        realign_rescore!(state, params.use_ref_for_qvs)
+        if params.verbose >= 2
+            println("  step: resample")
+        end
+        resample!(state; verbose=params.verbose)
+
+        if params.verbose >= 2
+            println("  step: realign and rescore")
+        end
+        realign_rescore!(state, params.use_ref_for_qvs, verbose=params.verbose)
+
+        if params.verbose >= 2
+            println("  step: check score")
+        end
         check_score!(state, params, old_score)
         old_score = state.score
-        if params.verbose > 1
-            println(STDERR, "  score: $(state.score)")
-        end
 
         # get candidate changes to consensus
-        state.realign_As = false
         state.penalties_increased = false
         indel_seeds = get_indel_seeds(state, params)
         candidates = get_candidates(state, params; indel_seeds=indel_seeds)
@@ -1252,8 +1284,14 @@ function rifraf(dnaseqs::Vector{DNASeq},
         # handle candidates
         state.realign_As = true
         if length(candidates) > 0
+            if params.verbose >= 2
+                println(STDERR, "  step: handle candidates")
+            end
             handle_candidates!(candidates, state, params)
         else
+            if params.verbose >= 2
+                println(STDERR, "  step: finish_stage")
+            end
             finish_stage!(state, params)
         end
         if state.converged
@@ -1261,29 +1299,32 @@ function rifraf(dnaseqs::Vector{DNASeq},
         end
     end
     state.stage = STAGE_SCORE
-    if params.verbose > 0
-        println(STDERR, "done. converged: $(state.converged)")
-    end
-
     result = RifrafResult(consensus=state.consensus,
                           params=params,
                           state=state,
                           consensus_stages=consensus_stages)
 
     if STAGE_SCORE in enabled_stages
+        if params.verbose >= 2
+            println(STDERR, "computing consensus quality scores")
+        end
+
         # FIXME: recomputing for all sequences is costly, but using batch
         # is less accurate
         state.realign_As = true
         state.realign_Bs = true
-        realign_rescore!(state, params.use_ref_for_qvs)
+        realign_rescore!(state, params.use_ref_for_qvs, verbose=params.verbose)
         result.error_probs = estimate_probs(state, params.use_ref_for_qvs)
         result.aln_error_probs = alignment_error_probs(length(state.consensus),
                                                      state.batch_seqs, state.Amoves)
     end
+    if params.verbose >= 1
+        println(STDERR, "done. converged: $(state.converged)")
+    end
     return result
 end
 
-function rifraf(sequences::Vector{DNASeq},
+function rifraf(dnaseqs::Vector{DNASeq},
                 phreds::Vector{Vector{Phred}},
                 scores::Scores;
                 kwargs...)
@@ -1291,5 +1332,5 @@ function rifraf(sequences::Vector{DNASeq},
         error("phred score cannot be negative")
     end
     error_log_ps = phred_to_log_p(phreds)
-    return rifraf(sequences, error_log_ps, scores; kwargs...)
+    return rifraf(dnaseqs, error_log_ps, scores; kwargs...)
 end
