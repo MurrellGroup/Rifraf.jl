@@ -815,10 +815,29 @@ function initial_state(consensus::DNASeq,
                        stage=stage)
 end
 
+function use_ref(ref, stage, use_ref_for_qvs)
+    if length(ref) == 0
+        return false
+    end
+    if stage == STAGE_FRAME
+        return true
+    end
+    if stage == STAGE_SCORE && use_ref_for_qvs
+        return true
+    end
+    return false
+end
+
+function rescore!(state::RifrafState, use_ref_for_qvs::Bool)
+    state.score = sum(A[end, end] for A in state.As)
+    if use_ref(state.reference, state.stage, use_ref_for_qvs)
+        state.score += state.A_ref[end, end]
+    end
+end
+
 """Do forward and backward alignments, and compute scores"""
-function realign!(state::RifrafState, use_ref_for_qvs::Bool)
+function realign_and_score!(state::RifrafState, use_ref_for_qvs::Bool)
     seqs = state.batch_seqs
-    reference = state.reference
     seq_padding = state.As[1].padding
     if state.realign_As
         clen = length(state.consensus)
@@ -832,11 +851,8 @@ function realign!(state::RifrafState, use_ref_for_qvs::Bool)
         for (s, A, Amoves) in zip(seqs, state.As, state.Amoves)
             forward_moves!(state.consensus, s, A, Amoves)
         end
-        if (((state.stage == STAGE_FRAME) ||
-             ((state.stage == STAGE_SCORE) &&
-              (use_ref_for_qvs))) &&
-              (length(reference) > 0))
-            forward_moves!(state.consensus, reference,
+        if use_ref(state.reference, state.stage, use_ref_for_qvs)
+            forward_moves!(state.consensus, state.reference,
                            state.A_ref, state.Amoves_ref)
         end
     end
@@ -850,20 +866,11 @@ function realign!(state::RifrafState, use_ref_for_qvs::Bool)
         for (s, B) in zip(seqs, state.Bs)
             backward!(state.consensus, s, B)
         end
-        if (((state.stage == STAGE_FRAME) ||
-             ((state.stage == STAGE_SCORE) &&
-              (use_ref_for_qvs))) &&
-            (length(reference) > 0))
-            backward!(state.consensus, reference, state.B_ref)
+        if use_ref(state.reference, state.stage, use_ref_for_qvs)
+            backward!(state.consensus, state.reference, state.B_ref)
         end
     end
-    state.score = sum(A[end, end] for A in state.As)
-    if (((state.stage == STAGE_FRAME) ||
-         ((state.stage == STAGE_SCORE) &&
-          (use_ref_for_qvs))) &&
-        (length(reference) > 0))
-        state.score += state.A_ref[end, end]
-    end
+    rescore!(state, use_ref_for_qvs)
 end
 
 """convert per-proposal log differences to a per-base error rate"""
@@ -1103,7 +1110,7 @@ function handle_candidates!(candidates::Vector{ScoredProposal},
                                                for c in chosen_cands])
     state.realign_As = true
     state.realign_Bs = false
-    realign!(state, params.use_ref_for_qvs)
+    realign_and_score!(state, params.use_ref_for_qvs)
     # detect if a single proposal is better
     # note: this may not always be correct, because score_proposal() is not exact
     if length(chosen_cands) > 1 &&
@@ -1159,12 +1166,13 @@ function rifraf_kernel!(state::RifrafState, params::RifrafParams)
     end
 end
 
-function resample(sequences, batch_size)
-    if batch_size < length(sequences)
-        indices = rand(1:length(sequences), batch_size)
-        return sequences[indices]
+"""Samble a subset of `data`"""
+function resample(data, batch_size)
+    if batch_size < length(data)
+        indices = rand(1:length(data), batch_size)
+        return data[indices]
     else
-        return sequences
+        return data
     end
 end
 
@@ -1175,11 +1183,17 @@ function resample!(state::RifrafState)
     end
 end
 
+"""Resample and realign.
+
+Check if batch size needs to be increased. If so, increase, resample,
+and realign again.
+
+"""
 function resample_and_realign!(state::RifrafState, params::RifrafParams,
                                old_score::Float64)
     resample!(state)
     state.realign_Bs = true
-    realign!(state, params.use_ref_for_qvs)
+    realign_and_score!(state, params.use_ref_for_qvs)
     if params.verbose > 1
         println(STDERR, "  score: $(state.score) ($(state.stage))")
     end
@@ -1197,10 +1211,12 @@ function resample_and_realign!(state::RifrafState, params::RifrafParams,
         !state.penalties_increased &&
         state.batch_size < length(state.sequences) &&
         state.stage_iterations[Int(state.stage)] > 0)
+        # TODO: could speed this up by adding new sequences and
+        # realigning only the new ones
         state.batch_size = min(state.batch_size + state.base_batch_size,
                                length(state.sequences))
         resample!(state)
-        realign!(state, params.use_ref_for_qvs)
+        realign_and_score!(state, params.use_ref_for_qvs)
         if params.verbose > 1
             println(STDERR, "  increased batch size to $(batch_size). new score: $(state.score)")
         end
@@ -1220,7 +1236,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
                         for (s, p) in zip(dnaseqs, error_log_ps)]
 
     state = initial_state(consensus, sequences, reference, params)
-    realign!(state, params.use_ref_for_qvs)
+    realign_and_score!(state, params.use_ref_for_qvs)
 
     if params.verbose > 1
         println(STDERR, "initial score: $(state.score)")
@@ -1274,7 +1290,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
         # is less accurate
         state.realign_As = true
         state.realign_Bs = true
-        realign!(state, params.use_ref_for_qvs)
+        realign_and_score!(state, params.use_ref_for_qvs)
         result.error_probs = estimate_probs(state, params.use_ref_for_qvs)
         result.aln_error_probs = alignment_error_probs(length(state.consensus),
                                                      state.batch_seqs, state.Amoves)
