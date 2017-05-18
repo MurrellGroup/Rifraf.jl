@@ -15,7 +15,7 @@ import Rifraf.sample_from_template,
        Rifraf.Deletion,
        Rifraf.apply_proposals,
        Rifraf.rbase,
-       Rifraf.forward_moves,
+       Rifraf.smart_forward_moves!,
        Rifraf.backward,
        Rifraf.phred_to_log_p,
        Rifraf.equal_ranges,
@@ -451,4 +451,26 @@ end
     indices = sortperm(result)
     expected = [4, 3, 2, 1]
     @test indices == expected
+end
+
+@testset "smart_forward_moves" begin
+    consensus = DNASeq("AAACCCGGGTTT")
+
+    # make sequence with long insertion
+    seq = DNASeq("AAAGGGTTTCCC")
+    errors = fill(0.3, length(seq))
+    errors[end-3:end] = 0.45
+    err_log_p = log10(errors)
+    bandwidth = 1
+    scores = Scores(ErrorModel(1.0, 10.0, 10.0, 0.0, 0.0))
+    rseq = RifrafSequence(seq, err_log_p, bandwidth, scores)
+
+    # make arrays
+    shape = (length(seq) + 1, length(consensus) + 1)
+    A = BandedArray(Score, shape, bandwidth, default=-Inf)
+    B = BandedArray(Score, shape, bandwidth, default=-Inf)
+    Amoves = BandedArray(Rifraf.Trace, shape, bandwidth)
+    pvalue = 0.1
+    smart_forward_moves!(consensus, rseq, A, B, Amoves, pvalue)
+    @test rseq.bandwidth > bandwidth
 end

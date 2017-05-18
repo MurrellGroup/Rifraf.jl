@@ -21,7 +21,6 @@ macro includeif(test, exp)
     return :()
 end
 
-
 """LogSumExp in base 10.
 
 Borrowed from StatsFuns.jl.
@@ -37,7 +36,6 @@ function logsumexp10{T<:Real}(x::AbstractArray{T})
     end
     log10(s) + u
 end
-
 
 @generated function summax(a, b)
     return quote

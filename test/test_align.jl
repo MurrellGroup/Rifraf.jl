@@ -223,3 +223,20 @@ end
         @test b == expected_b
     end
 end
+
+@testset "align with self" begin
+    # make sequence with long insertion
+    seqstring = "AAAGGGTTTCCC"
+    seq = DNASeq(seqstring)
+    errors = fill(0.1, length(seq))
+    errors[1:6] = 0.3
+    errors[end-3:end] = 0.45
+    err_log_p = log10(errors)
+    bandwidth = 3
+    scores = Scores(ErrorModel(1.0, 10.0, 10.0, 0.0, 0.0))
+    rseq = RifrafSequence(seq, err_log_p, bandwidth, scores)
+
+    a, b = align(seq, rseq)
+    @test a == b
+    @test a == seqstring
+end
