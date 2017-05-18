@@ -28,7 +28,6 @@ import Rifraf.sample_from_template,
        Rifraf.realign_rescore!,
        Rifraf.get_candidates,
        Rifraf.alignment_proposals,
-       Rifraf.surgery_candidates,
        Rifraf.align_moves,
        Rifraf.moves_to_aligned_seqs,
        Rifraf.alignment_error_probs,
@@ -194,49 +193,8 @@ end
     @test expected == proposals
 end
 
-@testset "surgery helpers" begin
-    @testset "surrounding insertions" begin
-        moves = [Rifraf.TRACE_INSERT,
-                 Rifraf.TRACE_MATCH,
-                 Rifraf.TRACE_INSERT]
-        scores = Scores(ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0))
-
-        # Will want to make the base with higher error prob the insertion
-        # so should pick 1st
-        seq = RifrafSequence(DNASeq("TAT"), LogProb[-1.0, -2.0, -3.0], 10, scores)
-        aln_idx = 2
-        seq_idx = 2
-        result = Rifraf.best_surrounding_ins_bases(moves, seq, aln_idx, seq_idx)
-        @test length(result) == 1
-        @test first(keys(result)) == DNA_T
-        @test result[DNA_T] == (seq.match_scores[3], seq.ins_scores[3])
-    end
-
-    @testset "surrounding deletions" begin
-        moves = [Rifraf.TRACE_MATCH,
-                 Rifraf.TRACE_DELETE,
-                 Rifraf.TRACE_MATCH,
-                 Rifraf.TRACE_DELETE,
-                 Rifraf.TRACE_MATCH]
-        scores = Scores(ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0))
-
-        # gap will want to move towards base with higher log error prob (-1.0)
-        consensus = DNASeq("ATGTA")
-        seq = RifrafSequence(DNASeq("ATA"), LogProb[-2.0, -10.0, -1.0], 10, scores)
-        aln_idx = 3
-        cons_idx = 3
-        seq_idx = 2
-        result = Rifraf.surrounding_del_bases(moves, consensus, seq, aln_idx, cons_idx, seq_idx)
-        @test length(result) == 1
-        @test first(keys(result)) == DNA_T
-        @test result[DNA_T] == (seq.del_scores[2], seq.del_scores[3])
-    end
-end
-
-@testset "fast proposals" begin
-    function _test_fast_proposals(consensus, seqs, lps, expected;
-                                  do_alignment::Bool=true,
-                                  do_surgery::Bool=true,
+@testset "alignment proposals" begin
+    function _test_alignment_proposals(consensus, seqs, lps, expected;
                                   do_indels::Bool=true)
         params = RifrafParams(bandwidth=6)
 
@@ -251,16 +209,9 @@ end
         resample!(state)
         realign_rescore!(state, false)
 
-        if do_alignment
-            proposals = alignment_proposals(state.Amoves, state.consensus,
-                                            pseqs, do_indels)
-            @test length(symdiff(Set(proposals), Set(expected))) == 0
-        end
-        if do_surgery
-            cands = surgery_candidates(state, do_indels)
-            proposals = Proposal[c.proposal for c in cands]
-            @test length(symdiff(Set(proposals), Set(expected))) == 0
-        end
+        proposals = alignment_proposals(state.Amoves, state.consensus,
+                                        pseqs, do_indels)
+        @test length(symdiff(Set(proposals), Set(expected))) == 0
     end
 
     @testset "fast proposals 1" begin
@@ -271,7 +222,7 @@ end
         expected = [Deletion(1),
                     Insertion(3, DNA_T),
                     Substitution(5, DNA_C)]
-        _test_fast_proposals(consensus, seqs, [], expected)
+        _test_alignment_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals 2" begin
@@ -280,7 +231,7 @@ end
                 DNASeq("AA"),
                 DNASeq("AAG")]
         expected = [Insertion(2, DNA_G)]
-        _test_fast_proposals(consensus, seqs, [], expected)
+        _test_alignment_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals 3" begin
@@ -289,7 +240,7 @@ end
                 DNASeq("AA"),
                 DNASeq("GAA")]
         expected = [Insertion(0, DNA_G)]
-        _test_fast_proposals(consensus, seqs, [], expected)
+        _test_alignment_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals 4" begin
@@ -298,7 +249,7 @@ end
                 DNASeq("AA"),
                 DNASeq("AGA")]
         expected = [Insertion(1, DNA_G)]
-        _test_fast_proposals(consensus, seqs, [], expected)
+        _test_alignment_proposals(consensus, seqs, [], expected)
     end
 
     @testset "fast proposals - highly confident base" begin
@@ -310,105 +261,13 @@ end
                                    [-3.0, -5.0],
                                    [-3.0, -50]]
         expected = [Insertion(0, DNA_G)]
-        _test_fast_proposals(consensus, seqs, lps, expected)
+        _test_alignment_proposals(consensus, seqs, lps, expected)
     end
-    @testset "push deletions" begin
-        # test that deletions get pushed
-        consensus = DNASeq("CCGTAAAC")
-        seqs = [DNASeq("CGTAAAC"), DNASeq("CCGTAAAC"), DNASeq("CGTAAAC")]
-        lps = Vector{LogProb}[[-1.0,-0.6,-1.1,-0.5,-0.5,-1.2,-2.0],
-                                   [-1.0,-1.0,-1.6,-2.2,-0.8,-0.5,-1.2,-1.8],
-                                   [-1.0,-1.8,-1.0,-0.5,-0.6,-1.0,-1.4]]
-        expected = [Deletion(2)]
-        _test_fast_proposals(consensus, seqs, lps, expected,
-                             do_alignment=false, do_surgery=true)
-    end
-    @testset "push deletions - simple" begin
-        # test that deletions get pushed to end
-        consensus = DNASeq("CCC")
-        seqs = [DNASeq("CC")]
-        expected = [Deletion(3)]
-        _test_fast_proposals(consensus, seqs, [], expected,
-                             do_alignment=false, do_surgery=true)
-    end
-
-    @testset "push insertions" begin
-        # test that insertions get pushed to end
-        consensus = DNASeq("TT")
-        seqs = [DNASeq("TTT"),
-                DNASeq("CTT")]
-        expected = [Insertion(0, DNA_C),
-                    Insertion(2, DNA_T)]
-        _test_fast_proposals(consensus, seqs, [], expected,
-                             do_alignment=false, do_surgery=true)
-    end
-
-    @testset "push subs" begin
-        # test that subs get pushed backwards
-        consensus = DNASeq("ATG")
-        seqs = [DNASeq("ATG"), DNASeq("CATG"), DNASeq("CTG")]
-        lps = [[-0.8, -1.7, -0.8],
-               [-0.7, -0.5, -1.2, -1.0],
-               [-0.9, -1.9, -1.0]]
-        expected = [Substitution(1, DNA_C)]
-        _test_fast_proposals(consensus, seqs, lps, expected,
-                             do_alignment=false, do_surgery=true,
-                             do_indels=false)
-    end
-
-    @testset "test fast proposals converged" begin
-        consensus = DNASeq("GTTCGGCTC")
-        seqs = [DNASeq("GTTCGGCTTC"),
-                DNASeq("GTTCGGCTC"),
-                DNASeq("GTTCCTG")]
-        phreds = Vector{Phred}[[28,16,13,21,15,13,13,12,20,16],
-                               [21,16,9,17,6,15,6,16,12],
-                               [26,14,5,24,8,12,7]]
-        lps = map(phred_to_log_p, phreds)
-        expected = []
-        _test_fast_proposals(consensus, seqs, lps, expected,
-                             do_alignment=false, do_surgery=true)
-
-    end
-
-@testset "test fast proposals converged 2" begin
-    consensus = DNASeq("CAGTGCCGG")
-    seqs = [DNASeq("CATGCCGG"),
-            DNASeq("CATGCCCTGG"),
-            DNASeq("CAGGGCCGG")]
-    phreds = Vector{Phred}[[13,7,12,13,7,11,6,14],
-                           [16,14,14,20,5,5,15,12,10,20],
-                           [23,9,7,6,9,10,10,10,23]]
-    lps = map(phred_to_log_p, phreds)
-    expected = []
-    # no indels, because this happened during refinement
-    _test_fast_proposals(consensus, seqs, lps, expected,
-                         do_alignment=false, do_surgery=true,
-                         do_indels=false)
-end
-@testset "test fast proposals insertion/mismatch swap" begin
-    # inserting 'T' after position 5 should swap with G/T
-    # mismatch in second sequence
-    consensus = DNASeq("GGAAGTCC")
-    seqs = [DNASeq("GGAAGTCC"),
-            DNASeq("GGAATTCC"),
-            DNASeq("GGAAGTCTACC")]
-    phreds = Vector{Phred}[[18,9,12,14,11,11,15,14],
-                           [25,10,6,8,12,11,19,13],
-                           [24,12,9,15,8,8,8,8,8,23,19]]
-    lps = map(phred_to_log_p, phreds)
-    expected = [Substitution(5, DNA_T),
-                Insertion(6, DNA_T)]
-    _test_fast_proposals(consensus, seqs, lps, expected,
-                         do_alignment=false, do_surgery=true,
-                         do_indels=true)
-end
 end
 
 @testset "candidate scores" begin
     params = RifrafParams(bandwidth=9,
-                          do_alignment_proposals=true,
-                          do_surgery_proposals=false)
+                          do_alignment_proposals=true)
 
     function _test_candidate_scores(consensus, pseqs, expected)
         state = initial_state(consensus, pseqs, DNASeq(), params)
@@ -491,19 +350,13 @@ end
     @testset "full model" begin
         for (use_ref,
              do_alignment_proposals,
-             do_surgery_proposals,
              seed_indels,
              indel_correction_only,
              batch_size) in product([true, false],
                                     [true, false],
                                     [true, false],
                                     [true, false],
-                                    [true, false],
                                     [3, 6])
-
-            if do_alignment_proposals && do_surgery_proposals
-                continue
-            end
 
             (reference, template, template_error, reads, actual, phreds, sbools,
              tbools) = sample(n_seqs, len; sample_params...)
@@ -513,7 +366,6 @@ end
 
             params = RifrafParams(ref_scores=ref_scores,
                                   do_alignment_proposals=do_alignment_proposals,
-                                  do_surgery_proposals=do_surgery_proposals,
                                   seed_indels=seed_indels,
                                   indel_correction_only=indel_correction_only,
                                   batch_size=batch_size)
