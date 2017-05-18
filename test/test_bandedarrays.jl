@@ -59,7 +59,7 @@ using Rifraf
     end
 
     @testset "flip" begin
-        m = BandedArray(Int, (5, 3), 1, padding=5)
+        m = BandedArray(Int, (5, 3), 1, row_padding=5, col_padding=5)
         m[1, 1] = 1
         flip!(m)
         @test m[5, 3] == 1
@@ -165,21 +165,21 @@ using Rifraf
     end
 
     @testset "resize up within padding" begin
-        m = BandedArray(Int, (3, 3), 1, padding=10)
+        m = BandedArray(Int, (3, 3), 1, row_padding=10, col_padding=10)
         old = m.data
         resize!(m, (5, 5))
         @test m.data == old
     end
 
     @testset "resize down" begin
-        m = BandedArray(Int, (5, 5), 1, padding=0)
+        m = BandedArray(Int, (5, 5), 1)
         old = m.data
         resize!(m, (3, 3))
         @test m.data == old
     end
 
     @testset "resize with reallocate" begin
-        m = BandedArray(Int, (3, 3), 1, padding=5)
+        m = BandedArray(Int, (3, 3), 1, row_padding=5, col_padding=5)
         @test Rifraf.row_range(m, 1) == (1, 2)
         old = m.data
         resize!(m, (5, 10))
@@ -188,6 +188,14 @@ using Rifraf
         @test Rifraf.row_range(m, 3) == (1, 4)
         @test Rifraf.row_range(m, 5) == (1, 5)
         @test Rifraf.row_range(m, 10) == (4, 5)
+    end
+
+    @testset "resize columns" begin
+        m = BandedArray(Int, (3, 3), 1, row_padding=5, col_padding=10)
+        @test Rifraf.row_range(m, 1) == (1, 2)
+        old = m.data
+        resize!(m, (5, 10))
+        @test m.data == old
     end
 
     @testset "test get and set" begin

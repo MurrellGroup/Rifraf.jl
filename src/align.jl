@@ -153,16 +153,11 @@ end
 
 """Does backtracing to find best alignment."""
 function forward_moves(t::DNASeq, s::RifrafSequence;
-                       padding::Int=0,
                        trim::Bool=false,
                        skew_matches::Bool=false)
     result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
-                         padding=padding,
-                         initialize=false,
-                         default=-Inf)
-    moves = BandedArray(Trace, size(result), s.bandwidth,
-                        padding=padding,
-                        initialize=false)
+                         default=-Inf, initialize=false)
+    moves = BandedArray(Trace, size(result), s.bandwidth, initialize=false)
     forward_moves!(t, s, result, moves,
                    trim=trim, skew_matches=skew_matches)
     return result, moves
@@ -185,14 +180,11 @@ F[i, j] is the log probability of aligning s[1:i-1] to t[1:j-1].
 
 """
 function forward(t::DNASeq, s::RifrafSequence;
-                 padding::Int=0,
                  doreverse::Bool=false,
                  trim::Bool=false,
                  skew_matches::Bool=false)
     result = BandedArray(Score, (length(s) + 1, length(t) + 1), s.bandwidth;
-                         padding=padding,
-                         default=-Inf,
-                         initialize=false)
+                         initialize=false, default=-Inf)
     forward!(t, s, result; doreverse=doreverse, trim=trim,
              skew_matches=skew_matches)
     return result
@@ -317,22 +309,18 @@ function moves_to_indices(moves::Vector{Trace},
 end
 
 function align_moves(t::DNASeq, s::RifrafSequence;
-                     padding::Int=0,
                      trim::Bool=false,
                      skew_matches::Bool=false)
     A, Amoves = forward_moves(t, s;
-                              padding=padding,
                               trim=trim,
                               skew_matches=skew_matches)
     return backtrace(Amoves)
 end
 
 function align(t::DNASeq, s::RifrafSequence;
-               padding::Int=0,
                trim::Bool=false,
                skew_matches::Bool=false)
     moves = align_moves(t, s;
-                        padding=padding,
                         trim=trim,
                         skew_matches=skew_matches)
     return moves_to_aligned_seqs(moves, t, s.seq)
@@ -341,11 +329,9 @@ end
 function align(t::DNASeq, s::DNASeq, phreds::Vector{Phred},
                scores::Scores,
                bandwidth::Int;
-               padding::Int=0,
                trim::Bool=false,
                skew_matches::Bool=false)
     moves = align_moves(t, RifrafSequence(s, phreds, bandwidth, scores),
-                        padding=padding,
                         trim=trim, skew_matches=skew_matches)
     return moves_to_aligned_seqs(moves, t, s)
 end
@@ -353,11 +339,9 @@ end
 function align_score(t::DNASeq, s::DNASeq, phreds::Vector{Phred},
                      scores::Scores,
                      bandwidth::Int;
-                     padding::Int=0,
                      trim::Bool=false,
                      skew_matches::Bool=false)
     A, Amoves = forward_moves(t, RifrafSequence(s, phreds, bandwidth, scores);
-                              padding=padding,
                               trim=trim,
                               skew_matches=skew_matches)
     moves = backtrace(Amoves)

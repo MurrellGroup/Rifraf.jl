@@ -14,20 +14,21 @@ type BandedArray{T} <: AbstractArray{T,2}
     lower::Int
     upper::Int
     # used for initial creation and resizing
-    padding::Int  # set by user
+    row_padding::Int  # set by user
+    col_padding::Int  # set by user
+    default::T
     initialize::Bool
 
-    default::T
-
     function BandedArray(data::Array{T, 2}, shape::Tuple{Int, Int},
-                         bandwidth::Int, padding::Int,
-                         initialize::Bool, default::T)
+                         bandwidth::Int,
+                         row_padding::Int, col_padding::Int,
+                         default::T, initialize::Bool)
         if bandwidth < 1
             error("bandwidth must be positive")
         end
         nrows, ncols = shape
         drows = ndatarows(nrows, ncols, bandwidth)
-        if size(data) != (drows + padding, ncols + padding)
+        if size(data) != (drows + row_padding, ncols + col_padding)
             error("data is wrong shape")
         end
         h_offset = max(ncols - nrows, 0)
@@ -35,7 +36,8 @@ type BandedArray{T} <: AbstractArray{T,2}
         lower, upper = bandlimits(nrows, ncols, bandwidth)
         return new(data, nrows, ncols, bandwidth,
                    h_offset, v_offset,
-                   lower, upper, padding, initialize, default)
+                   lower, upper, row_padding, col_padding,
+                   default, initialize)
     end
 end
 
@@ -51,27 +53,28 @@ function bandlimits(nrows, ncols, bandwidth)
 end
 
 function BandedArray(T::Type, shape::Tuple{Int, Int}, bandwidth::Int;
-                     padding::Int=0, initialize::Bool=true, default=zero(T))
+                     row_padding::Int=0, col_padding::Int=0,
+                     default=zero(T), initialize::Bool=true)
     nrows, ncols = shape
-    data = allocate_data(T, nrows, ncols, bandwidth, padding, initialize)
-    return BandedArray{T}(data, shape, bandwidth, padding, initialize, default)
+    data = allocate_data(T, nrows, ncols, bandwidth, row_padding, col_padding, initialize)
+    return BandedArray{T}(data, shape, bandwidth, row_padding, col_padding, default, initialize)
 end
 
-function allocate_data(T::Type,
-                       nrows::Int, ncols::Int, bandwidth::Int,
-                       padding::Int, initialize::Bool)
+function allocate_data(T::Type, nrows::Int, ncols::Int, bandwidth::Int,
+                       row_padding::Int, col_padding::Int, initialize::Bool)
     ndrows = ndatarows(nrows, ncols, bandwidth)
     if initialize
-        data = zeros(T, ndrows + padding, ncols + padding)
+        data = zeros(T, ndrows + row_padding, ncols + col_padding)
     else
-        data = Array(T, ndrows + padding, ncols + padding)
+        data = Array(T, ndrows + row_padding, ncols + col_padding)
     end
     return data
 end
 
 function reallocate!{T}(A::BandedArray{T})
     # TODO: copy if requested
-    A.data = allocate_data(T, A.nrows, A.ncols, A.bandwidth, A.padding, A.initialize)
+    A.data = allocate_data(T, A.nrows, A.ncols, A.bandwidth,
+                           A.row_padding, A.col_padding, A.initialize)
 end
 
 function Base.resize!{T}(A::BandedArray{T}, shape::Tuple{Int, Int})

@@ -82,7 +82,7 @@ end
 
 """Update scores for the given sequence."""
 function RifrafSequence(seq::RifrafSequence, scores::Scores)
-    error_log_p = loq10(1.0 - exp10(seq.match_log_p))
+    error_log_p = log10(1.0 - exp10(seq.match_log_p))
     return RifrafSequence(seq, error_log_p, seq.bandwidth, scores)
 end
 
