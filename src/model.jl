@@ -15,9 +15,9 @@ immutable EstimatedProbs
 end
 
 @with_kw type RifrafParams
-    ref_scores::Scores = Scores(ErrorModel(10.0, 1e-3, 1e-3, 1.0, 1.0))
-    ref_indel_penalty::Score = -3.0
-    min_ref_indel_score::Score = -15.0
+    ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))
+    ref_indel_mult::Score = 3.0
+    min_ref_indel_score::Score = -1.0 * 3^5
     do_init::Bool = true
     do_frame::Bool = true
     do_refine::Bool = true
@@ -413,9 +413,9 @@ function has_single_indels(consensus::DNASeq,
     return result
 end
 
-function single_indel_proposals(reference::DNASeq,
-                                consensus::RifrafSequence)
-    moves = align_moves(reference, consensus,
+function single_indel_proposals(consensus::DNASeq,
+                                reference::RifrafSequence)
+    moves = align_moves(consensus, reference,
                         skew_matches=true)
     results = Proposal[]
     cons_idx = 0
@@ -425,15 +425,15 @@ function single_indel_proposals(reference::DNASeq,
             cons_idx += 1
             ref_idx += 1
         elseif move == TRACE_INSERT
+            ref_idx += 1
+            push!(results, Insertion(cons_idx, reference.seq[ref_idx]))
+        elseif move == TRACE_DELETE
             cons_idx += 1
             push!(results, Deletion(cons_idx))
-        elseif move == TRACE_DELETE
-            ref_idx += 1
-            push!(results, Insertion(cons_idx, reference[ref_idx]))
         elseif move == TRACE_CODON_INSERT
-            cons_idx += 3
-        elseif move == TRACE_CODON_DELETE
             ref_idx += 3
+        elseif move == TRACE_CODON_DELETE
+            cons_idx += 3
         end
     end
     return results
@@ -727,8 +727,8 @@ function check_params(scores, reference, params)
     end
 
     if length(reference) > 0
-        if params.ref_indel_penalty >= 0.0
-            error("ref_indel_penalty must be < 0.0")
+        if params.ref_indel_mult <= 0.0
+            error("ref_indel_mult must be > 0.0")
         end
         if params.min_ref_indel_score >= 0.0
             error("min_ref_indel_score must be < 0.0")
@@ -839,9 +839,9 @@ function finish_stage!(state::RifrafState,
             state.penalties_increased = true
             # TODO: this is not probabilistically correct
             state.ref_scores = Scores(state.ref_scores.mismatch,
-                                      max(state.ref_scores.insertion + params.ref_indel_penalty,
+                                      max(state.ref_scores.insertion * params.ref_indel_mult,
                                           params.min_ref_indel_score),
-                                      max(state.ref_scores.deletion + params.ref_indel_penalty,
+                                      max(state.ref_scores.deletion * params.ref_indel_mult,
                                           params.min_ref_indel_score),
                                       state.ref_scores.codon_insertion,
                                       state.ref_scores.codon_deletion)
@@ -855,27 +855,6 @@ function finish_stage!(state::RifrafState,
     else
         error("  invalid stage: $(state.stage)")
     end
-end
-
-function get_indel_seeds(state::RifrafState, params::RifrafParams)
-    indel_proposals = Proposal[]
-    if state.stage == STAGE_FRAME && params.seed_indels
-        cons_errors = alignment_error_probs(length(state.consensus),
-                                            state.batch_seqs, state.Amoves)
-        # ensure none are 0.0
-        cons_errors = [max(p, 1e-10) for p in cons_errors]
-        # flip insertions and deletions
-        cons_scores = Scores(params.ref_scores.mismatch,
-                             params.ref_scores.deletion,
-                             params.ref_scores.insertion,
-                             params.ref_scores.codon_deletion,
-                             params.ref_scores.codon_insertion)
-
-        cons = RifrafSequence(state.consensus, log10(cons_errors),
-                                      params.bandwidth, cons_scores)
-        indel_proposals = single_indel_proposals(state.reference.seq, cons)
-    end
-    return indel_proposals
 end
 
 """Samble a subset of `data`"""
@@ -1064,7 +1043,12 @@ function rifraf(dnaseqs::Vector{DNASeq},
 
         # get candidate changes to consensus
         state.penalties_increased = false
-        indel_seeds = get_indel_seeds(state, params)
+
+        indel_seeds = if state.stage == STAGE_FRAME && params.seed_indels
+            single_indel_proposals(state.consensus, state.reference)
+        else
+            Proposal[]
+        end
         candidates = get_candidates(state, params; indel_seeds=indel_seeds)
 
         # handle candidates
@@ -1085,7 +1069,9 @@ function rifraf(dnaseqs::Vector{DNASeq},
         end
 
         # update batch randomness
-        if !params.batch_fixed || state.stage == STAGE_REFINE
+        if (!params.batch_fixed ||
+            (state.stage == STAGE_REFINE &&
+             state.stage_iterations[Int(STAGE_REFINE)] > 1))
             state.batch_randomness *= params.batch_mult
             if params.verbose >= 2
                 println(STDERR, "  batch randomness decreased to $(state.batch_randomness)")
@@ -1106,6 +1092,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
 
         # FIXME: recomputing for all sequences is costly, but using batch
         # is less accurate
+        # possibly use top n sequences here
         state.realign_As = true
         state.realign_Bs = true
         realign_rescore!(state, params)
