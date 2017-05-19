@@ -15,7 +15,7 @@ immutable EstimatedProbs
 end
 
 @with_kw type RifrafParams
-    ref_scores::Scores = Scores(0.0, 0.0, 0.0, 0.0, 0.0)
+    ref_scores::Scores = Scores(ErrorModel(10.0, 1e-3, 1e-3, 1.0, 1.0))
     ref_indel_penalty::Score = -3.0
     min_ref_indel_score::Score = -15.0
     do_init::Bool = true
@@ -29,9 +29,11 @@ end
     bandwidth::Int = (3 * CODON_LENGTH)
     bandwidth_pvalue::Float64 = 0.1
     min_dist::Int = (5 * CODON_LENGTH)
-    initial_run::Int = 5
+    batch_fixed::Bool = true
+    batch_fixed_size::Int = 5
     batch_size::Int = 10
-    batch_randomness::Float64 = 0.5
+    batch_randomness::Float64 = 0.9
+    batch_mult::Float64 = 0.7
     batch_threshold::Float64 = 0.1
     max_iters::Int = 100
 
@@ -49,8 +51,10 @@ end
     ref_scores::Scores
     ref_error_rate::Float64 = -Inf
     reference::RifrafSequence
+    batch_fixed_size::Int
     batch_size::Int
     base_batch_size::Int
+    batch_randomness::Float64 = 0.9
     sequences::Vector{RifrafSequence}
     batch_seqs::Vector{RifrafSequence} = RifrafSequence[]
     maxlen::Int
@@ -440,10 +444,9 @@ function initial_state(consensus::DNASeq,
                        reference::DNASeq,
                        params::RifrafParams)
     # batch size calculations
-    batch_size = params.batch_size
-    if batch_size < 0 || batch_size > length(sequences)
-        batch_size = length(sequences)
-    end
+    batch_size = min(max(params.batch_size, 0), length(sequences))
+    batch_fixed_size = min(max(params.batch_fixed_size, 0),
+                           length(sequences))
     base_batch_size = batch_size
 
     if length(consensus) == 0
@@ -456,17 +459,9 @@ function initial_state(consensus::DNASeq,
     rlen = length(reference)
 
     # initialize sequence banded arrays
-    # use longest sequence to ensure data reallocation is rarely necessary
-    seq_shape = (maxlen + 1, maxlen + 1)
-    As = BandedArray{Score}[BandedArray(Score, seq_shape, params.bandwidth,
-                                        default=-Inf)
-                            for _ in 1:batch_size]
-    Bs = BandedArray{Score}[BandedArray(Score, seq_shape, params.bandwidth,
-                                        default=-Inf)
-                            for _ in 1:batch_size]
-    Amoves = BandedArray{Trace}[BandedArray(Trace, seq_shape, params.bandwidth)
-                                for _ in 1:batch_size]
-
+    As = BandedArray{Score}[]
+    Bs = BandedArray{Score}[]
+    Amoves = BandedArray{Trace}[]
 
     # initialize reference alignment arrays
     ref_shape = (maxlen + 1, rlen + 1)
@@ -487,6 +482,7 @@ function initial_state(consensus::DNASeq,
     return RifrafState(consensus=consensus,
                        reference=refseq,
                        ref_scores=params.ref_scores,
+                       batch_fixed_size=batch_fixed_size,
                        batch_size=batch_size,
                        base_batch_size=base_batch_size,
                        maxlen=maxlen,
@@ -766,6 +762,9 @@ function check_params(scores, reference, params)
     if params.batch_randomness < 0.0 || params.batch_randomness > 1.0
         error("batch_randomness must be between 0.0 and 1.0")
     end
+    if params.batch_mult < 0.0 || params.batch_mult > 1.0
+        error("batch_mult must be between 0.0 and 1.0")
+    end
 end
 
 function handle_candidates!(candidates::Vector{ScoredProposal},
@@ -880,10 +879,10 @@ function get_indel_seeds(state::RifrafState, params::RifrafParams)
 end
 
 """Samble a subset of `data`"""
-function resample(data, batch_size, wv)
+function resample(data, n, wv)
     # TODO: optionally softmax the weight vector
-    if batch_size < length(data)
-        return StatsBase.sample(data, wv, batch_size, replace=false)
+    if n < length(data)
+        return StatsBase.sample(data, wv, n, replace=false)
     else
         return data
     end
@@ -923,8 +922,18 @@ end
 function resample!(state::RifrafState, params::RifrafParams;
                    verbose::Int=0)
     err_weights = [s.est_n_errors for s in state.sequences]
+    if ((state.stage == STAGE_INIT || state.stage == STAGE_FRAME) &&
+        params.batch_fixed)
+        # always return the top `n`
+        indices = sortperm(err_weights)[1:state.batch_fixed_size]
+        state.batch_seqs = state.sequences[indices]
+        if verbose >= 2
+            println(STDERR, "    kept fixed batch")
+        end
+        return
+    end
     wv = WeightVec(reweight(1.0 - err_weights ./ sum(err_weights),
-                            state.batch_size, params.batch_randomness))
+                            state.batch_size, state.batch_randomness))
     state.batch_seqs = resample(state.sequences, state.batch_size, wv)
     did_sample = state.batch_size < length(state.sequences)
     if did_sample
@@ -1073,6 +1082,14 @@ function rifraf(dnaseqs::Vector{DNASeq},
         end
         if state.converged
             break
+        end
+
+        # update batch randomness
+        if !params.batch_fixed || state.stage == STAGE_REFINE
+            state.batch_randomness *= params.batch_mult
+            if params.verbose >= 2
+                println(STDERR, "  batch randomness decreased to $(state.batch_randomness)")
+            end
         end
     end
     state.stage = STAGE_SCORE
