@@ -18,19 +18,21 @@ end
     ref_scores::Scores = Scores(0.0, 0.0, 0.0, 0.0, 0.0)
     ref_indel_penalty::Score = -3.0
     min_ref_indel_score::Score = -15.0
-    enabled_stages::Vector{Stage} = [STAGE_INIT,
-                                     STAGE_FRAME,
-                                     STAGE_REFINE,
-                                     STAGE_SCORE]
+    do_init::Bool = true
+    do_frame::Bool = true
+    do_refine::Bool = true
+    do_score::Bool = true
     do_alignment_proposals::Bool = true
     seed_indels::Bool = true
     indel_correction_only::Bool = true
     use_ref_for_qvs::Bool = false
-    bandwidth::Int = (3*CODON_LENGTH)
-    bandwidth_pvalue::Float64 = 0.01
+    bandwidth::Int = (3 * CODON_LENGTH)
+    bandwidth_pvalue::Float64 = 0.1
     min_dist::Int = (5 * CODON_LENGTH)
+    initial_run::Int = 5
     batch_size::Int = 10
-    batch_threshold::Float64 = 0.05
+    batch_randomness::Float64 = 0.5
+    batch_threshold::Float64 = 0.1
     max_iters::Int = 100
 
     # verbosity level
@@ -482,7 +484,6 @@ function initial_state(consensus::DNASeq,
     refseq = RifrafSequence(reference, ref_error_log_p,
                             params.bandwidth, params.ref_scores)
 
-    stage = minimum(params.enabled_stages)
     return RifrafState(consensus=consensus,
                        reference=refseq,
                        ref_scores=params.ref_scores,
@@ -491,8 +492,7 @@ function initial_state(consensus::DNASeq,
                        maxlen=maxlen,
                        sequences=sequences,
                        As=As, Bs=Bs, Amoves=Amoves,
-                       A_ref=A_ref, B_ref=B_ref, Amoves_ref=Amoves_ref,
-                       stage=stage)
+                       A_ref=A_ref, B_ref=B_ref, Amoves_ref=Amoves_ref)
 end
 
 function use_ref(ref, stage, use_ref_for_qvs)
@@ -720,7 +720,7 @@ function alignment_error_probs(tlen::Int,
     return vec(probs)
 end
 
-function check_args(scores, reference, params)
+function check_params(scores, reference, params)
     if (scores.mismatch >= 0.0 || scores.mismatch == -Inf ||
         scores.insertion >= 0.0 || scores.insertion == -Inf ||
         scores.deletion >= 0.0 || scores.deletion == -Inf)
@@ -757,11 +757,14 @@ function check_args(scores, reference, params)
         end
     end
 
-    if length(params.enabled_stages) == 0
+    if !any([params.do_init, params.do_frame, params.do_refine, params.do_score])
         error("no stages enabled")
     end
     if params.max_iters < 1
         error("invalid max iters: $(params.max_iters)")
+    end
+    if params.batch_randomness < 0.0 || params.batch_randomness > 1.0
+        error("batch_randomness must be between 0.0 and 1.0")
     end
 end
 
@@ -807,7 +810,7 @@ function finish_stage!(state::RifrafState,
         println(STDERR, "    no candidates found in $(state.stage).")
     end
     if state.stage == STAGE_INIT
-        if length(state.reference) == 0 || !(STAGE_FRAME in params.enabled_stages)
+        if length(state.reference) == 0 || !(params.do_frame)
             state.converged = true
         else
             state.stage = STAGE_FRAME
@@ -877,17 +880,52 @@ function get_indel_seeds(state::RifrafState, params::RifrafParams)
 end
 
 """Samble a subset of `data`"""
-function resample(data, batch_size)
+function resample(data, batch_size, wv)
+    # TODO: optionally softmax the weight vector
     if batch_size < length(data)
-        indices = rand(1:length(data), batch_size)
-        return data[indices]
+        return StatsBase.sample(data, wv, batch_size, replace=false)
     else
         return data
     end
 end
 
-function resample!(state::RifrafState; verbose::Int=0)
-    state.batch_seqs = resample(state.sequences, state.batch_size)
+"""Reweight weight vector to increase or decrease the weights of the
+top `n` values.
+
+`randomness` can be between 0 and 1
+
+0: top n get picked
+0.5: weight according to estimated errors
+1: completely random
+
+"""
+function reweight(wv, n, randomness)
+    # TODO: there is probably a one liner that does all this
+    if randomness < 0.0 || randomness > 1.0
+        error("randomness must be between 0.0 and 1.0")
+    end
+    wv = wv ./ sum(wv)
+    indices = reverse(sortperm(wv))[1:n]
+    endpoint = wv
+    weight = 0.0
+    if randomness > 0.5
+        weight = (randomness - 0.5) * 2.0
+        endpoint = fill(1.0 / length(wv), length(wv))
+    elseif randomness < 0.5
+        weight = 1.0 - randomness * 2.0
+        endpoint = zeros(length(wv))
+        endpoint[indices] = 1.0 / n
+    end
+    result = weight * endpoint + (1.0 - weight) * wv
+    return result
+end
+
+function resample!(state::RifrafState, params::RifrafParams;
+                   verbose::Int=0)
+    err_weights = [s.est_n_errors for s in state.sequences]
+    wv = WeightVec(reweight(1.0 - err_weights ./ sum(err_weights),
+                            state.batch_size, params.batch_randomness))
+    state.batch_seqs = resample(state.sequences, state.batch_size, wv)
     did_sample = state.batch_size < length(state.sequences)
     if did_sample
         state.realign_As = true
@@ -932,7 +970,7 @@ function check_score!(state::RifrafState, params::RifrafParams,
         if params.verbose >= 2
             println(STDERR, "    NOTE: increased batch size to $(state.batch_size).")
         end
-        resample!(state, verbose=params.verbose)
+        resample!(state, params, verbose=params.verbose)
         state.realign_As = true
         state.realign_Bs = true
         realign_rescore!(state, params)
@@ -949,12 +987,27 @@ function rifraf(dnaseqs::Vector{DNASeq},
                 consensus::DNASeq=DNASeq(),
                 reference::DNASeq=DNASeq(),
                 params::RifrafParams=RifrafParams())
-    check_args(scores, reference, params)
-    enabled_stages = Set(params.enabled_stages)
+    check_params(scores, reference, params)
+
     sequences = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
                         for (s, p) in zip(dnaseqs, error_log_ps)]
 
     state = initial_state(consensus, sequences, reference, params)
+
+    # TODO: this is ugly
+    enabled_stages = Set{Stage}()
+    if params.do_init
+        push!(enabled_stages, STAGE_INIT)
+    end
+    if params.do_frame
+        push!(enabled_stages, STAGE_FRAME)
+    end
+    if params.do_refine
+        push!(enabled_stages, STAGE_REFINE)
+    end
+    if params.do_score
+        push!(enabled_stages, STAGE_SCORE)
+    end
 
     # keep track of every iteration's consensus
     consensus_stages = [[] for _ in 1:(Int(typemax(Stage)) - 1)]
@@ -987,7 +1040,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
         if params.verbose >= 2
             println("  step: resample")
         end
-        resample!(state; verbose=params.verbose)
+        resample!(state, params; verbose=params.verbose)
 
         if params.verbose >= 2
             println("  step: realign and rescore")
@@ -1023,12 +1076,13 @@ function rifraf(dnaseqs::Vector{DNASeq},
         end
     end
     state.stage = STAGE_SCORE
+
     result = RifrafResult(consensus=state.consensus,
                           params=params,
                           state=state,
                           consensus_stages=consensus_stages)
 
-    if STAGE_SCORE in enabled_stages
+    if params.do_score
         if params.verbose >= 2
             println(STDERR, "computing consensus quality scores")
         end

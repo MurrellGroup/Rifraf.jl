@@ -4,6 +4,7 @@ using Bio.Seq
 using Distributions
 using Levenshtein
 using Parameters
+using StatsBase
 
 import Base.length
 import Base.reverse
@@ -47,4 +48,3 @@ include("model.jl")
 include("sample.jl")
 
 end
-
