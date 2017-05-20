@@ -29,8 +29,12 @@ end
     bandwidth::Int = (3 * CODON_LENGTH)
     bandwidth_pvalue::Float64 = 0.1
     min_dist::Int = (5 * CODON_LENGTH)
+
+    # use top sequences for initial stage and frame correction
     batch_fixed::Bool = true
     batch_fixed_size::Int = 5
+
+    # if <= 1, no batching is used
     batch_size::Int = 10
     batch_randomness::Float64 = 0.9
     batch_mult::Float64 = 0.7
@@ -444,8 +448,9 @@ function initial_state(consensus::DNASeq,
                        reference::DNASeq,
                        params::RifrafParams)
     # batch size calculations
-    batch_size = min(max(params.batch_size, 0), length(sequences))
-    batch_fixed_size = min(max(params.batch_fixed_size, 0),
+    batch_size = params.batch_size > 1 ? params.batch_size : length(sequences)
+    batch_size = min(batch_size, length(sequences))
+    batch_fixed_size = min(params.batch_fixed_size,
                            length(sequences))
     base_batch_size = batch_size
 
@@ -759,11 +764,17 @@ function check_params(scores, reference, params)
     if params.max_iters < 1
         error("invalid max iters: $(params.max_iters)")
     end
+    if params.batch_fixed && params.batch_fixed_size <= 1
+        error("batch_fixed_size must be > 1")
+    end
     if params.batch_randomness < 0.0 || params.batch_randomness > 1.0
         error("batch_randomness must be between 0.0 and 1.0")
     end
     if params.batch_mult < 0.0 || params.batch_mult > 1.0
         error("batch_mult must be between 0.0 and 1.0")
+    end
+    if params.batch_threshold < 0.0 || params.batch_mult > 1.0
+        error("batch_threshold must be between 0.0 and 1.0")
     end
 end
 
@@ -911,8 +922,8 @@ function resample!(state::RifrafState, params::RifrafParams;
         end
         return
     end
-    wv = WeightVec(reweight(1.0 - err_weights ./ sum(err_weights),
-                            state.batch_size, state.batch_randomness))
+    wv = Weights(reweight(1.0 - err_weights ./ sum(err_weights),
+                          state.batch_size, state.batch_randomness))
     state.batch_seqs = resample(state.sequences, state.batch_size, wv)
     did_sample = state.batch_size < length(state.sequences)
     if did_sample
