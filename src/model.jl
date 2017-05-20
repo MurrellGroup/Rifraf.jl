@@ -570,7 +570,7 @@ function realign!(state::RifrafState, params::RifrafParams)
 
     if state.realign_As
         if params.verbose >= 2
-            println("    realigning As")
+            println(STDERR, "    realigning As")
         end
         for (s, A, B, Amoves) in zip(seqs, state.As, state.Bs, state.Amoves)
             smart_forward_moves!(state.consensus, s, A, B, Amoves,
@@ -584,7 +584,7 @@ function realign!(state::RifrafState, params::RifrafParams)
     end
     if state.realign_Bs
         if params.verbose >= 2
-            println("    realigning Bs")
+            println(STDERR, "    realigning Bs")
         end
         for (s, B) in zip(seqs, state.Bs)
             backward!(state.consensus, s, B)
@@ -929,9 +929,9 @@ function resample!(state::RifrafState, params::RifrafParams;
     end
     if verbose >= 2
         if did_sample
-            println("    sampled $(state.batch_size) new sequences")
+            println(STDERR, "    sampled $(state.batch_size) new sequences")
         else
-            println("    sampled all sequences")
+            println(STDERR, "    sampled all sequences")
         end
     end
 end
@@ -1035,17 +1035,17 @@ function rifraf(dnaseqs::Vector{DNASeq},
 
         # resample sequences, realign, and possibly adjust batch size
         if params.verbose >= 2
-            println("  step: resample")
+            println(STDERR, "  step: resample")
         end
         resample!(state, params; verbose=params.verbose)
 
         if params.verbose >= 2
-            println("  step: realign and rescore")
+            println(STDERR, "  step: realign and rescore")
         end
         realign_rescore!(state, params)
 
         if params.verbose >= 2
-            println("  step: check score")
+            println(STDERR, "  step: check score")
         end
         check_score!(state, params, old_score)
         old_score = state.score
