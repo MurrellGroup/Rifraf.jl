@@ -825,9 +825,7 @@ function finish_stage!(state::RifrafState,
         else
             state.stage = STAGE_FRAME
             # estimate reference error rate
-            # TODO: use consensus estimated error rate here too
-            edit_dist = levenshtein(convert(String, state.reference.seq),
-                                    convert(String, state.consensus))
+            edit_dist = edit_distance(state.consensus, state.reference.seq)
             ref_error_rate = edit_dist / max(length(state.reference),
                                              length(state.consensus))
             # needs to be < 0.5, otherwise matches aren't rewarded at all

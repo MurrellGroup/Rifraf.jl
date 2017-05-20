@@ -2,7 +2,6 @@ ArgParse
 Bio
 Distributions
 Glob
-Levenshtein
 Iterators
 Parameters
 StatsBase

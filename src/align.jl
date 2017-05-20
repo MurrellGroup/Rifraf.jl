@@ -244,6 +244,20 @@ function count_errors(arr::BandedArray{Trace},
     return sum([1 for (x, y) in zip(a, b) if x != y])
 end
 
+function count_errors(t::DNASeq, s::RifrafSequence)
+    _, Amoves = forward_moves(t, s, skew_matches=true)
+    return count_errors(Amoves, t, s.seq)
+end
+
+function edit_distance(t::DNASeq, s::DNASeq)
+    log_ps = fill(-1.0, length(s))
+    bandwidth = Int(ceil(min(length(t), length(s)) * 0.5))
+    scores = Scores(ErrorModel(1.0, 1.0, 1.0))
+    seq = RifrafSequence(s, log_ps, bandwidth, scores)
+    _, Amoves = forward_moves(t, seq, skew_matches=true)
+    return count_errors(Amoves, t, s)
+end
+
 function band_tolerance(Amoves::BandedArray{Trace})
     nrows, ncols = size(Amoves)
     dist = nrows

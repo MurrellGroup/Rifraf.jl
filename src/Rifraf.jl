@@ -2,7 +2,6 @@ module Rifraf
 
 using Bio.Seq
 using Distributions
-using Levenshtein
 using Parameters
 using StatsBase
 
