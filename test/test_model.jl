@@ -36,13 +36,11 @@ import Rifraf.sample_from_template,
 
 srand(1234)
 
-
 @testset "equal_ranges" begin
     @test equal_ranges((3, 5), (4, 6)) == ((2, 3), (1, 2))
     @test equal_ranges((1, 5), (1, 2)) == ((1, 2), (1, 2))
     @test equal_ranges((1, 5), (4, 5)) == ((4, 5), (1, 2))
 end
-
 
 @testset "scoring proposals" begin
     const errors = ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0)
@@ -184,19 +182,23 @@ end
     ref_errors = ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
     ref_scores = Scores(ref_errors)
 
-    ref = DNASeq("CGGCGATTT")
-    consensus_errors = LogProb[-8., -8., -8., -1., -8., -10., -10.]
-    consensus = RifrafSequence(DNASeq("CTGCCGA"), consensus_errors, 10, ref_scores)
+    refseq = DNASeq("CGGCGATTT")
+    ref_lps = fill(-1.0, length(refseq))
+    ref = RifrafSequence(refseq, ref_lps, 10, ref_scores)
 
-    proposals = single_indel_proposals(ref, consensus)
-    expected = [Deletion(4)]
-    @test expected == proposals
+    consensus = DNASeq("CTGCCGA")
+
+    proposals = single_indel_proposals(consensus, ref)
+    expected = [Deletion(2), Deletion(4), Deletion(5)]
+    @test length(proposals) == 1
+    @test proposals[1] in expected
 end
 
 @testset "alignment proposals" begin
     function _test_alignment_proposals(consensus, seqs, lps, expected;
                                   do_indels::Bool=true)
-        params = RifrafParams(bandwidth=6)
+        params = RifrafParams(bandwidth=6, batch_fixed=false,
+                              batch_size=length(seqs))
 
         errors = ErrorModel(1.0, 5.0, 5.0, 0.0, 0.0)
         scores = Scores(errors)
@@ -206,7 +208,7 @@ end
         pseqs = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
                                for (s, p) in zip(seqs, lps)]
         state = initial_state(consensus, pseqs, DNASeq(), params)
-        resample!(state)
+        resample!(state, params)
         realign_rescore!(state, RifrafParams())
 
         proposals = alignment_proposals(state.Amoves, state.consensus,
@@ -271,7 +273,7 @@ end
 
     function _test_candidate_scores(consensus, pseqs, expected)
         state = initial_state(consensus, pseqs, DNASeq(), params)
-        resample!(state)
+        resample!(state, params)
         realign_rescore!(state, RifrafParams())
         cands = get_candidates(state, params)
         @test length(cands) == length(expected)
@@ -395,7 +397,7 @@ end
     pseqs = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
                            for (s, p) in zip(seqs, lps)]
     state = initial_state(consensus, pseqs, DNASeq(), params)
-    resample!(state)
+    resample!(state, params)
     realign_rescore!(state, RifrafParams())
     probs = estimate_probs(state, false)
     @test probs.sub[1, 2] > 0.9
@@ -419,7 +421,7 @@ end
     pseqs = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
                            for (s, p) in zip(seqs, lps)]
     state = initial_state(consensus, pseqs, DNASeq(), params)
-    resample!(state)
+    resample!(state, params)
     realign_rescore!(state, RifrafParams())
     probs = estimate_probs(state, false)
     @test maximum(probs.ins[1, :]) < 1e-9
@@ -443,7 +445,7 @@ end
     pseqs = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
                            for (s, p) in zip(seqs, lps)]
     state = initial_state(consensus, pseqs, DNASeq(), params)
-    resample!(state)
+    resample!(state, params)
     realign_rescore!(state, RifrafParams())
 
     result = alignment_error_probs(length(consensus),
