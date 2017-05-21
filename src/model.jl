@@ -1125,3 +1125,14 @@ function rifraf(dnaseqs::Vector{DNASeq},
     error_log_ps = phred_to_log_p(phreds)
     return rifraf(dnaseqs, error_log_ps, scores; kwargs...)
 end
+
+"""Adjust error probabilities so that the expected number of errors
+matches the edit distance to the consensus sequence.
+
+"""
+function calibrate_phreds(s::DNASeq, phred::Vector{Phred}, consensus::DNASeq)
+    # TODO: should use our own alignments here
+    n_errors = edit_distance(consensus, s)
+    errors = phred_to_p(phred)
+    return errors * float(n_errors) / sum(errors)
+end

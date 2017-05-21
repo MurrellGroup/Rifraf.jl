@@ -32,7 +32,8 @@ export rifraf,
        inband,
        flip!,
        newbandwidth!,
-       align
+       align,
+       calibrate_phreds
 
 include("bandedarrays.jl")
 include("types.jl")

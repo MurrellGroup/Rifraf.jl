@@ -249,6 +249,7 @@ function count_errors(t::DNASeq, s::RifrafSequence)
     return count_errors(Amoves, t, s.seq)
 end
 
+"""should be close to Levenshtein"""
 function edit_distance(t::DNASeq, s::DNASeq)
     log_ps = fill(-1.0, length(s))
     bandwidth = Int(ceil(min(length(t), length(s)) * 0.5))
