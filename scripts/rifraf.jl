@@ -3,16 +3,27 @@ import Bio.Seq
 using ArgParse
 using Glob
 
-import Quiver2.Model
-import Quiver2.QIO
-import Quiver2.Util
-@everywhere using Quiver2.Model
-@everywhere using Quiver2.QIO
-@everywhere using Quiver2.Util
+@everywhere using Rifraf
 
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
+        # script-only arguments
+        "--phred-cap"
+        help = "maximum PHRED score"
+        arg_type = Int8
+        default = Int8(0)
+
+        "--prefix"
+        help = "prepended to each filename to make name"
+        arg_type = String
+        default = ""
+
+        "--keep-unique-name"
+        help = "keep only unique middle part of filename"
+        action = :store_true
+
+        # RIFRAF arguments
         "--reference"
         help = string("reference fasta file.",
                       " uses first sequence unless --reference-map is given.")
@@ -24,70 +35,22 @@ function parse_commandline()
         arg_type = String
         default = ""
 
-        "--phred-cap"
-        help = "maximum PHRED score"
-        arg_type = Int8
-        default = Int8(0)
-
         "--ref-errors"
         help = "comma-seperated reference error ratios - mm, codon ins, codon del"
         arg_type = String
         default = "10,0.1,0.1,1,1"
-
-        "--ref-indel-penalty"
-        help = "log10 penalty added to reference indel scores"
-        arg_type = Float64
-        default = log10(0.1)
-
-        "--min-ref-indel-score"
-        help = "minimum reference indel scores"
-        arg_type = Float64
-        default = log10(1e-9)
-
-        "--prefix"
-        help = "prepended to each filename to make name"
-        arg_type = String
-        default = ""
-
-        "--keep-unique-name"
-        help = "keep only unique middle part of filename"
-        action = :store_true
-
-        "--bandwidth"
-        help = "alignment bandwidth"
-        arg_type = Int
-        default = 10
-
-        "--min-dist"
-        help = "minimum distance between mutations"
-        arg_type = Int
-        default = 9
-
-        "--batch"
-        help = "batch size; -1 for no batch iterations"
-        arg_type = Int
-        default = 10
-
-        "--batch-threshold"
-        help = "fraction score decrease before increasing batch size"
-        arg_type = Float64
-        default = 0.05
 
         "--max-iters"
         help = "maximum iterations before giving up"
         arg_type = Int
         default = 100
 
-        "--indel-file"
-        help = "if given, a file to store indel probabilities"
-        arg_type = String
-        default = ""
-
         "--verbose", "-v"
         help = "print progress"
         arg_type = Int
         default = 0
 
+        # required arguments
         "seq-errors"
         help = "comma-seperated sequence error ratios - mismatch, insertion, deletion"
         arg_type = String
@@ -106,16 +69,16 @@ function parse_commandline()
 end
 
 @everywhere function dofile(file, reffile, refid, args)
-    if args["verbose"] > 0
+    if args["verbose"] >= 1
         println(STDERR, "reading sequences from '$(file)'")
         if length(reffile) > 0
             println(STDERR, "reading reference from '$(reffile)'")
         end
     end
-    reference = DNASequence("")
+    reference = DNASeq()
     ref_records = []
     if length(reffile) > 0
-        ref_records = read_fasta_records(reffile)
+        ref_records = Rifraf.read_fasta_records(reffile)
     end
     if length(refid) > 0
         filt_records = collect(filter(r -> r.name == refid, ref_records))
@@ -126,10 +89,10 @@ end
             error("multiple references with id '$refid' found in `$reffile`")
         end
         ref_record = filt_records[1]
-        reference = ref_record.seq
+        reference = DNASeq(ref_record.seq)
     elseif length(ref_records) > 0
         ref_record = ref_records[1]
-        reference = ref_record.seq
+        reference = DNASeq(ref_record.seq)
     end
 
     score_args = map(x -> parse(Float64, x), split(args["seq-errors"], ","))
@@ -138,27 +101,22 @@ end
     ref_score_args = map(x -> parse(Float64, x), split(args["ref-errors"], ","))
     ref_scores = Scores(ErrorModel(ref_score_args...))
 
-    sequences, phreds = read_fastq(file)
-    if args["verbose"] > 0
+    sequences, phreds, _ = Rifraf.read_fastq(file)
+    if args["verbose"] >= 1
         println(STDERR, "starting run")
     end
     phred_cap = args["phred-cap"]
     if phred_cap > 0
-        phreds = Vector{Int8}[cap_phreds(p, phred_cap)
+        phreds = Vector{Int8}[Rifraf.cap_phreds(p, phred_cap)
                               for p in phreds]
     end
-    return quiver2(sequences, phreds,
-                   scores;
-                   reference=reference,
-                   ref_scores=ref_scores,
-                   ref_indel_penalty=args["ref-indel-penalty"],
-                   min_ref_indel_score=args["min-ref-indel-score"],
-                   bandwidth=args["bandwidth"],
-                   min_dist=args["min-dist"],
-                   batch=args["batch"],
-                   batch_threshold=args["batch-threshold"],
-                   max_iters=args["max-iters"],
-                   verbose=args["verbose"])
+    params = RifrafParams(ref_scores=ref_scores,
+                          max_iters=args["max-iters"],
+                          verbose=args["verbose"])
+    return rifraf(sequences, phreds,
+                  scores;
+                  reference=reference,
+                  params=params)
 end
 
 function common_prefix(strings)
@@ -186,7 +144,7 @@ function main()
     dir, pattern = splitdir(input)
     infiles = glob(pattern, dir)
     if length(infiles) == 0
-        if args["verbose"] > 0
+        if args["verbose"] >= 1
             println(STDERR, "warning: no input files found.")
         end
         return
@@ -242,48 +200,26 @@ function main()
 
     n_converged = 0
     prefix = args["prefix"]
-    indel_handle = open("/dev/null", "w")
-    if length(args["indel-file"]) > 0
-        indel_handle = open(args["indel-file"], "w")
-        write(indel_handle, "name",
-              ",", "max_indel_p",
-              ",", "sum_indel_p",
-              ",", "indel_rate",
-              "\n")
-    end
     stream = open(FASTQWriter, args["output"], quality_encoding=:sanger)
-    for i=1:length(results)
-        if typeof(results[i]) == RemoteException
-            throw(results[i])
+    for (i, result) in enumerate(results)
+        if typeof(result) == RemoteException
+            throw(result)
         end
-        consensus, base_probs, ins_probs, _, info = results[i]
-        if info["converged"]
+        if result.state.converged
             n_converged += 1
             name = basenames[i]
             if args["keep-unique-name"]
                 name = name[plen + 1:end - slen]
             end
             seqname = string(prefix, name)
-            quality = estimate_point_probs(base_probs, ins_probs)
-            t_phred = p_to_phred(quality)
-            record = Seq.FASTQSeqRecord(seqname, consensus, t_phred)
+            quality = Rifraf.estimate_point_probs(result.error_probs)
+            t_phred = Rifraf.p_to_phred(quality)
+            record = Seq.FASTQSeqRecord(seqname, result.consensus, t_phred)
             write(stream, record)
-            if length(args["indel-file"]) > 0
-                indel_p = estimate_indel_probs(base_probs, ins_probs)
-                max_indel_p = maximum(indel_p)
-                sum_indel_p = sum(indel_p)
-                indel_rate = sum_indel_p / length(indel_p)
-                write(indel_handle, seqname,
-                      ",", string(max_indel_p),
-                      ",", string(sum_indel_p),
-                      ",", string(indel_rate),
-                      "\n")
-            end
         end
     end
-    close(indel_handle)
     close(stream)
-    if args["verbose"] > 0
+    if args["verbose"] >= 1
         println(STDERR, "done. $n_converged / $(length(results)) converged.")
     end
 end
