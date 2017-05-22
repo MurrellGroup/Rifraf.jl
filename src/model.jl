@@ -1136,3 +1136,19 @@ function calibrate_phreds(s::DNASeq, phred::Vector{Phred}, consensus::DNASeq)
     errors = phred_to_p(phred)
     return errors * float(n_errors) / sum(errors)
 end
+
+"""rifraf-style fast frameshift correction"""
+function correct_shifts(consensus::DNASeq,
+                        reference::DNASeq;
+                        log_p::LogProb=-1.0,
+                        bandwidth::Int=-1,
+                        scores::Scores=Scores(ErrorModel(10.0, 1e-5, 1e-5, 1.0, 1.0)))
+    log_ps = fill(log_p, length(reference))
+    if bandwidth < 0
+        bandwidth = Int(ceil(min(length(consensus), length(reference)) * 0.1))
+    end
+    refseq = RifrafSequence(reference, log_ps, bandwidth, scores)
+    a, b = align(consensus, refseq)
+    proposals = single_indel_proposals(consensus, refseq)
+    result = apply_proposals(consensus, proposals)
+end
