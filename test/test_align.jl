@@ -33,7 +33,6 @@ import Rifraf.forward,
 
         A2, _ = forward_moves(template, pseq)
         @test full(A2) ≈ full(A)
-
     end
 
     @testset "perfect backward" begin
@@ -63,7 +62,6 @@ import Rifraf.forward,
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
         A = forward(template, pseq)
         B = backward(template, pseq)
-        display(A)
         check_all_cols(A, B, false)
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
                                       [lp + scores.insertion, match, match + lp + scores.deletion];
@@ -74,7 +72,6 @@ import Rifraf.forward,
 
         A2, _ = forward_moves(template, pseq)
         @test full(A2) ≈ full(A)
-
     end
 
     @testset "imperfect backward" begin
@@ -182,7 +179,7 @@ import Rifraf.forward,
     end
 end
 
-@testset "alignment"
+@testset "alignment" begin
     const errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
     const scores = Scores(errors)
 
@@ -192,8 +189,8 @@ end
         bandwidth = 10
         log_p = [-2.0, -3.0, -3.0]
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        moves = align_moves(template, pseq)
-        t, s = moves_to_aligned_seqs(moves, template, seq)
+        moves = Rifraf.align_moves(template, pseq)
+        t, s = Rifraf.moves_to_aligned_seqs(moves, template, seq)
         @test t == DNASequence("ATAA")
         @test s == DNASequence("A-AA")
     end
@@ -204,8 +201,8 @@ end
         bandwidth = 10
         log_p = fill(log10(0.1), length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        moves = align_moves(template, pseq)
-        t, s = moves_to_aligned_seqs(moves, template, seq)
+        moves = Rifraf.align_moves(template, pseq)
+        t, s = Rifraf.moves_to_aligned_seqs(moves, template, seq)
         @test t[end-1:end] == DNASequence("TT")
     end
 
@@ -226,7 +223,7 @@ end
 
 @testset "align with self" begin
     # make sequence with long insertion
-    seqstring = "AAAGGGTTTCCC"
+    seqstring = DNASequence("AAAGGGTTTCCC")
     seq = DNASeq(seqstring)
     errors = fill(0.1, length(seq))
     errors[1:6] = 0.3
@@ -236,7 +233,7 @@ end
     scores = Scores(ErrorModel(1.0, 10.0, 10.0, 0.0, 0.0))
     rseq = RifrafSequence(seq, err_log_p, bandwidth, scores)
 
-    a, b = align(seq, rseq)
+    a, b = Rifraf.align(seq, rseq)
     @test a == b
     @test a == seqstring
 end
