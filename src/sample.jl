@@ -217,7 +217,8 @@ function sample_mixture(nseqs::Tuple{Int, Int}, len::Int, n_diffs::Int;
             seqbools, tbools)
 end
 
-function sample(nseqs::Int, len::Int;
+function sample(nseqs::Int=3,
+                len::Int=90;
                 ref_error_rate::Prob=0.1,
                 ref_errors::ErrorModel=ErrorModel(10, 0, 0, 1, 0),
                 error_rate::Prob=0.01,
