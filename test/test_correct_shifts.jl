@@ -28,7 +28,7 @@ using Rifraf
     end
     @testset "correct shifts 4" begin
         consensus = DNASeq("TTTAACCC")
-        reference = DNASeq("TTTCGC")
+        reference = DNASeq("TTTCCC")
         expected = DNASeq("TTTCCC")
         result = Rifraf.correct_shifts(consensus, reference)
         @test result == expected
