@@ -18,6 +18,7 @@ end
     ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))
     ref_indel_mult::Score = 3.0
     min_ref_indel_score::Score = -1.0 * 3^5
+    ref_error_mult::Float64 = 1.0
     do_init::Bool = true
     do_frame::Bool = true
     do_refine::Bool = true
@@ -732,6 +733,9 @@ function check_params(scores, reference, params)
     end
 
     if length(reference) > 0
+        if params.ref_error_mult <= 0.0
+            error("ref_error_mult must be > 0.0")
+        end
         if params.ref_indel_mult <= 0.0
             error("ref_indel_mult must be > 0.0")
         end
@@ -828,6 +832,7 @@ function finish_stage!(state::RifrafState,
             edit_dist = edit_distance(state.consensus, state.reference.seq)
             ref_error_rate = edit_dist / max(length(state.reference),
                                              length(state.consensus))
+            ref_error_rate *= params.ref_error_mult
             # needs to be < 0.5, otherwise matches aren't rewarded at all
             state.ref_error_rate = min(max(ref_error_rate, 1e-10), 0.5)
             ref_error_log_p = fill(log10(state.ref_error_rate), length(state.reference))
