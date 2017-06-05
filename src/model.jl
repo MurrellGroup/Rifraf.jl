@@ -1013,7 +1013,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
     state.realign_Bs = true
     old_score = -Inf
 
-    for _ in 1:params.max_iters
+    for iter in 1:params.max_iters
         # skip to next valid stage
         while state.stage < STAGE_SCORE && !(state.stage in enabled_stages)
             state.stage = next_stage(state.stage)
@@ -1025,7 +1025,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
         push!(consensus_stages[Int(state.stage)], state.consensus)
 
         if params.verbose >= 1
-            println(STDERR, "iteration $i : $(state.stage) : $(state.score)")
+            println(STDERR, "iteration $iter : $(state.stage) : $(state.score)")
         end
         if params.verbose >= 3
             println(STDERR, "  consensus: $(state.consensus)")
