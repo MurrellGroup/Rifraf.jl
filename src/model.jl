@@ -409,13 +409,8 @@ end
 
 function has_single_indels(consensus::DNASeq,
                            reference::RifrafSequence)
-    has_right_length = length(consensus) % CODON_LENGTH == 0
     moves = align_moves(consensus, reference)
-    result = TRACE_INSERT in moves || TRACE_DELETE in moves
-    if !result && !has_right_length
-        error("consensus length is not a multiple of three")
-    end
-    return result
+    return TRACE_INSERT in moves || TRACE_DELETE in moves
 end
 
 function single_indel_proposals(consensus::DNASeq,
@@ -1018,7 +1013,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
     state.realign_Bs = true
     old_score = -Inf
 
-    for i in 1:params.max_iters
+    for _ in 1:params.max_iters
         # skip to next valid stage
         while state.stage < STAGE_SCORE && !(state.stage in enabled_stages)
             state.stage = next_stage(state.stage)
