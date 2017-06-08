@@ -40,6 +40,12 @@ function parse_commandline()
         arg_type = String
         default = "10,0.1,0.1,1,1"
 
+        "--consensuses"
+        help = string("consensus fasta file.",
+                      " Each sequence should have the filename as its id")
+        arg_type = String
+        default = ""
+
         "--max-iters"
         help = "maximum iterations before giving up"
         arg_type = Int
@@ -68,33 +74,40 @@ function parse_commandline()
     return parse_args(s)
 end
 
-@everywhere function dofile(file, reffile, refid, args)
+@everywhere function get_from_file(filename, seqid)
+    result = DNASeq()
+    records = []
+    if length(filename) > 0
+        records = Rifraf.read_fasta_records(filename)
+    else
+        return result
+    end
+    if length(seqid) > 0
+        filt_records = collect(filter(r -> r.name == seqid, records))
+        if length(filt_records) == 0
+            error("sequence '$seqid' not found in `$filename`")
+        end
+        if length(filt_records) > 1
+            error("multiple sequences with id '$seqid' found in `$filename`")
+        end
+        ref_record = filt_records[1]
+        result = DNASeq(ref_record.seq)
+    elseif length(records) > 0
+        ref_record = records[1]
+        result = DNASeq(ref_record.seq)
+    end
+    return result
+end
+
+@everywhere function dofile(file, reffile, refid, consfile, args)
     if args["verbose"] >= 1
         println(STDERR, "reading sequences from '$(file)'")
         if length(reffile) > 0
             println(STDERR, "reading reference from '$(reffile)'")
         end
     end
-    reference = DNASeq()
-    ref_records = []
-    if length(reffile) > 0
-        ref_records = Rifraf.read_fasta_records(reffile)
-    end
-    if length(refid) > 0
-        filt_records = collect(filter(r -> r.name == refid, ref_records))
-        if length(filt_records) == 0
-            error("reference '$refid' not found in `$reffile`")
-        end
-        if length(filt_records) > 1
-            error("multiple references with id '$refid' found in `$reffile`")
-        end
-        ref_record = filt_records[1]
-        reference = DNASeq(ref_record.seq)
-    elseif length(ref_records) > 0
-        ref_record = ref_records[1]
-        reference = DNASeq(ref_record.seq)
-    end
-
+    reference = get_from_file(reffile, refid)
+    consensus = get_from_file(consfile, basename(file))
     score_args = map(x -> parse(Float64, x), split(args["seq-errors"], ","))
     scores = Scores(ErrorModel(score_args...))
 
@@ -115,6 +128,7 @@ end
                           verbose=args["verbose"])
     return rifraf(sequences, phreds,
                   scores;
+                  consensus=consensus,
                   reference=reference,
                   params=params)
 end
@@ -170,6 +184,7 @@ function main()
         end
     end
 
+    consfile = args["consensuses"]
     reffile = args["reference"]
     refmapfile = args["reference-map"]
     refids = ["" for i in 1:length(infiles)]
@@ -187,7 +202,7 @@ function main()
         basenames = [basename(f) for f in infiles]
         refids = [name_to_ref[name] for name in basenames]
     end
-    results = pmap((f, rid) -> dofile(f, reffile, rid, args),
+    results = pmap((f, rid) -> dofile(f, reffile, rid, consfile, args),
                    infiles, refids)
 
     plen = 0
