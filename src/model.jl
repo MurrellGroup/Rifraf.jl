@@ -37,7 +37,12 @@ end
 
     # if <= 1, no batching is used
     batch_size::Int = 10
+
+    # 0: top n get picked
+    # 0.5: weight according to estimated errors
+    # 1: completely random
     batch_randomness::Float64 = 0.9
+
     batch_mult::Float64 = 0.7
     batch_threshold::Float64 = 0.1
     max_iters::Int = 100
@@ -987,7 +992,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
     check_params(scores, reference, params)
 
     sequences = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
-                        for (s, p) in zip(dnaseqs, error_log_ps)]
+                               for (s, p) in zip(dnaseqs, error_log_ps)]
 
     state = initial_state(consensus, sequences, reference, params)
 
