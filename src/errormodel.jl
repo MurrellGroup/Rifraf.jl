@@ -37,7 +37,7 @@ function Scores(errors::ErrorModel;
             errors.deletion,
             errors.codon_insertion,
             errors.codon_deletion]
-    m, i, d, ci, cd = log10(normalize(args))
+    m, i, d, ci, cd = log10.(normalize(args))
     return Scores(Score(m + mismatch),
                   Score(i + insertion),
                   Score(d + deletion),
