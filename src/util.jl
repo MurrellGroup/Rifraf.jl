@@ -34,7 +34,7 @@ function logsumexp10{T<:Real}(x::AbstractArray{T})
     for i = 1:length(x)
         @inbounds s += exp10(x[i] - u)
     end
-    log10(s) + u
+    log10.(s) + u
 end
 
 @generated function summax(a, b)

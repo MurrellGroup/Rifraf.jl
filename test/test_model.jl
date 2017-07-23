@@ -441,7 +441,7 @@ end
     ps = [[0.1, 0.1, 0.1, 0.1],
           [0.2, 0.1, 0.1],
           [0.2, 0.1, 0.1, 0.1]]
-    lps = map(log10, ps)
+    lps = [log10.(p) for p in ps]
     pseqs = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
                            for (s, p) in zip(seqs, lps)]
     state = initial_state(consensus, pseqs, DNASeq(), params)
@@ -462,7 +462,7 @@ end
     seq = DNASeq("AAAGGGTTTCCC")
     errors = fill(0.3, length(seq))
     errors[end-3:end] = 0.45
-    err_log_p = log10(errors)
+    err_log_p = log10.(errors)
     bandwidth = 1
     scores = Scores(ErrorModel(1.0, 10.0, 10.0, 0.0, 0.0))
     rseq = RifrafSequence(seq, err_log_p, bandwidth, scores)

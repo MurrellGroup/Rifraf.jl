@@ -87,9 +87,9 @@ end
     params::RifrafParams
     state::RifrafState
     consensus_stages::Vector{Vector{DNASeq}}
-    error_probs::EstimatedProbs = EstimatedProbs(Array{Prob, 2}(),
-                                                 Array{Prob, 1}(),
-                                                 Array{Prob, 2}())
+    error_probs::EstimatedProbs = EstimatedProbs(Array{Prob, 2}(0,0),
+                                                 Array{Prob, 1}(0),
+                                                 Array{Prob, 2}(0,0))
     aln_error_probs::Vector{Float64} = Float64[]
 end
 
@@ -307,35 +307,34 @@ function all_proposals(stage::Stage,
                 stage == STAGE_FRAME ||
                 stage == STAGE_SCORE
     no_seeds = length(indel_seeds) == 0
-    function _it()
-        if do_indels
+    results = Proposal[]
+    if do_indels
+        for base in BASES
+            push!(results, Insertion(0, base))
+        end
+    end
+    for j in 1:len
+        if do_subs
+            # substitutions
             for base in BASES
-                produce(Insertion(0, base))
+                if consensus[j] != base
+                    push!(results, Substitution(j, base))
+                end
             end
         end
-        for j in 1:len
-            if do_subs
-                # substitutions
-                for base in BASES
-                    if consensus[j] != base
-                        produce(Substitution(j, base))
-                    end
-                end
+        if do_indels
+            # single indels
+            if no_seeds || j in del_positions
+                push!(results, Deletion(j))
             end
-            if do_indels
-                # single indels
-                if no_seeds || j in del_positions
-                    produce(Deletion(j))
-                end
-                if no_seeds || j in ins_positions
-                    for base in BASES
-                        produce(Insertion(j, base))
-                    end
+            if no_seeds || j in ins_positions
+                for base in BASES
+                    push!(results, Insertion(j, base))
                 end
             end
         end
     end
-    Task(_it)
+    results
 end
 
 function moves_to_proposals(moves::Vector{Trace},
@@ -608,10 +607,10 @@ function normalize_log_differences(sub_scores,
                                    state_score)
     # per-base insertion score is mean of neighboring insertions
     pos_scores = hcat(sub_scores, del_scores)
-    pos_exp = exp10(pos_scores)
+    pos_exp = exp10.(pos_scores)
     pos_probs = broadcast(/, pos_exp, sum(pos_exp, 2))
-    ins_exp = exp10(ins_scores)
-    ins_probs = broadcast(/, ins_exp, exp10(state_score) + sum(ins_exp, 2))
+    ins_exp = exp10.(ins_scores)
+    ins_probs = broadcast(/, ins_exp, exp10.(state_score) + sum(ins_exp, 2))
     sub_probs = pos_probs[:, 1:4]
     del_probs = pos_probs[:, 5]
     return EstimatedProbs(sub_probs, del_probs, ins_probs)
@@ -717,7 +716,7 @@ function alignment_error_probs(tlen::Int,
             end
         end
     end
-    probs = exp10(probs)
+    probs = exp10.(probs)
     probs = 1.0 - maximum(probs ./ sum(probs, 2), 2)
     return vec(probs)
 end
