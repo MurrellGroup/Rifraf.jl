@@ -60,18 +60,18 @@ import Rifraf.forward,
         match = inv_log10(lp)
         log_p = fill(lp, length(seq))
         pseq = RifrafSequence(seq, log_p, bandwidth, scores)
-        A = forward(template, pseq)
+        A1 = forward(template, pseq)
         B = backward(template, pseq)
-        check_all_cols(A, B, false)
+        check_all_cols(A1, B, false)
         expected = transpose(reshape([[0.0, lp + scores.deletion, 0.0];
                                       [lp + scores.insertion, match, match + lp + scores.deletion];
                                       [0.0, match + lp + scores.insertion, match + lp + scores.mismatch]],
                                      (3, 3)))
 
-        @test full(A) ≈ expected
+        @test full(A1) ≈ expected atol=0.01
 
-        A2, _ = forward_moves(template, pseq)
-        @test full(A2) ≈ full(A)
+        A2, moves = forward_moves(template, pseq)
+        @test full(A1) ≈ full(A2) atol=0.01
     end
 
     @testset "imperfect backward" begin
@@ -87,7 +87,7 @@ import Rifraf.forward,
                                       [2*lp + scores.deletion + scores.mismatch, lp + scores.mismatch, lp + scores.insertion];
                                       [0.0, lp + scores.deletion, 0.0]],
                                      (3, 3)))
-        @test full(B) ≈ expected
+        @test full(B) ≈ expected atol=0.01
     end
 
     @testset "forward/backward agreement" begin
@@ -103,7 +103,7 @@ import Rifraf.forward,
             check_all_cols(A, B, true)
 
             A2, _ = forward_moves(template, pseq)
-            @test full(A) == full(A2)
+            @test full(A) ≈ full(A2) atol=0.01
         end
 
         @testset "forward/backward agreement 2" begin
@@ -118,7 +118,7 @@ import Rifraf.forward,
             check_all_cols(A, B, true)
 
             A2, _ = forward_moves(template, pseq)
-            @test full(A) == full(A2)
+            @test full(A) ≈ full(A2) atol=0.01
         end
     end
 
@@ -228,7 +228,7 @@ end
     errors = fill(0.1, length(seq))
     errors[1:6] = 0.3
     errors[end-3:end] = 0.45
-    err_log_p = log10(errors)
+    err_log_p = log10.(errors)
     bandwidth = 3
     scores = Scores(ErrorModel(1.0, 10.0, 10.0, 0.0, 0.0))
     rseq = RifrafSequence(seq, err_log_p, bandwidth, scores)

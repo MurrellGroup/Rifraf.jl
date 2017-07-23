@@ -51,7 +51,7 @@ function update(A::BandedArray{Score},
                 i::Int, j::Int,
                 s_base::DNANucleotide, t_base::DNANucleotide,
                 pseq::RifrafSequence;
-                newcols::Array{Score, 2}=Array(Score, (0, 0)),
+                newcols::Array{Score, 2}=Array{Score}((0, 0)),
                 doreverse::Bool=false,
                 acol=-1, trim=false,
                 skew_matches=false)
@@ -111,31 +111,6 @@ function update(A::BandedArray{Score},
     return final_score, final_move
 end
 
-"""The heart of the forward algorithm.
-
-`use_moves` determines whether moves are saved or not.
-
-"""
-macro forward(use_moves)
-    moves = use_moves ? :(moves[i, j]) : :()
-    return quote
-        for j = 1:ncols
-            start, stop = row_range(result, j)
-            for i = start:stop
-                if i == 1 && j == 1
-                    continue
-                end
-                sbase = i > 1 ? s.seq[doreverse ? length(s) - (i-1) + 1 : i-1] : DNA_Gap
-                tbase = j > 1 ? t[doreverse ? length(t) - (j-1) + 1 : j-1] : DNA_Gap
-                result[i, j], $moves = update(result, i, j, sbase, tbase, s;
-                                              doreverse=doreverse,
-                                              trim=trim,
-                                              skew_matches=skew_matches)
-            end
-      end
-    end
-end
-
 function forward_moves!(t::DNASeq, s::RifrafSequence,
                         result::BandedArray{Score},
                         moves::BandedArray{Trace};
@@ -149,8 +124,20 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
     result[1, 1] = Score(0.0)
     moves[1, 1] = TRACE_NONE
     nrows, ncols = new_shape
-    doreverse=false;
-    @forward(true)
+    for j = 1:ncols
+        start, stop = row_range(result, j)
+        for i = start:stop
+            if i == 1 && j == 1
+                continue
+            end
+            sbase = i > 1 ? s.seq[i-1] : DNA_Gap
+            tbase = j > 1 ? t[j-1] : DNA_Gap
+            result[i, j], moves[i, j] = update(result, i, j, sbase, tbase, s;
+                                               doreverse=false,
+                                               trim=trim,
+                                               skew_matches=skew_matches)
+        end
+    end
 end
 
 """Does backtracing to find best alignment."""
@@ -174,8 +161,21 @@ function forward!(t::DNASeq, s::RifrafSequence,
     newbandwidth!(result, s.bandwidth)
     resize!(result, new_shape)
     result[1, 1] = Score(0.0)
-    nrows, ncols = size(result)
-    @forward(false)
+    nrows, ncols = new_shape
+    for j = 1:ncols
+        start, stop = row_range(result, j)
+        for i = start:stop
+            if i == 1 && j == 1
+                continue
+            end
+            sbase = i > 1 ? s.seq[doreverse ? length(s) - (i-1) + 1 : i-1] : DNA_Gap
+            tbase = j > 1 ? t[doreverse ? length(t) - (j-1) + 1 : j-1] : DNA_Gap
+            result[i, j], _ = update(result, i, j, sbase, tbase, s;
+                                     doreverse=doreverse,
+                                     trim=trim,
+                                     skew_matches=skew_matches)
+        end
+    end
 end
 
 """
@@ -337,7 +337,7 @@ function align_moves(t::DNASeq, s::RifrafSequence;
                      trim::Bool=false,
                      skew_matches::Bool=false)
     A, Amoves = forward_moves(t, s;
-                              trim=trim,
+                              trim=trim, 
                               skew_matches=skew_matches)
     return backtrace(Amoves)
 end
