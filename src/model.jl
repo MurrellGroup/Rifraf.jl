@@ -8,7 +8,7 @@ function next_stage(s::Stage)
     return Stage(Int(s) + 1)
 end
 
-immutable EstimatedProbs
+struct EstimatedProbs
     sub::Array{Prob, 2}
     del::Array{Prob, 1}
     ins::Array{Prob, 2}

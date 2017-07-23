@@ -1,16 +1,16 @@
-abstract Proposal
+abstract type Proposal end
 
-immutable Substitution <: Proposal
+struct Substitution <: Proposal
     pos::Int
     base::DNANucleotide
 end
 
-immutable Insertion <: Proposal
+struct Insertion <: Proposal
     pos::Int  # insert after this position
     base::DNANucleotide
 end
 
-immutable Deletion <: Proposal
+struct Deletion <: Proposal
     pos::Int
 end
 
@@ -26,7 +26,7 @@ function update_pos(p::Deletion, pos)
     return Deletion(pos)
 end
 
-immutable ScoredProposal
+struct ScoredProposal
     proposal::Proposal
     score::Score
 end
@@ -74,7 +74,7 @@ function get_proposal_base(seq::DNASeq, proposal::Deletion,
 end
 
 
-immutable AmbiguousProposalsError <: Exception end
+struct AmbiguousProposalsError <: Exception end
 
 
 function apply_proposals(seq::DNASeq,

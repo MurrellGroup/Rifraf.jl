@@ -1,7 +1,7 @@
 import Base.zero
 
 # trace type for pairwise alignment
-typealias Trace Int8
+const Trace = Int8
 
 # trace values
 const TRACE_NONE         = Trace(0)

@@ -2,7 +2,7 @@
 # TODO: better bounds checking for getting and setting
 
 """Sparse array with a band of nonzeroes."""
-type BandedArray{T} <: AbstractArray{T,2}
+mutable struct BandedArray{T} <: AbstractArray{T,2}
     data::Array{T,2}
     nrows::Int
     ncols::Int
@@ -19,10 +19,10 @@ type BandedArray{T} <: AbstractArray{T,2}
     default::T
     initialize::Bool
 
-    function BandedArray(data::Array{T, 2}, shape::Tuple{Int, Int},
-                         bandwidth::Int,
-                         row_padding::Int, col_padding::Int,
-                         default::T, initialize::Bool)
+    function BandedArray{T}(data::Array{T, 2}, shape::Tuple{Int, Int},
+                            bandwidth::Int,
+                            row_padding::Int, col_padding::Int,
+                            default::T, initialize::Bool) where T
         if bandwidth < 1
             error("bandwidth must be positive")
         end
@@ -34,10 +34,10 @@ type BandedArray{T} <: AbstractArray{T,2}
         h_offset = max(ncols - nrows, 0)
         v_offset = max(nrows - ncols, 0)
         lower, upper = bandlimits(nrows, ncols, bandwidth)
-        return new(data, nrows, ncols, bandwidth,
-                   h_offset, v_offset,
-                   lower, upper, row_padding, col_padding,
-                   default, initialize)
+        new(data, nrows, ncols, bandwidth,
+            h_offset, v_offset,
+            lower, upper, row_padding, col_padding,
+            default, initialize)
     end
 end
 

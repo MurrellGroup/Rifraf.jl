@@ -1,5 +1,5 @@
-typealias DNASeq BioSequence{DNAAlphabet{2}}
-typealias Phred Int8
-typealias Prob Float64
-typealias LogProb Float64
-typealias Score Float64
+const DNASeq = BioSequence{DNAAlphabet{2}}
+const Phred = Int8
+const Prob = Float64
+const LogProb = Float64
+const Score = Float64

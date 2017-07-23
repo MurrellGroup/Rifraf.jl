@@ -1,4 +1,4 @@
-immutable ErrorModel
+struct ErrorModel
     mismatch::Real
     insertion::Real
     deletion::Real
@@ -20,7 +20,7 @@ function normalize(errors::ErrorModel)
     return ErrorModel(m, i, d, ci, cd)
 end
 
-immutable Scores
+struct Scores
     mismatch::Score
     insertion::Score
     deletion::Score
