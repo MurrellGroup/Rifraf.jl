@@ -66,7 +66,7 @@ function allocate_data(T::Type, nrows::Int, ncols::Int, bandwidth::Int,
     if initialize
         data = zeros(T, ndrows + row_padding, ncols + col_padding)
     else
-        data = Array(T, ndrows + row_padding, ncols + col_padding)
+        data = Array{T}(ndrows + row_padding, ncols + col_padding)
     end
     return data
 end
@@ -113,14 +113,9 @@ function data_row(A::BandedArray, i::Int, j::Int)
     return (i - j) + A.h_offset + A.bandwidth + 1
 end
 
-"""Macro to help index into `data` matching A[i, j]"""
-macro banddata(A, i, j)
-    :($A.data[data_row($A, $i, $j), $j])
-end
-
 function Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int)
     if inband(A, i, j)
-        return @banddata(A, i, j)
+        return A.data[data_row(A, i, j), j]
     else
         return A.default
     end
@@ -128,7 +123,7 @@ end
 
 function Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int)
     if inband(A, i, j)
-        @banddata(A, i, j) = v
+        A.data[data_row(A, i, j), j] = v
     else
         error("Cannot set out-of-band element [$i, $j].")
     end
