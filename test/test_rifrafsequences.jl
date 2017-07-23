@@ -19,7 +19,7 @@ using Rifraf
         scores = Scores(-1., -2., -3., -4., -5.)
         rseq = RifrafSequence(seq, error_log_p, bandwidth, scores)
 
-        @test rseq.match_scores == log10(1.0 - exp10(error_log_p))
+        @test rseq.match_scores == log10.(1.0 - exp10.(error_log_p))
         @test rseq.mismatch_scores == error_log_p + scores.mismatch
         @test rseq.ins_scores == error_log_p + scores.insertion
         @test rseq.del_scores == LogProb[-1., -1., -2., -3., -4.] + scores.deletion
