@@ -35,7 +35,7 @@ const MAX_PROB = Prob(0.5)
 function jitter_phred_domain(x::Vector{Prob},
                              phred_std::Prob)
     error = randn(length(x)) * phred_std / 10.0
-    result = exp10(log10(x) + error)
+    result = exp10.(log10.(x) + error)
     result[map(a -> a < MIN_PROB, result)] = MIN_PROB
     result[map(a -> a > MAX_PROB, result)] = MAX_PROB
     return result
@@ -76,7 +76,7 @@ function hmm_sample(sequence::DNASeq,
         if Base.rand(Bernoulli(ins_p)) == 1
             if codon
                 push!(final_seq, random_codon()...)
-                push!(final_error_p, collect(repeated(max_p, 3))...)
+                push!(final_error_p, collect(Base.Iterators.repeated(max_p, 3))...)
                 push!(seqbools, false, false, false)
             else
                 push!(final_seq, rbase())
@@ -149,7 +149,7 @@ function sample_from_template(template::DNASeq,
     end
     # add noise to simulate measurement error
     d = Exponential(phred_scale)
-    base_vector = exp10((-10.0 * log10(template_error_p) + rand(d)) / (-10.0))
+    base_vector = exp10.((-10.0 * log10.(template_error_p) + rand(d)) / (-10.0))
     jittered_error_p = jitter_phred_domain(base_vector,
                                            actual_std)
 

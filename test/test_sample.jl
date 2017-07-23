@@ -41,7 +41,7 @@ srand(1)
         len = 900
         (ref, template, template_error_p,
          seqs, actual, phreds) = sample(nseqs, len; params...)
-        @test_approx_eq_eps mean(template_error_p) params[:error_rate] 0.1
+        @test mean(template_error_p) ≈ params[:error_rate] atol=0.1
     end
 
     @testset "test_sample_mixture" begin
