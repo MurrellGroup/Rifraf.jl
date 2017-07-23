@@ -42,7 +42,7 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
     ins_scores = Vector{Score}(length(error_log_p))
     del_scores = Vector{Score}(length(error_log_p) + 1)
 
-    match_scores[:] = log10(1.0 - exp10(error_log_p))
+    match_scores[:] = log10.(1.0 - exp10.(error_log_p))
     mismatch_scores[:] = error_log_p + scores.mismatch
     ins_scores[:] = error_log_p + scores.insertion
 
@@ -71,7 +71,7 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
         end
     end
 
-    n_errors = sum(exp10(error_log_p))
+    n_errors = sum(exp10.(error_log_p))
 
     return RifrafSequence(seq, n_errors, error_log_p,
                           match_scores, mismatch_scores,
