@@ -26,6 +26,7 @@ end
     do_alignment_proposals::Bool = true
     seed_indels::Bool = true
     indel_correction_only::Bool = true
+    refine_propose_all::Bool = false
     use_ref_for_qvs::Bool = false
     bandwidth::Int = (3 * CODON_LENGTH)
     bandwidth_pvalue::Float64 = 0.1
@@ -66,10 +67,11 @@ end
     ref_scores::Scores
     ref_error_rate::Float64 = -Inf
     reference::RifrafSequence
+    batch_fixed::Bool
     batch_fixed_size::Int
     batch_size::Int
     base_batch_size::Int
-    batch_randomness::Float64 = 0.9
+    batch_randomness::Float64 = 1.0
     sequences::Vector{RifrafSequence}
     batch_seqs::Vector{RifrafSequence} = RifrafSequence[]
     maxlen::Int
@@ -393,8 +395,9 @@ function get_candidates(state::RifrafState, params::RifrafParams;
     newcols = zeros(Score, (nrows, CODON_LENGTH + 1))
 
     # multi-line ternary
-    proposals = if (state.stage == STAGE_INIT ||
-        state.stage == STAGE_REFINE) && params.do_alignment_proposals
+    proposals = if (params.do_alignment_proposals &&
+                    (state.stage == STAGE_INIT ||
+                     (state.stage == STAGE_REFINE && !params.refine_propose_all)))
         do_indels = state.stage == STAGE_INIT
         alignment_proposals(state.Amoves, state.consensus,
                             state.batch_seqs, do_indels)
@@ -493,6 +496,7 @@ function initial_state(consensus::DNASeq,
     return RifrafState(consensus=consensus,
                        reference=refseq,
                        ref_scores=params.ref_scores,
+                       batch_fixed=params.batch_fixed,
                        batch_fixed_size=batch_fixed_size,
                        batch_size=batch_size,
                        base_batch_size=base_batch_size,
@@ -830,7 +834,19 @@ function finish_stage!(state::RifrafState,
     end
     if state.stage == STAGE_INIT
         if length(state.reference) == 0 || !(params.do_frame)
-            state.converged = true
+            if (state.batch_fixed &&
+                state.batch_fixed_size < length(state.sequences))
+                state.batch_fixed = false
+                if params.verbose >= 2
+                    println(STDERR, "    switching off fixed batch")
+                end
+            else
+                if params.refine_propose_all
+                    state.stage = STAGE_REFINE
+                else
+                    state.converged = true
+                end
+            end
         else
             state.stage = STAGE_FRAME
             # estimate reference error rate
@@ -921,7 +937,7 @@ function resample!(state::RifrafState, params::RifrafParams;
                    verbose::Int=0)
     err_weights = [s.est_n_errors for s in state.sequences]
     if ((state.stage == STAGE_INIT || state.stage == STAGE_FRAME) &&
-        params.batch_fixed)
+        state.batch_fixed)
         # always return the top `n`
         indices = sortperm(err_weights)[1:state.batch_fixed_size]
         state.batch_seqs = state.sequences[indices]
@@ -1088,9 +1104,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
         end
 
         # update batch randomness
-        if (!params.batch_fixed ||
-            (state.stage == STAGE_REFINE &&
-             state.stage_iterations[Int(STAGE_REFINE)] > 1))
+        if (!state.batch_fixed || state.stage == STAGE_REFINE)
             state.batch_randomness *= params.batch_mult
             if params.verbose >= 2
                 println(STDERR, "  batch randomness decreased to $(state.batch_randomness)")
