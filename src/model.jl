@@ -43,8 +43,13 @@ end
     # 1: completely random
     batch_randomness::Float64 = 0.9
 
-    batch_mult::Float64 = 0.7
+    # how much to reduce batch randomness each iteration
+    batch_mult::Float64 = 0.9
+
+    # score threshold to increase batch size
     batch_threshold::Float64 = 0.1
+
+    # maximum iterations
     max_iters::Int = 100
 
     # verbosity level
