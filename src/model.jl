@@ -26,7 +26,7 @@ end
     do_alignment_proposals::Bool = true
     seed_indels::Bool = true
     indel_correction_only::Bool = true
-    refine_propose_all::Bool = false
+    refine_propose_all::Bool = true
     use_ref_for_qvs::Bool = false
     bandwidth::Int = (3 * CODON_LENGTH)
     bandwidth_pvalue::Float64 = 0.1
