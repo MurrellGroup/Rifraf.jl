@@ -20,7 +20,7 @@ import Rifraf.sample_from_template,
        Rifraf.phred_to_log_p,
        Rifraf.equal_ranges,
        Rifraf.initial_state,
-       Rifraf.estimate_probs,
+       Rifraf.estimate_consensus_error_probs,
        Rifraf.has_single_indels,
        Rifraf.score_proposal,
        Rifraf.single_indel_proposals,
@@ -30,7 +30,6 @@ import Rifraf.sample_from_template,
        Rifraf.alignment_proposals,
        Rifraf.align_moves,
        Rifraf.moves_to_aligned_seqs,
-       Rifraf.alignment_error_probs,
        Rifraf.Prob,
        Rifraf.LogProb
 
@@ -381,80 +380,6 @@ end
             @test result.consensus == template
         end
     end
-end
-
-
-@testset "base_probs" begin
-    consensus = DNASeq("CGTAC")
-    seqs = [DNASeq("CGAC"),
-            DNASeq("CGAC"),
-            DNASeq("CGAC")]
-    lps = Vector{LogProb}[[-9.0, -9.0, -9.0, -9.0],
-                               [-9.0, -9.0, -9.0, -9.0],
-                               [-9.0, -9.0, -9.0, -9.0]]
-
-    params = RifrafParams(bandwidth=6)
-    errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
-    scores = Scores(errors)
-    pseqs = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
-                           for (s, p) in zip(seqs, lps)]
-    state = initial_state(consensus, pseqs, DNASeq(), params)
-    resample!(state, params)
-    realign_rescore!(state, RifrafParams())
-    probs = estimate_probs(state, false)
-    @test probs.sub[1, 2] > 0.9
-    @test probs.del[1] < 1e-9
-    @test probs.del[3] > 0.9
-end
-
-
-@testset "ins_probs" begin
-    consensus = DNASeq("CGAT")
-    seqs = [DNASeq("CGTAT"),
-            DNASeq("CGTAT"),
-            DNASeq("CGTAT")]
-    params = RifrafParams(bandwidth=6)
-    errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
-    scores = Scores(errors)
-
-    lps = Vector{LogProb}[[-9.0, -9.0, -9.0, -9.0, -9.0],
-                          [-9.0, -9.0, -9.0, -9.0, -9.0],
-                          [-9.0, -9.0, -9.0, -9.0, -9.0]]
-    pseqs = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
-                           for (s, p) in zip(seqs, lps)]
-    state = initial_state(consensus, pseqs, DNASeq(), params)
-    resample!(state, params)
-    realign_rescore!(state, RifrafParams())
-    probs = estimate_probs(state, false)
-    @test maximum(probs.ins[1, :]) < 1e-9
-    @test probs.ins[3, 4] > 0.9
-end
-
-@testset "alignment_probs" begin
-    consensus = DNASeq("ACGT")
-    seqs = [DNASeq("ACGT"),
-            DNASeq("CGT"),
-            DNASeq("CCGT")]
-
-    params = RifrafParams(bandwidth=6)
-    errors = Rifraf.normalize(ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0))
-    scores = Scores(errors)
-
-    ps = [[0.1, 0.1, 0.1, 0.1],
-          [0.2, 0.1, 0.1],
-          [0.2, 0.1, 0.1, 0.1]]
-    lps = map(log10, ps)
-    pseqs = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
-                           for (s, p) in zip(seqs, lps)]
-    state = initial_state(consensus, pseqs, DNASeq(), params)
-    resample!(state, params)
-    realign_rescore!(state, RifrafParams())
-
-    result = alignment_error_probs(length(consensus),
-                                   pseqs, state.Amoves)
-    indices = sortperm(result)
-    expected = [4, 3, 2, 1]
-    @test indices == expected
 end
 
 @testset "smart_forward_moves" begin

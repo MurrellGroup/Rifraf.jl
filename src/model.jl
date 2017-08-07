@@ -94,10 +94,10 @@ end
     params::RifrafParams
     state::RifrafState
     consensus_stages::Vector{Vector{DNASeq}}
-    error_probs::EstimatedProbs = EstimatedProbs(Array{Prob, 2}(),
-                                                 Array{Prob, 1}(),
-                                                 Array{Prob, 2}())
-    aln_error_probs::Vector{Float64} = Float64[]
+    all_error_probs::EstimatedProbs = EstimatedProbs(Array{Prob, 2}(),
+                                                     Array{Prob, 1}(),
+                                                     Array{Prob, 2}())
+    point_error_probs::Vector{Prob} = Prob[]
 end
 
 function equal_ranges(a_range::Tuple{Int,Int},
@@ -426,10 +426,7 @@ function has_single_indels(consensus::DNASeq,
     return TRACE_INSERT in moves || TRACE_DELETE in moves
 end
 
-function single_indel_proposals(consensus::DNASeq,
-                                reference::RifrafSequence)
-    moves = align_moves(consensus, reference,
-                        skew_matches=true)
+function single_indel_proposals(moves::Vector{Trace}, otherseq)
     results = Proposal[]
     cons_idx = 0
     ref_idx = 0
@@ -439,7 +436,7 @@ function single_indel_proposals(consensus::DNASeq,
             ref_idx += 1
         elseif move == TRACE_INSERT
             ref_idx += 1
-            push!(results, Insertion(cons_idx, reference.seq[ref_idx]))
+            push!(results, Insertion(cons_idx, otherseq[ref_idx]))
         elseif move == TRACE_DELETE
             cons_idx += 1
             push!(results, Deletion(cons_idx))
@@ -450,6 +447,18 @@ function single_indel_proposals(consensus::DNASeq,
         end
     end
     return results
+end
+
+
+"""
+Get proposals for indels that actually appeary in alignment.
+
+"""
+function single_indel_proposals(consensus::DNASeq,
+                                other::RifrafSequence)
+    moves = align_moves(consensus, other,
+                        skew_matches=true)
+    return single_indel_proposals(moves, other.seq)
 end
 
 function initial_state(consensus::DNASeq,
@@ -614,24 +623,29 @@ end
 function normalize_log_differences(sub_scores,
                                    del_scores,
                                    ins_scores,
-                                   state_score)
-    # per-base insertion score is mean of neighboring insertions
-    pos_scores = hcat(sub_scores, del_scores)
-    pos_exp = exp10(pos_scores)
-    pos_probs = broadcast(/, pos_exp, sum(pos_exp, 2))
+                                   ins_base_probs)
+    position_scores = hcat(sub_scores, del_scores)
+    position_exp = exp10(position_scores)
+    position_probs = position_exp ./ sum(position_exp, 2)
+
+    # TODO: how to get base rate for insertion at each position???
+    # these probs need to be multiplied by that!!!
+    # but without reference, these probs might be too large
+    # and with reference, they might be too small
     ins_exp = exp10(ins_scores)
-    ins_probs = broadcast(/, ins_exp, exp10(state_score) + sum(ins_exp, 2))
-    sub_probs = pos_probs[:, 1:4]
-    del_probs = pos_probs[:, 5]
+    ins_probs = (ins_exp ./ (sum(ins_exp, 2))) .* ins_base_probs
+
+    sub_probs = position_probs[:, 1:4]
+    del_probs = position_probs[:, 5]
     return EstimatedProbs(sub_probs, del_probs, ins_probs)
 end
 
-function estimate_probs(state::RifrafState,
-                        use_ref_for_qvs::Bool)
+function estimate_consensus_error_probs(state::RifrafState,
+                                        use_ref_for_qvs::Bool)
     sequences = state.batch_seqs
     reference = state.reference
     # `sub_scores[i]` gives the following log probabilities
-    # for `consensus[i]`: [A, C, G, T, -]
+    # for `consensus[i]`: [A, C, G, T]
     sub_scores = zeros(length(state.consensus), 4) + state.score
     del_scores = zeros(length(state.consensus)) + state.score
     # `ins_scores[i]` gives the following log probabilities for an
@@ -661,35 +675,47 @@ function estimate_probs(state::RifrafState,
             ins_scores[m.pos + 1, BASEINTS[m.base]] = score
         end
     end
-    max_score = maximum([maximum(sub_scores),
-                         maximum(del_scores),
-                         maximum(ins_scores)])
-    sub_scores -= max_score
-    del_scores -= max_score
-    ins_scores -= max_score
-    if maximum(sub_scores) > 0.0
-        error("sub scores cannot be positive")
+    sub_scores -= state.score
+    del_scores -= state.score
+    ins_scores -= state.score
+
+    ins_counts = zeros(Int, size(ins_scores)...)
+    for (i, seq) in enumerate(state.batch_seqs)
+        moves = backtrace(state.Amoves[i])
+        props = single_indel_proposals(moves, seq.seq)
+        insertions = [p for p in props if typeof(p) == Insertion]
+        for ins in insertions
+            # TODO: use scores instead of counts here
+            ins_counts[ins.pos + 1, BASEINTS[ins.base]] += 1
+        end
     end
-    if maximum(del_scores) > 0.0
-        error("deletion scores cannot be positive")
+    # base probability of an insertion at any position
+    ins_base_probs = zeros(size(ins_counts)...)
+    # add tiny pseudocount and re-normalize
+    n_seqs = length(state.batch_seqs)
+    ins_base_probs = sum(ins_counts, 2) ./ n_seqs
+    for i in 1:length(ins_base_probs)
+        if ins_base_probs[i] == 0
+            # scale pseudocount by number of sequences
+            ins_base_probs[i] = 1 / 10^(min(n_seqs, 6))
+        end
     end
-    if maximum(ins_scores) > 0.0
-        error("insertion scores cannot be positive")
-    end
+
     return normalize_log_differences(sub_scores,
                                      del_scores,
                                      ins_scores,
-                                     state.score - max_score)
+                                     ins_base_probs)
 end
 
-function estimate_point_probs(probs::EstimatedProbs)
-    pos_probs = hcat(probs.sub, probs.del)
-    no_point_error_prob = maximum(pos_probs, 2)
-    # multiple by 0.5 to avoid double counting.
-    no_ins_error_prob = 1.0 - 0.5 * sum(probs.ins, 2)
-    result = 1.0 - broadcast(*, no_point_error_prob,
-                             no_ins_error_prob[1:end-1],
-                             no_ins_error_prob[2:end])
+function estimate_point_error_probs(probs::EstimatedProbs)
+    position_probs = hcat(probs.sub, probs.del)
+    # assume no substitution would have a higher score than the
+    # current base
+    no_point_error_prob = maximum(probs.sub, 2)
+    no_ins_error_prob = 1.0 - sum(probs.ins, 2)
+    result = 1.0 - (no_point_error_prob .*
+                    no_ins_error_prob[1:end-1] .*
+                    no_ins_error_prob[2:end])
     return reshape(result, length(result))
 end
 
@@ -698,37 +724,6 @@ function base_distribution(base::DNANucleotide, ilp)
     result = fill(lp - log10(3), 4)
     result[BASEINTS[base]] = ilp
     return result
-end
-
-"""Assign error probabilities to consensus bases.
-
-Compute posterior error probability from all sequence bases
-that aligned to the consensus base.
-
-"""
-function alignment_error_probs(tlen::Int,
-                               seqs::Vector{RifrafSequence},
-                               Amoves::Vector{BandedArray{Trace}})
-    # FIXME: incorporate scores
-    # FIXME: account for indels
-    probs = zeros(tlen, 4)
-    for (s, Am) in zip(seqs, Amoves)
-        moves = backtrace(Am)
-        result = zeros(Int, tlen + 1)
-        i, j = (1, 1)
-        for move in moves
-            i, j = offset_forward(move, i, j)
-            s_i = i - 1
-            t_j = j - 1
-            if move == TRACE_MATCH
-                probs[t_j, 1:4] += base_distribution(s.seq[s_i],
-                                                     s.match_scores[s_i])
-            end
-        end
-    end
-    probs = exp10(probs)
-    probs = 1.0 - maximum(probs ./ sum(probs, 2), 2)
-    return vec(probs)
 end
 
 function check_params(scores, reference, params)
@@ -1125,13 +1120,15 @@ function rifraf(dnaseqs::Vector{DNASeq},
 
         # FIXME: recomputing for all sequences is costly, but using batch
         # is less accurate
-        # possibly use top n sequences here
+
+        # possibly use top n sequences here, plus current batch? But
+        # then it might not be converged!!!
+
         state.realign_As = true
         state.realign_Bs = true
         realign_rescore!(state, params)
-        result.error_probs = estimate_probs(state, params.use_ref_for_qvs)
-        result.aln_error_probs = alignment_error_probs(length(state.consensus),
-                                                     state.batch_seqs, state.Amoves)
+        result.all_error_probs = estimate_consensus_error_probs(state, params.use_ref_for_qvs)
+        result.point_error_probs = estimate_point_error_probs(result.all_error_probs)
     end
     if params.verbose >= 1
         println(STDERR, "done. converged: $(state.converged)")

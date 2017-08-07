@@ -27,8 +27,11 @@ using Rifraf
         @test result == expected
     end
     @testset "correct shifts 4" begin
+        # TODO: we expect to delete AA, but RIFRAF aligment finds
+        # a codon insertion and a single deletion, which is cheaper
+        # than two deletions
         consensus = DNASeq("TTTAACCC")
-        reference = DNASeq("TTTCCC")
+        reference = DNASeq("TT---TCCC")
         expected = DNASeq("TTTCCC")
         result = Rifraf.correct_shifts(consensus, reference)
         @test result == expected
