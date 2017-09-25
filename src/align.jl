@@ -6,8 +6,8 @@ typealias Trace Int8
 # trace values
 const TRACE_NONE         = Trace(0)
 const TRACE_MATCH        = Trace(1)
-const TRACE_INSERT       = Trace(2)
-const TRACE_DELETE       = Trace(3)
+const TRACE_INSERT       = Trace(2) # insertion during sequencing (so propose deletion)
+const TRACE_DELETE       = Trace(3) # deletion during sequencing (so propose insertion)
 const TRACE_CODON_INSERT = Trace(4)
 const TRACE_CODON_DELETE = Trace(5)
 
