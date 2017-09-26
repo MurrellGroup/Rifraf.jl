@@ -1,4 +1,5 @@
 ArgParse
+BioCore
 BioSymbols
 BioSequences
 Distributions
@@ -6,3 +7,4 @@ Glob
 IterTools
 Parameters
 StatsBase
+TestSetExtensions

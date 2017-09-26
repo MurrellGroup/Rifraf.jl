@@ -1,5 +1,6 @@
 module Rifraf
 
+using BioCore
 using BioSymbols
 using BioSequences
 using Distributions
