@@ -1,6 +1,7 @@
 module Rifraf
 
-using Bio.Seq
+using BioSymbols
+using BioSequences
 using Distributions
 using Parameters
 using StatsBase

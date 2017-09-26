@@ -1,4 +1,5 @@
-using Bio.Seq
+using BioSymbols
+using BioSequences
 using Base.Test
 
 using Rifraf

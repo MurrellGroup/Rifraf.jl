@@ -2,7 +2,7 @@ function rbase()
     return Distributions.sample([DNA_A, DNA_C, DNA_G, DNA_T])
 end
 
-function mutate_base(base::DNANucleotide)
+function mutate_base(base::DNA)
     result = rbase()
     while result == base
         result = rbase()

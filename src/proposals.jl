@@ -2,12 +2,12 @@ abstract type Proposal end
 
 struct Substitution <: Proposal
     pos::Int
-    base::DNANucleotide
+    base::DNA
 end
 
 struct Insertion <: Proposal
     pos::Int  # insert after this position
-    base::DNANucleotide
+    base::DNA
 end
 
 struct Deletion <: Proposal

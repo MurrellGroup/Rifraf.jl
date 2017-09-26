@@ -49,7 +49,7 @@ end
 
 function update(A::BandedArray{Score},
                 i::Int, j::Int,
-                s_base::DNANucleotide, t_base::DNANucleotide,
+                s_base::DNA, t_base::DNA,
                 pseq::RifrafSequence;
                 newcols::Array{Score, 2}=Array{Score}((0, 0)),
                 doreverse::Bool=false,

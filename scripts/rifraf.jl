@@ -1,5 +1,6 @@
 import Bio.Seq
-@everywhere using Bio.Seq
+@everywhere using BioSymbols
+@everywhere using BioSequences
 using ArgParse
 using Glob
 

@@ -1,5 +1,6 @@
-using Bio.Seq
-using Iterators
+using BioSymbols
+using BioSequences
+using IterTools
 using Base.Test
 
 using Rifraf

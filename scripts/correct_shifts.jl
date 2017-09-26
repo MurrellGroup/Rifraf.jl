@@ -1,5 +1,5 @@
-import Bio.Seq
-using Bio.Seq
+using BioSymbols
+using BioSequences
 using ArgParse
 using Glob
 

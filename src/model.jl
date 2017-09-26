@@ -407,7 +407,7 @@ function get_candidates(state::RifrafState, params::RifrafParams;
     return candidates
 end
 
-function base_consensus(d::Dict{DNANucleotide, Score})
+function base_consensus(d::Dict{DNA, Score})
     return minimum((v, k) for (k, v) in d)[2]
 end
 
@@ -683,7 +683,7 @@ function estimate_point_probs(probs::EstimatedProbs)
     return reshape(result, length(result))
 end
 
-function base_distribution(base::DNANucleotide, ilp)
+function base_distribution(base::DNA, ilp)
     lp = log10(1.0 - exp10(ilp))
     result = fill(lp - log10(3), 4)
     result[BASEINTS[base]] = ilp
