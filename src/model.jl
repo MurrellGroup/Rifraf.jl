@@ -15,6 +15,7 @@ struct EstimatedProbs
 end
 
 @with_kw type RifrafParams
+    scores::Scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
     ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))
     ref_indel_mult::Score = 3.0
     min_ref_indel_score::Score = -1.0 * 3^5
@@ -22,7 +23,7 @@ end
     do_init::Bool = true
     do_frame::Bool = true
     do_refine::Bool = true
-    do_score::Bool = true
+    do_score::Bool = false
     do_alignment_proposals::Bool = true
     seed_indels::Bool = true
     indel_correction_only::Bool = true
@@ -36,7 +37,7 @@ end
     batch_fixed_size::Int = 5
 
     # if <= 1, no batching is used
-    batch_size::Int = 10
+    batch_size::Int = 20
 
     # 0: top n get picked
     # 0.5: weight according to estimated errors
@@ -45,6 +46,7 @@ end
 
     batch_mult::Float64 = 0.7
     batch_threshold::Float64 = 0.1
+
     max_iters::Int = 100
 
     # verbosity level
@@ -789,6 +791,9 @@ function handle_candidates!(candidates::Vector{ScoredProposal},
     if params.verbose >= 2
         println(STDERR, "    found $(length(candidates)) candidates; filtered to $(length(chosen_cands))")
     end
+    if params.verbose >= 3
+        println(STDERR, "    chosen: $chosen_cands")
+    end
     state.consensus = apply_proposals(old_consensus,
                                       Proposal[c.proposal
                                                for c in chosen_cands])
@@ -952,12 +957,18 @@ function check_score!(state::RifrafState, params::RifrafParams,
         println(STDERR, "    score: $(state.score)")
     end
 
-    if (state.score < old_score &&
-        !state.penalties_increased &&
+    if (!state.penalties_increased &&
         state.batch_size == length(state.sequences) &&
         state.stage_iterations[Int(state.stage)] > 1)
-        if params.verbose >= 2
-            println(STDERR, "    WARNING: not using batches, but score decreased.")
+        if state.score < old_score
+            if params.verbose >= 2
+                println(STDERR, "    WARNING: not using batches, but score decreased.")
+            end
+        elseif state.score == old_score
+            if params.verbose >= 2
+                println(STDERR, "    score did not change. ending stage.")
+            end
+            return false
         end
     end
     if ((state.score - old_score) / old_score > params.batch_threshold &&
@@ -979,18 +990,17 @@ function check_score!(state::RifrafState, params::RifrafParams,
             println(STDERR, "    new score: $(state.score)")
         end
     end
-
+    return true
 end
 
 function rifraf(dnaseqs::Vector{DNASeq},
-                error_log_ps::Vector{Vector{LogProb}},
-                scores::Scores;
+                error_log_ps::Vector{Vector{LogProb}};
                 consensus::DNASeq=DNASeq(),
                 reference::DNASeq=DNASeq(),
                 params::RifrafParams=RifrafParams())
-    check_params(scores, reference, params)
+    check_params(params.scores, reference, params)
 
-    sequences = RifrafSequence[RifrafSequence(s, p, params.bandwidth, scores)
+    sequences = RifrafSequence[RifrafSequence(s, p, params.bandwidth, params.scores)
                                for (s, p) in zip(dnaseqs, error_log_ps)]
 
     state = initial_state(consensus, sequences, reference, params)
@@ -1017,7 +1027,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
     state.realign_Bs = true
     old_score = -Inf
 
-    for _ in 1:params.max_iters
+    for iter in 1:params.max_iters
         # skip to next valid stage
         while state.stage < STAGE_SCORE && !(state.stage in enabled_stages)
             state.stage = next_stage(state.stage)
@@ -1029,7 +1039,7 @@ function rifraf(dnaseqs::Vector{DNASeq},
         push!(consensus_stages[Int(state.stage)], state.consensus)
 
         if params.verbose >= 1
-            println(STDERR, "iteration $i : $(state.stage) : $(state.score)")
+            println(STDERR, "iteration $iter : $(state.stage) : $(state.score)")
         end
         if params.verbose >= 3
             println(STDERR, "  consensus: $(state.consensus)")
@@ -1051,30 +1061,33 @@ function rifraf(dnaseqs::Vector{DNASeq},
         if params.verbose >= 2
             println(STDERR, "  step: check score")
         end
-        check_score!(state, params, old_score)
-        old_score = state.score
+        if check_score!(state, params, old_score)
+            old_score = state.score
 
-        # get candidate changes to consensus
-        state.penalties_increased = false
+            # get candidate changes to consensus
+            state.penalties_increased = false
 
-        indel_seeds = if state.stage == STAGE_FRAME && params.seed_indels
-            single_indel_proposals(state.consensus, state.reference)
-        else
-            Proposal[]
-        end
-        candidates = get_candidates(state, params; indel_seeds=indel_seeds)
-
-        # handle candidates
-        state.realign_As = true
-        if length(candidates) > 0
-            if params.verbose >= 2
-                println(STDERR, "  step: handle candidates")
+            indel_seeds = if state.stage == STAGE_FRAME && params.seed_indels
+                single_indel_proposals(state.consensus, state.reference)
+            else
+                Proposal[]
             end
-            handle_candidates!(candidates, state, params)
-        else
-            if params.verbose >= 2
-                println(STDERR, "  step: finish_stage")
+            candidates = get_candidates(state, params; indel_seeds=indel_seeds)
+
+            # handle candidates
+            state.realign_As = true
+            if length(candidates) > 0
+                if params.verbose >= 2
+                    println(STDERR, "  step: handle candidates")
+                end
+                handle_candidates!(candidates, state, params)
+            else
+                if params.verbose >= 2
+                    println(STDERR, "  step: finish_stage")
+                end
+                finish_stage!(state, params)
             end
+        else
             finish_stage!(state, params)
         end
         if state.converged
@@ -1082,9 +1095,10 @@ function rifraf(dnaseqs::Vector{DNASeq},
         end
 
         # update batch randomness
-        if (!params.batch_fixed ||
+        if ((!params.batch_fixed ||
             (state.stage == STAGE_REFINE &&
-             state.stage_iterations[Int(STAGE_REFINE)] > 1))
+             state.stage_iterations[Int(STAGE_REFINE)] > 1)) &&
+            state.batch_size < length(state.sequences))
             state.batch_randomness *= params.batch_mult
             if params.verbose >= 2
                 println(STDERR, "  batch randomness decreased to $(state.batch_randomness)")
@@ -1120,14 +1134,13 @@ function rifraf(dnaseqs::Vector{DNASeq},
 end
 
 function rifraf(dnaseqs::Vector{DNASeq},
-                phreds::Vector{Vector{Phred}},
-                scores::Scores;
+                phreds::Vector{Vector{Phred}};
                 kwargs...)
     if any(minimum(p) < 0 for p in phreds)
         error("phred score cannot be negative")
     end
     error_log_ps = phred_to_log_p(phreds)
-    return rifraf(dnaseqs, error_log_ps, scores; kwargs...)
+    return rifraf(dnaseqs, error_log_ps; kwargs...)
 end
 
 """Adjust error probabilities so that the expected number of errors

@@ -23,7 +23,7 @@ function phred_to_p(q::Phred)
 end
 
 function phred_to_p(x::Vector{Phred})
-    return exp10(phred_to_log_p(x))
+    return exp10.(phred_to_log_p(x))
 end
 
 

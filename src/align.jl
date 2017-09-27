@@ -53,8 +53,8 @@ function update(A::BandedArray{Score},
                 pseq::RifrafSequence;
                 newcols::Array{Score, 2}=Array{Score}((0, 0)),
                 doreverse::Bool=false,
-                acol=-1, trim=false,
-                skew_matches=false)
+                acol::Int=-1, trim::Bool=false,
+                skew_matches::Bool=false)
     final_score = Score(-Inf)
     final_move = TRACE_NONE
 
