@@ -88,7 +88,7 @@ function apply_proposals(seq::DNASeq,
     # knows not to include the deleted base
     last_del_pos = 0
     # sort by position, making sure deletions go before insertions
-    proposals = sort(proposals, by=p->(p.pos, typeof(p) == Deletion ? 0 : 1))
+    proposals = sort(proposals, by = p -> (p.pos, typeof(p) == Deletion ? 0 : 1))
     for p in proposals
         push!(result, seq[next:p.pos - 1])
         push!(result, get_proposal_base(seq, p, last_del_pos))

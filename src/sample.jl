@@ -99,7 +99,7 @@ function hmm_sample(sequence::DNASeq,
             if i > length(sequence) - 2
                 del_p = 0.0
             else
-                del_p = maximum(error_p[i:i+2]) * del_ratio / 3.0
+                del_p = maximum(error_p[i:i + 2]) * del_ratio / 3.0
             end
         else
             del_p = p * del_ratio
@@ -164,7 +164,7 @@ function sample_from_template(template::DNASeq,
     return DNASeq(seq), actual_error_p, phreds, sbools, tbools
 end
 
-function sample_mixture(nseqs::Tuple{Int, Int}, len::Int, n_diffs::Int;
+function sample_mixture(nseqs::Tuple{Int,Int}, len::Int, n_diffs::Int;
                         ref_error_rate::Prob=0.1,
                         ref_errors::ErrorModel=ErrorModel(10, 0, 0, 1, 0),
                         error_rate::Prob=0.01,

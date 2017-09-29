@@ -25,7 +25,7 @@ end
 
 Borrowed from StatsFuns.jl.
 """
-function logsumexp10{T<:Real}(x::AbstractArray{T})
+function logsumexp10(x::AbstractArray{T}) where {T <: Real}
     S = typeof(exp10(zero(T)))    # because of 0.4.0
     isempty(x) && return -S(Inf)
     u = maximum(x)

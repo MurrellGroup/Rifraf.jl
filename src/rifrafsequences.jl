@@ -2,7 +2,7 @@
 error probabilities.
 
 """
-type RifrafSequence
+mutable struct RifrafSequence
     seq::DNASeq
     est_n_errors::Float64
     error_log_p::Vector{LogProb}
@@ -48,16 +48,16 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
 
     del_scores[1] = error_log_p[1] + scores.deletion
     del_scores[end] = error_log_p[end] + scores.deletion
-    for i=1:(length(error_log_p) - 1)
-        del_scores[i+1] = max(error_log_p[i], error_log_p[i+1]) + scores.deletion
+    for i = 1:(length(error_log_p) - 1)
+        del_scores[i + 1] = max(error_log_p[i], error_log_p[i + 1]) + scores.deletion
     end
 
     codon_ins_scores = Vector{Score}()
     codon_del_scores = Vector{Score}()
     if scores.codon_insertion > -Inf
         codon_ins_scores = Vector{Score}(length(error_log_p) - 2)
-        for i=2:(length(error_log_p)-1)
-            codon_ins_scores[i-1] = max(error_log_p[i - 1],
+        for i = 2:(length(error_log_p) - 1)
+            codon_ins_scores[i - 1] = max(error_log_p[i - 1],
                                         error_log_p[i],
                                         error_log_p[i + 1]) + scores.codon_insertion
         end
@@ -66,8 +66,8 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
         codon_del_scores = Vector{Score}(length(error_log_p) + 1)
         codon_del_scores[1] = error_log_p[1] + scores.codon_deletion
         codon_del_scores[end] = error_log_p[end] + scores.codon_deletion
-        for i=1:(length(error_log_p) - 1)
-            codon_del_scores[i+1] = max(error_log_p[i], error_log_p[i+1]) + scores.codon_deletion
+        for i = 1:(length(error_log_p) - 1)
+            codon_del_scores[i + 1] = max(error_log_p[i], error_log_p[i + 1]) + scores.codon_deletion
         end
     end
 

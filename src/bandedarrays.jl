@@ -19,7 +19,7 @@ mutable struct BandedArray{T} <: AbstractArray{T,2}
     default::T
     initialize::Bool
 
-    function BandedArray{T}(data::Array{T, 2}, shape::Tuple{Int, Int},
+    function BandedArray{T}(data::Array{T,2}, shape::Tuple{Int,Int},
                             bandwidth::Int,
                             row_padding::Int, col_padding::Int,
                             default::T, initialize::Bool) where T
@@ -52,7 +52,7 @@ function bandlimits(nrows, ncols, bandwidth)
     return lower, upper
 end
 
-function BandedArray(T::Type, shape::Tuple{Int, Int}, bandwidth::Int;
+function BandedArray(T::Type, shape::Tuple{Int,Int}, bandwidth::Int;
                      row_padding::Int=0, col_padding::Int=0,
                      default=zero(T), initialize::Bool=true)
     nrows, ncols = shape
@@ -71,13 +71,13 @@ function allocate_data(T::Type, nrows::Int, ncols::Int, bandwidth::Int,
     return data
 end
 
-function reallocate!{T}(A::BandedArray{T})
+function reallocate!(A::BandedArray{T}) where {T}
     # TODO: copy if requested
     A.data = allocate_data(T, A.nrows, A.ncols, A.bandwidth,
                            A.row_padding, A.col_padding, A.initialize)
 end
 
-function Base.resize!{T}(A::BandedArray{T}, shape::Tuple{Int, Int})
+function Base.resize!(A::BandedArray{T}, shape::Tuple{Int,Int}) where {T}
     nrows, ncols = shape
     A.nrows = nrows
     A.ncols = ncols
@@ -92,7 +92,7 @@ function Base.resize!{T}(A::BandedArray{T}, shape::Tuple{Int, Int})
     end
 end
 
-function newbandwidth!{T}(A::BandedArray{T}, bandwidth::Int)
+function newbandwidth!(A::BandedArray{T}, bandwidth::Int) where {T}
     A.bandwidth = bandwidth
     reallocate!(A)
 end
@@ -113,7 +113,7 @@ function data_row(A::BandedArray, i::Int, j::Int)
     return (i - j) + A.h_offset + A.bandwidth + 1
 end
 
-function Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int)
+function Base.getindex(A::BandedArray{T}, i::Int, j::Int) where {T}
     if inband(A, i, j)
         return A.data[data_row(A, i, j), j]
     else
@@ -121,7 +121,7 @@ function Base.getindex{T}(A::BandedArray{T}, i::Int, j::Int)
     end
 end
 
-function Base.setindex!{T}(A::BandedArray{T}, v, i::Int, j::Int)
+function Base.setindex!(A::BandedArray{T}, v, i::Int, j::Int) where {T}
     if inband(A, i, j)
         A.data[data_row(A, i, j), j] = v
     else
@@ -157,7 +157,7 @@ function inband(A::BandedArray, i::Int, j::Int)
 end
 
 """Return a dense representation of A"""
-function Base.full{T}(A::BandedArray{T})
+function Base.full(A::BandedArray{T}) where {T}
     result = zeros(T, size(A))
     for j = 1:A.ncols
         start, stop = row_range(A, j)
@@ -173,7 +173,7 @@ If `A` has shape `m` by `n`, then element [i, j] goes to
 position [m - i, n - j].
 
 """
-function flip!{T}(A::BandedArray{T})
+function flip!(A::BandedArray{T}) where {T}
     nrows = ndatarows(A.nrows, A.ncols, A.bandwidth)
     a, b = divrem(A.ncols, 2)
     for j in 1:a

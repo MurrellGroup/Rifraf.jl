@@ -1,20 +1,20 @@
 @enum(Stage,
-      STAGE_INIT=1,    # no reference; all proposals
-      STAGE_FRAME=2,   # reference; indel proposals
-      STAGE_REFINE=3,  # no reference; substitutions
-      STAGE_SCORE=4)
+      STAGE_INIT = 1,    # no reference; all proposals
+      STAGE_FRAME = 2,   # reference; indel proposals
+      STAGE_REFINE = 3,  # no reference; substitutions
+      STAGE_SCORE = 4)
 
 function next_stage(s::Stage)
     return Stage(Int(s) + 1)
 end
 
 struct EstimatedProbs
-    sub::Array{Prob, 2}
-    del::Array{Prob, 1}
-    ins::Array{Prob, 2}
+    sub::Array{Prob,2}
+    del::Array{Prob,1}
+    ins::Array{Prob,2}
 end
 
-@with_kw type RifrafParams
+@with_kw mutable struct RifrafParams
     scores::Scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
     ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))
     ref_indel_mult::Score = 3.0
@@ -57,7 +57,7 @@ end
     verbose::Int = 0
 end
 
-@with_kw type RifrafState
+@with_kw mutable struct RifrafState
     score::Score = -Inf
     consensus::DNASeq
     ref_scores::Scores
@@ -84,14 +84,14 @@ end
     converged::Bool = false
 end
 
-@with_kw type RifrafResult
+@with_kw mutable struct RifrafResult
     consensus::DNASeq
     params::RifrafParams
     state::RifrafState
     consensus_stages::Vector{Vector{DNASeq}}
-    error_probs::EstimatedProbs = EstimatedProbs(Array{Prob, 2}(0,0),
-                                                 Array{Prob, 1}(0),
-                                                 Array{Prob, 2}(0,0))
+    error_probs::EstimatedProbs = EstimatedProbs(Array{Prob,2}(0, 0),
+                                                 Array{Prob,1}(0),
+                                                 Array{Prob,2}(0, 0))
     aln_error_probs::Vector{Float64} = Float64[]
 end
 
@@ -126,7 +126,7 @@ const BOFFSETS = Dict(Substitution => 2,
 function score_nocodon(proposal::Proposal,
                        A::BandedArray{Score}, B::BandedArray{Score},
                        pseq::RifrafSequence,
-                       newcols::Array{Score, 2})
+                       newcols::Array{Score,2})
     if size(A)[1] != length(pseq) + 1
         error("wrong size array")
     end
@@ -145,7 +145,7 @@ function score_nocodon(proposal::Proposal,
     new_acol = acol + 1
     amin, amax = row_range(A, min(new_acol, ncols))
     for i in amin:amax
-        seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
+        seq_base = i > 1 ? pseq.seq[i - 1] : DNA_Gap
         newcols[i, 1], _ = update(A, i, new_acol,
                                   seq_base, proposal.base, pseq;
                                   newcols=newcols, acol=acol)
@@ -187,7 +187,7 @@ function score_proposal(proposal::Proposal,
                         A::BandedArray{Score}, B::BandedArray{Score},
                         consensus::DNASeq,
                         pseq::RifrafSequence,
-                        newcols::Array{Score, 2})
+                        newcols::Array{Score,2})
     if !do_codon_moves(pseq)
         return score_nocodon(proposal, A, B, pseq, newcols)
     end
@@ -228,7 +228,7 @@ function score_proposal(proposal::Proposal,
         range_col = min(acol + j, ncols)
         amin, amax = row_range(A, range_col)
         for i in amin:amax
-            seq_base = i > 1 ? pseq.seq[i-1] : DNA_Gap
+            seq_base = i > 1 ? pseq.seq[i - 1] : DNA_Gap
             newcols[i, j], _ = update(A, i, acol + j,
                                       seq_base, sub_consensus[j], pseq;
                                       newcols=newcols, acol=acol)
@@ -268,7 +268,7 @@ end
 
 function score_proposal(m::Proposal,
                         state::RifrafState,
-                        newcols::Array{Score, 2},
+                        newcols::Array{Score,2},
                         use_ref::Bool)
     score = 0.0
     for si in 1:length(state.batch_seqs)
@@ -409,7 +409,7 @@ function get_candidates(state::RifrafState, params::RifrafParams;
     return candidates
 end
 
-function base_consensus(d::Dict{DNA, Score})
+function base_consensus(d::Dict{DNA,Score})
     return minimum((v, k) for (k, v) in d)[2]
 end
 
@@ -529,7 +529,7 @@ function smart_forward_moves!(consensus::DNASeq, seq::RifrafSequence,
                               B::BandedArray{Score},
                               Amoves::BandedArray{Trace},
                               pvalue::Float64)
-    max_bandwidth = min(seq.bandwidth * 2 ^ 5, length(consensus), length(seq))
+    max_bandwidth = min(seq.bandwidth * 2^5, length(consensus), length(seq))
     if seq.bandwidth_fixed
         max_bandwidth = seq.bandwidth
     end
@@ -680,7 +680,7 @@ function estimate_point_probs(probs::EstimatedProbs)
     # multiple by 0.5 to avoid double counting.
     no_ins_error_prob = 1.0 - 0.5 * sum(probs.ins, 2)
     result = 1.0 - broadcast(*, no_point_error_prob,
-                             no_ins_error_prob[1:end-1],
+                             no_ins_error_prob[1:end - 1],
                              no_ins_error_prob[2:end])
     return reshape(result, length(result))
 end
@@ -922,6 +922,7 @@ function resample!(state::RifrafState, params::RifrafParams;
     if ((state.stage == STAGE_INIT || state.stage == STAGE_FRAME) &&
         params.batch_fixed)
         # always return the top `n`
+        # TODO: when to switch to random batches?
         indices = sortperm(err_weights)[1:state.batch_fixed_size]
         state.batch_seqs = state.sequences[indices]
         if verbose >= 2

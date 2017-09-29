@@ -367,16 +367,15 @@ end
                 reference = DNASeq()
             end
 
-            params = RifrafParams(ref_scores=ref_scores,
+            params = RifrafParams(scores=seq_scores,
+                                  ref_scores=ref_scores,
                                   do_alignment_proposals=do_alignment_proposals,
                                   seed_indels=seed_indels,
                                   indel_correction_only=indel_correction_only,
                                   batch_size=batch_size)
 
-            result = rifraf(reads,
-                            phreds, seq_scores;
-                            reference=reference,
-                            params=params)
+            result = rifraf(reads, phreds;
+                            reference=reference, params=params)
             @test result.consensus == template
         end
     end

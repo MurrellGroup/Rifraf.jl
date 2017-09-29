@@ -29,7 +29,7 @@ end
 
 function update_helper(final_score::Score, final_move::Trace,
                        move_score::Score, move::Trace,
-                       newcols::Array{Score, 2},
+                       newcols::Array{Score,2},
                        A::BandedArray{Score},
                        i::Int, j::Int, acol::Int)
     prev_i, prev_j = offset_backward(move, i, j)
@@ -51,7 +51,7 @@ function update(A::BandedArray{Score},
                 i::Int, j::Int,
                 s_base::DNA, t_base::DNA,
                 pseq::RifrafSequence;
-                newcols::Array{Score, 2}=Array{Score}((0, 0)),
+                newcols::Array{Score,2}=Array{Score}((0, 0)),
                 doreverse::Bool=false,
                 acol::Int=-1, trim::Bool=false,
                 skew_matches::Bool=false)
@@ -61,7 +61,7 @@ function update(A::BandedArray{Score},
     nrows, ncols = size(A)
     seqlen = length(pseq)
     # TODO: this cannot make mismatches preferable to codon indels
-    seq_i = doreverse? min(seqlen, seqlen - (i-1) + 1) : max(i-1, 1)
+    seq_i = doreverse ? min(seqlen, seqlen - (i - 1) + 1) : max(i - 1, 1)
     del_i = doreverse ? nrows - i + 1 : i
     match_score = (s_base == t_base) ? pseq.match_scores[seq_i] : pseq.mismatch_scores[seq_i]
     ins_score = pseq.ins_scores[seq_i]
@@ -130,8 +130,8 @@ function forward_moves!(t::DNASeq, s::RifrafSequence,
             if i == 1 && j == 1
                 continue
             end
-            sbase = i > 1 ? s.seq[i-1] : DNA_Gap
-            tbase = j > 1 ? t[j-1] : DNA_Gap
+            sbase = i > 1 ? s.seq[i - 1] : DNA_Gap
+            tbase = j > 1 ? t[j - 1] : DNA_Gap
             result[i, j], moves[i, j] = update(result, i, j, sbase, tbase, s;
                                                doreverse=false,
                                                trim=trim,
@@ -168,8 +168,8 @@ function forward!(t::DNASeq, s::RifrafSequence,
             if i == 1 && j == 1
                 continue
             end
-            sbase = i > 1 ? s.seq[doreverse ? length(s) - (i-1) + 1 : i-1] : DNA_Gap
-            tbase = j > 1 ? t[doreverse ? length(t) - (j-1) + 1 : j-1] : DNA_Gap
+            sbase = i > 1 ? s.seq[doreverse ? length(s) - (i - 1) + 1 : i - 1] : DNA_Gap
+            tbase = j > 1 ? t[doreverse ? length(t) - (j - 1) + 1 : j - 1] : DNA_Gap
             result[i, j], _ = update(result, i, j, sbase, tbase, s;
                                      doreverse=doreverse,
                                      trim=trim,
@@ -212,8 +212,8 @@ function backward(t::DNASeq, s::RifrafSequence)
 end
 
 function backtrace_indices(moves::BandedArray{Trace};
-                           start::Tuple{Int, Int}=(0, 0))
-    result = Tuple{Int, Int}[]
+                           start::Tuple{Int,Int}=(0, 0))
+    result = Tuple{Int,Int}[]
     i, j = start
     if i == 0 || j == 0
         i, j = size(moves)
@@ -301,9 +301,9 @@ function moves_to_aligned_seqs(moves::Vector{Trace},
             push!(aligned_s, DNA_Gap)
         elseif move == TRACE_CODON_INSERT
             append!(aligned_t, DNASequence([DNA_Gap, DNA_Gap, DNA_Gap]))
-            append!(aligned_s, DNASequence([s[i-2], s[i-1], s[i]]))
+            append!(aligned_s, DNASequence([s[i - 2], s[i - 1], s[i]]))
         elseif move == TRACE_CODON_DELETE
-            append!(aligned_t, DNASequence([t[j-2], t[j-1], t[j]]))
+            append!(aligned_t, DNASequence([t[j - 2], t[j - 1], t[j]]))
             append!(aligned_s, DNASequence([DNA_Gap, DNA_Gap, DNA_Gap]))
         end
     end
