@@ -205,4 +205,11 @@ using Rifraf
         @test m[1, 1] == Score(1.0)
         @test m[end, 1] == default
     end
+
+    @testset "equal_ranges" begin
+        @test Rifraf.equal_ranges((3, 5), (4, 6)) == ((2, 3), (1, 2))
+        @test Rifraf.equal_ranges((1, 5), (1, 2)) == ((1, 2), (1, 2))
+        @test Rifraf.equal_ranges((1, 5), (4, 5)) == ((4, 5), (1, 2))
+    end
+
 end

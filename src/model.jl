@@ -8,28 +8,60 @@ function next_stage(s::Stage)
     return Stage(Int(s) + 1)
 end
 
+"""
+Estimated error probabilities of a consensus sequence.
+
+# Fields
+- `sub::Array{Prob,2}`: Probabilities for all four bases.
+- `del::Array{Prob,1}`: Probabilities for a deletion
+- `ins::Array{Prob,2}`: Probabilities for all insertions.
+
+"""
 struct EstimatedProbs
     sub::Array{Prob,2}
     del::Array{Prob,1}
     ins::Array{Prob,2}
 end
 
+"""The parameters for a RIFRAF run."""
 @with_kw mutable struct RifrafParams
     scores::Scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
     ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))
+
+    # multiplier for single indel penalty
     ref_indel_mult::Score = 3.0
+
+    # limit for single indel penalty
     min_ref_indel_score::Score = -1.0 * 3^5
+
+    # multiplier for estimated reference error rate
     ref_error_mult::Float64 = 1.0
+
+    # enable or disable various stages of the run
     do_init::Bool = true
     do_frame::Bool = true
     do_refine::Bool = true
     do_score::Bool = false
+
+    # only propose changes that occur in pairwise alignments
     do_alignment_proposals::Bool = true
+
+    # seed indel locations from the alignment to reference
     seed_indels::Bool = true
+
+    # only propose indels during frame correction stage
     indel_correction_only::Bool = true
+
+    # use reference alignment when estimating quality scores
     use_ref_for_qvs::Bool = false
+
+    # alignment bandwidth
     bandwidth::Int = (3 * CODON_LENGTH)
+
+    # p-value for increasing bandwidth
     bandwidth_pvalue::Float64 = 0.1
+
+    # distance between accepted candidate proposals
     min_dist::Int = (5 * CODON_LENGTH)
 
     # use top sequences for initial stage and frame correction
@@ -44,9 +76,13 @@ end
     # 1: completely random
     batch_randomness::Float64 = 0.9
 
+    # multiplier to reduce batch randomness
     batch_mult::Float64 = 0.7
+
+    # score threshold for increasing batch size
     batch_threshold::Float64 = 0.1
 
+    # maximum total iterations across all stages before giving up
     max_iters::Int = 100
 
     # verbosity level
@@ -57,6 +93,7 @@ end
     verbose::Int = 0
 end
 
+"""The mutable state that keeps track of a RIFRAF run."""
 @with_kw mutable struct RifrafState
     score::Score = -Inf
     consensus::DNASeq
@@ -84,6 +121,22 @@ end
     converged::Bool = false
 end
 
+"""
+    RifrafResult()
+
+The result of a RIFRAF run.
+
+# Fields
+- `consensus::DNASeq`: the consensus found by RIFRAF.
+- `params::RifrafParams`: the parameters used for this run.
+- `state::RifrafState`: the final state of the run.
+- `consensus_stages::Vector{Vector{DNASeq}}`:
+- `error_probs::EstimatedProbs`: estimated per-base probabilities for
+  each position. Only available if `params.do_score` is `true`.
+- `aln_error_probs::Vector{Float64}`: combined per-base error
+  probabilities. Only available if `params.do_score` is `true`.
+
+"""
 @with_kw mutable struct RifrafResult
     consensus::DNASeq
     params::RifrafParams
@@ -93,19 +146,6 @@ end
                                                  Array{Prob,1}(0),
                                                  Array{Prob,2}(0, 0))
     aln_error_probs::Vector{Float64} = Float64[]
-end
-
-function equal_ranges(a_range::Tuple{Int,Int},
-                      b_range::Tuple{Int,Int})
-    a_start, a_stop = a_range
-    b_start, b_stop = b_range
-    alen = a_stop - a_start + 1
-    blen = b_stop - b_start + 1
-    amin = max(b_start - a_start + 1, 1)
-    amax = alen - max(a_stop - b_stop, 0)
-    bmin = max(a_start - b_start + 1, 1)
-    bmax = blen - max(b_stop - a_stop, 0)
-    return (amin, amax), (bmin, bmax)
 end
 
 function seq_score_deletion(A::BandedArray{Score}, B::BandedArray{Score},
@@ -1134,6 +1174,22 @@ function rifraf(dnaseqs::Vector{DNASeq},
     return result
 end
 
+"""
+    rifraf(dnaseqs, phreds; kwargs...)
+
+Find a consensus sequence for a set of DNA sequences.
+
+Returns an instance of `RifrafResult`.
+
+# Arguments
+- `dnaseqs::Vector{DNASeq}`: find a consensus of these sequences.
+- `phreds::Vector{Vector{Phred}}`: Phred scores for `dnaseqs`.
+- `consensus::DNASeq=DNASeq()`: initial consensus. If not given, defaults
+  to the sequence in `dnaseqs` with the lowest mean error rate.
+- `reference::DNASeq=DNASeq()`: reference for frame correction.
+- `params::RifrafParams=RifrafParams()`: options for the run.
+
+"""
 function rifraf(dnaseqs::Vector{DNASeq},
                 phreds::Vector{Vector{Phred}};
                 kwargs...)
@@ -1144,7 +1200,9 @@ function rifraf(dnaseqs::Vector{DNASeq},
     return rifraf(dnaseqs, error_log_ps; kwargs...)
 end
 
-"""Adjust error probabilities so that the expected number of errors
+"""
+
+Adjust error probabilities so that the expected number of errors
 matches the edit distance to the consensus sequence.
 
 """

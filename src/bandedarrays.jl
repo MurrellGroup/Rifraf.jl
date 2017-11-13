@@ -196,3 +196,36 @@ function flip!(A::BandedArray{T}) where {T}
         end
     end
 end
+
+"""
+    equal_ranges(a_range, b_range)
+
+Takes the true ranges of two sub-columns of a banded array and returns
+the start:stop range for their overlapping elements.
+
+# Examples
+```julia-repl
+julia> equal_ranges((3, 5), (4, 6))
+((2, 3), (1, 2))
+
+julia> equal_ranges((1, 5), (1, 2))
+((1, 2), (1, 2))
+
+julia> equal_ranges((1, 5), (4, 5))
+((4, 5), (1, 2))
+
+```
+
+"""
+function equal_ranges(a_range::Tuple{Int,Int},
+                      b_range::Tuple{Int,Int})
+    a_start, a_stop = a_range
+    b_start, b_stop = b_range
+    alen = a_stop - a_start + 1
+    blen = b_stop - b_start + 1
+    amin = max(b_start - a_start + 1, 1)
+    amax = alen - max(a_stop - b_stop, 0)
+    bmin = max(a_start - b_start + 1, 1)
+    bmax = blen - max(b_stop - a_stop, 0)
+    return (amin, amax), (bmin, bmax)
+end

@@ -19,7 +19,6 @@ import Rifraf.sample_from_template,
        Rifraf.smart_forward_moves!,
        Rifraf.backward,
        Rifraf.phred_to_log_p,
-       Rifraf.equal_ranges,
        Rifraf.initial_state,
        Rifraf.estimate_probs,
        Rifraf.has_single_indels,
@@ -36,12 +35,6 @@ import Rifraf.sample_from_template,
        Rifraf.LogProb
 
 srand(1234)
-
-@testset "equal_ranges" begin
-    @test equal_ranges((3, 5), (4, 6)) == ((2, 3), (1, 2))
-    @test equal_ranges((1, 5), (1, 2)) == ((1, 2), (1, 2))
-    @test equal_ranges((1, 5), (4, 5)) == ((4, 5), (1, 2))
-end
 
 @testset "scoring proposals" begin
     const errors = ErrorModel(1.0, 1.0, 1.0, 0.0, 0.0)
