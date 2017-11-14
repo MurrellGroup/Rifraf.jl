@@ -11,10 +11,13 @@ import Base.reverse
 
 export rifraf,
        RifrafParams,
+       RifrafResult,
        ErrorModel,
        Scores,
        normalize,
-       sample,
+       sample_sequences,
+       write_samples,
+       read_samples,
        sample_mixture,
        RifrafSequence,
        length,
@@ -33,7 +36,13 @@ export rifraf,
        flip!,
        newbandwidth!,
        align,
-       calibrate_phreds
+       calibrate_phreds,
+       read_fastq_records,
+       read_fastq,
+       write_fastq,
+       read_fasta_records,
+       read_fasta,
+       write_fasta
 
 include("bandedarrays.jl")
 include("types.jl")

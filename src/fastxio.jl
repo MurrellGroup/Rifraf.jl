@@ -1,3 +1,12 @@
+"""
+    read_fasta_records(filename)
+
+Read a FASTA file and return records.
+
+# Returns:
+- `records::Vector{FASTA.Record}`
+
+"""
 function read_fasta_records(filename)
     stream = open(FASTA.Reader, filename)
     records = FASTA.Record[]
@@ -7,11 +16,31 @@ function read_fasta_records(filename)
     return records
 end
 
+"""
+    read_fasta(filename)
+
+Read a FASTA file and convert to a given sequence type.
+
+# Returns:
+- `seqs::Vector{T}`
+
+"""
 function read_fasta(filename; seqtype=DNASequence)
     records = read_fasta_records(filename)
     return seqtype[sequence(r) for r in records]
 end
 
+"""
+    write_fasta(filename, seqs; names)
+
+Write sequences to a FASTA file.
+
+# Arguments:
+- `filename`: file into which to write
+- `seqs`: sequences to write
+- `names::Vector{String}`: optional list of corresponding names
+
+"""
 function write_fasta(filename, seqs; names=String[])
     if length(names) == 0
         names = ["seq_$i" for i in 1:length(seqs)]
@@ -23,6 +52,15 @@ function write_fasta(filename, seqs; names=String[])
     close(stream)
 end
 
+"""
+    read_fastq_records(filename)
+
+Read a FASTQ file and return records.
+
+# Returns:
+- `records::Vector{FASTQ.Record}`
+
+"""
 function read_fastq_records(filename)
     stream = open(FASTQ.Reader, filename)
     records = FASTQ.Record[]
@@ -35,6 +73,17 @@ function read_fastq_records(filename)
     return records
 end
 
+"""
+    read_fastq(filename)
+
+Read a FASTQ file and convert to a given sequence type.
+
+# Returns:
+- `seqs::Vector{T}`:
+- `phreds::Vector{Vector{Phred}}`: Phred values
+- `names::Vector{String}`: sequence names
+
+"""
 function read_fastq(filename; seqtype=DNASequence)
     records = read_fastq_records(filename)
     seqs = seqtype[]
@@ -48,6 +97,18 @@ function read_fastq(filename; seqtype=DNASequence)
     return seqs, phreds, names
 end
 
+"""
+    write_fastq(filename, seqs, phreds; names)
+
+Write sequences to a FASTA file.
+
+# Arguments:
+- `filename`: file into which to write
+- `seqs`: sequences to write
+- `phreds`: corresponding Phred scores
+- `names::Vector{String}`: optional list of corresponding names
+
+"""
 function write_fastq(filename, seqs, phreds::Vector{Vector{Phred}};
                      names=String[])
     stream = open(FASTQ.Writer, filename)

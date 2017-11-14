@@ -40,7 +40,7 @@ srand(1)
         nseqs = 3
         len = 900
         (ref, template, template_error_p,
-         seqs, actual, phreds) = sample(nseqs, len; params...)
+         seqs, actual, phreds) = sample_sequences(nseqs, len; params...)
         @test mean(template_error_p) ≈ params[:error_rate] atol=0.1
     end
 

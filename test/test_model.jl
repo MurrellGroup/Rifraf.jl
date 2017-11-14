@@ -355,7 +355,7 @@ end
                                     [3, 6])
 
             (reference, template, template_error, reads, actual, phreds, sbools,
-             tbools) = sample(n_seqs, len; sample_params...)
+             tbools) = sample_sequences(n_seqs, len; sample_params...)
             if !use_ref
                 reference = DNASeq()
             end

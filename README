@@ -1,14 +1,9 @@
-Example script usage:
+Rifraf.jl
+=========
 
-julia ./scripts/rifraf.jl \
-    --reference ./data/references.fasta \
-    --reference-map ./data/ref-map.tsv \
-    --phred-cap 30 \
-    --ref-errors 8,0.1,0.1,1,1 \
-    1,2,2 \
-    "example-*-sequences.fastq" \
-    consensus-seqs.fastq
+A Julia package that implements the RIFRAF sequence consensus
+algorithm.
 
-julia ./scripts/correct_shifts.jl \
-    ./data/shifted_input.fasta \
-    ./data/shifted_output.fasta
+A full description of the pipeline has been submitted for
+publication. A link to the journal article will be added here when it
+is available.

@@ -23,7 +23,76 @@ struct EstimatedProbs
     ins::Array{Prob,2}
 end
 
-"""The parameters for a RIFRAF run."""
+"""
+The parameters for a RIFRAF run.
+
+# Fields
+- `scores::Scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))`
+
+- `ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))`
+
+- `ref_indel_mult::Score = 3.0`: multiplier for single indel penalties
+  in alignment with the reference
+
+- `min_ref_indel_score::Score = -1.0 * 3^5`: limit for single indel penalty
+
+- `ref_error_mult::Float64 = 1.0`: multiplier for estimated reference
+  error rate.
+
+- `do_init::Bool = true`: enable initialization stage
+
+- `do_frame::Bool = true`: enable frame correction stage
+
+- `do_refine::Bool = true`: enable refinement stage
+
+- `do_score::Bool = false`: enable scoring stage
+
+- `do_alignment_proposals::Bool = true`: only propose changes that
+  occur in pairwise alignments
+
+- `seed_indels::Bool = true`: seed indel locations from the alignment
+  to reference
+
+- `indel_correction_only::Bool = true`: only propose indels during
+  frame correction stage
+
+- `use_ref_for_qvs::Bool = false`: use reference alignment when
+  estimating quality scores
+
+- `bandwidth::Int = (3 * CODON_LENGTH)`: alignment bandwidth
+
+- `bandwidth_pvalue::Float64 = 0.1`: p-value for increasing bandwidth
+
+- `min_dist::Int = (5 * CODON_LENGTH)`: distance between accepted
+  candidate proposals
+
+- `batch_fixed::Bool = true`: use top sequences for initial stage and
+  frame correction
+
+- `batch_fixed_size::Int = 5`: size of fixed batch
+
+- `batch_size::Int = 20`: batch size; if <= 1, no batching is used
+
+- `batch_randomness::Float64 = 0.9`: batch randomness
+  -  `0`: top n get picked
+  -  `0.5`: weight according to estimated errors
+  -  `1`: completely random
+
+- `batch_mult::Float64 = 0.7`: multiplier to reduce batch randomness
+
+- `batch_threshold::Float64 = 0.1`: score threshold for increasing
+  batch size
+
+- `max_iters::Int = 100`: maximum total iterations across all stages
+  before giving up
+
+- `verbose::Int = 0`: verbosity level
+  - `0`: nothing
+  - `1`: print iteration and score
+  - `2`: also print step within each iteration
+  - `3`: also print full consensus sequence
+
+"""
 @with_kw mutable struct RifrafParams
     scores::Scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))
     ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))
@@ -128,11 +197,16 @@ The result of a RIFRAF run.
 
 # Fields
 - `consensus::DNASeq`: the consensus found by RIFRAF.
+
 - `params::RifrafParams`: the parameters used for this run.
+
 - `state::RifrafState`: the final state of the run.
+
 - `consensus_stages::Vector{Vector{DNASeq}}`:
+
 - `error_probs::EstimatedProbs`: estimated per-base probabilities for
   each position. Only available if `params.do_score` is `true`.
+
 - `aln_error_probs::Vector{Float64}`: combined per-base error
   probabilities. Only available if `params.do_score` is `true`.
 
@@ -1182,22 +1256,29 @@ Find a consensus sequence for a set of DNA sequences.
 Returns an instance of `RifrafResult`.
 
 # Arguments
-- `dnaseqs::Vector{DNASeq}`: find a consensus of these sequences.
-- `phreds::Vector{Vector{Phred}}`: Phred scores for `dnaseqs`.
-- `consensus::DNASeq=DNASeq()`: initial consensus. If not given, defaults
-  to the sequence in `dnaseqs` with the lowest mean error rate.
-- `reference::DNASeq=DNASeq()`: reference for frame correction.
-- `params::RifrafParams=RifrafParams()`: options for the run.
+- `dnaseqs::Vector{DNASeq}`: reads for which to find a consensus
+
+- `phreds::Vector{Vector{Phred}}`: Phred scores for `dnaseqs`
+
+- `consensus::DNASeq=DNASeq()`: initial consensus; if not given,
+  defaults to the sequence in `dnaseqs` with the lowest mean error
+  rate
+
+- `reference::DNASeq=DNASeq()`: reference for frame correction
+
+- `params::RifrafParams=RifrafParams()`
 
 """
 function rifraf(dnaseqs::Vector{DNASeq},
                 phreds::Vector{Vector{Phred}};
                 kwargs...)
+    # TODO: do not require DNASeq only!
     if any(minimum(p) < 0 for p in phreds)
         error("phred score cannot be negative")
     end
     error_log_ps = phred_to_log_p(phreds)
-    return rifraf(dnaseqs, error_log_ps; kwargs...)
+    myseqs = DNASeq[DNASeq(s) for s in dnaseqs]
+    return rifraf(myseqs, error_log_ps; kwargs...)
 end
 
 """

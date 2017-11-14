@@ -1,0 +1,60 @@
+# Examples
+
+## From Julia
+
+Here is a small snippet showing how to use the module.
+
+First, we generate a random 1,200 bp template, along with a reference
+and thirty sequences. We run RIFRAF both without and with the
+reference and compare the result to the expected template.
+
+```@repl
+using Rifraf
+
+reference, template, _, sequences, _, phreds, _, _ = sample_sequences(20, 1200);
+
+result = rifraf(sequences, phreds;
+                params=RifrafParams(batch_fixed_size=3, batch_size=5,
+                                    verbose=1, max_iters=20));
+result.consensus == template
+
+result = rifraf(sequences, phreds; reference=reference,
+                params=RifrafParams(verbose=1, max_iters=20));
+
+result.consensus == template
+```
+
+Rifraf.jl also provides a set of convenience functions for reading and
+writing FASTA and FASTQ files. For instance, here is one way to run
+RIFRAF on sequences from a file:
+
+```
+sequences, phreds, names = Rifraf.read_fastq("/path/to/sequences.fastq")
+reference = Rifraf.read_fasta("/path/to/reference.fasta")[1]
+result = rifraf(sequences, phreds; reference=reference)
+```
+
+There are also convenience functions for reading and writing entire
+simulated problems.
+
+```
+reference, template, t_error, sequences, _, phreds, _, _ = sample_sequences()
+Rifraf.write_samples("/path/to/basename", reference, template, t_error, sequences, phreds)
+reference, template, t_error, sequences, phreds = Rifraf.read_samples("/path/to/basename")
+```
+
+## Command-line script
+
+This package also comes with a command-line script for processing many
+sets of reads at once. Example usage:
+
+```
+julia ./scripts/rifraf.jl \
+    --reference reference.fasta \
+    --reference-map ref-map.tsv \
+    --phred-cap 30 \
+    --ref-errors 8,0.1,0.1,1,1 \
+    1,2,2 \
+    "example-sequences-*.fastq" \
+    consensus-seqs.fastq
+```
