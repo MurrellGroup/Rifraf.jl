@@ -1,13 +1,10 @@
 # Rifraf.jl
 
-A Julia package that implements the RIFRAF sequence consensus algorithm.
+A Julia package for the RIFRAF sequence consensus algorithm.
 
-This method has been submitted for publication. A link to the journal
-article will be added here when it is available.
-
-## Overview
-
-RIFRAF overview
+RIFRAF is a DNA consensus algorithm that is extremely accurate even
+for a small number of sequences. It uses quality scores and optionally
+takes a reference sequence for frame correction.
 
 ## Examples
 
@@ -25,6 +22,11 @@ Pages = [
     ]
 Depth = 1
 ```
+
+## Citing RIFRAF
+
+This method has been submitted for publication. A link to the journal
+article will be added here when it is available.
 
 ## Index
 
