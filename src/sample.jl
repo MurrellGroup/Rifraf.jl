@@ -49,9 +49,6 @@ function hmm_sample(sequence::DNASeq,
     if codon && (errors.insertion > 0.0 || errors.deletion > 0.0)
         error("codon and non-codon indels are not both allowed")
     end
-    if codon && length(sequence) % 3 != 0
-        error("sequence length is not multiple of 3")
-    end
     sub_ratio = errors.mismatch
     ins_ratio = errors.insertion
     del_ratio = errors.deletion
@@ -125,16 +122,25 @@ function hmm_sample(sequence::DNASeq,
     return DNASeq(final_seq), final_error_p, seqbools, tbools
 end
 
-function sample_reference(reference::DNASeq,
+function sample_reference(template::DNASeq,
                           error_rate::Prob,
                           errors::ErrorModel)
     errors = normalize(errors)
     if errors.insertion > 0.0 || errors.deletion > 0.0
-        error("non-codon indels are not allowed in template")
+        error("non-codon indels are not allowed in reference")
     end
-    error_p = error_rate * ones(length(reference))
-    template, _, _, _ = hmm_sample(reference, error_p, errors)
-    return template
+    error_p = error_rate * ones(length(template))
+    reference, _, _, _ = hmm_sample(template, error_p, errors)
+    if length(reference) % 3 == 1
+        # randomly remove a base
+        idx = rand(1:length(reference))
+        reference = DNASeq(reference[1:(idx-1)], reference[(idx+1):end])
+    elseif length(reference) % 3 == 2
+        # randomly add base
+        idx = rand(1:(length(reference) + 1))
+        reference = DNASeq(reference[1:(idx-1)], DNASeq([rbase()]), reference[idx:end])
+    end
+    return reference
 end
 
 function sample_from_template(template::DNASeq,
@@ -173,10 +179,6 @@ function sample_mixture(nseqs::Tuple{Int,Int}, len::Int, n_diffs::Int;
                         actual_std::Float64=3.0,
                         reported_std::Float64=1.0,
                         seq_errors::ErrorModel=ErrorModel(1, 5, 5))
-    if len % 3 != 0
-        error("Reference length must be a multiple of three")
-    end
-
     template1 = random_seq(len)
     template2 = mutate_seq(template1, n_diffs)
     templates = DNASeq[template1, template2]
