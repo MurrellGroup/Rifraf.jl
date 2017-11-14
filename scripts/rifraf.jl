@@ -1,4 +1,3 @@
-import Bio.Seq
 @everywhere using BioSymbols
 @everywhere using BioSequences
 using ArgParse
@@ -62,7 +61,7 @@ function parse_commandline()
         required = true
 
         "output"
-        help = "output fastq file"
+        help = "output fasta file"
         required = true
 
     end
@@ -82,7 +81,7 @@ end
         ref_records = Rifraf.read_fasta_records(reffile)
     end
     if length(refid) > 0
-        filt_records = collect(filter(r -> r.name == refid, ref_records))
+        filt_records = collect(filter(r -> FASTA.identifier(r) == refid, ref_records))
         if length(filt_records) == 0
             error("reference '$refid' not found in `$reffile`")
         end
@@ -90,10 +89,10 @@ end
             error("multiple references with id '$refid' found in `$reffile`")
         end
         ref_record = filt_records[1]
-        reference = DNASeq(ref_record.seq)
+        reference = DNASeq(sequence(ref_record))
     elseif length(ref_records) > 0
         ref_record = ref_records[1]
-        reference = DNASeq(ref_record.seq)
+        reference = DNASeq(sequence(ref_record))
     end
 
     score_args = map(x -> parse(Float64, x), split(args["seq-errors"], ","))
@@ -102,20 +101,20 @@ end
     ref_score_args = map(x -> parse(Float64, x), split(args["ref-errors"], ","))
     ref_scores = Scores(ErrorModel(ref_score_args...))
 
-    sequences, phreds, _ = Rifraf.read_fastq(file)
+    sequences, phreds, _ = Rifraf.read_fastq(file, seqtype=DNASeq)
     if args["verbose"] >= 1
         println(STDERR, "starting run")
     end
     phred_cap = args["phred-cap"]
     if phred_cap > 0
-        phreds = Vector{Int8}[Rifraf.cap_phreds(p, phred_cap)
-                              for p in phreds]
+        phreds = Vector{Phred}[Rifraf.cap_phreds(p, phred_cap)
+                               for p in phreds]
     end
-    params = RifrafParams(ref_scores=ref_scores,
+    params = RifrafParams(scores=scores,
+                          ref_scores=ref_scores,
                           max_iters=args["max-iters"],
                           verbose=args["verbose"])
-    return rifraf(sequences, phreds,
-                  scores;
+    return rifraf(sequences, phreds;
                   reference=reference,
                   params=params)
 end
@@ -201,7 +200,7 @@ function main()
 
     n_converged = 0
     prefix = args["prefix"]
-    stream = open(FASTQWriter, args["output"], quality_encoding=:sanger)
+    stream = open(FASTA.Writer, args["output"])
     for (i, result) in enumerate(results)
         if typeof(result) == RemoteException
             throw(result)
@@ -213,9 +212,7 @@ function main()
                 name = name[plen + 1:end - slen]
             end
             seqname = string(prefix, name)
-            quality = Rifraf.estimate_point_probs(result.error_probs)
-            t_phred = Rifraf.p_to_phred(quality)
-            record = Seq.FASTQSeqRecord(seqname, result.consensus, t_phred)
+            record = FASTA.Record(seqname, result.consensus)
             write(stream, record)
         end
     end

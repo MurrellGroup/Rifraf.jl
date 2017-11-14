@@ -45,16 +45,21 @@ reference, template, t_error, sequences, phreds = Rifraf.read_samples("/path/to/
 
 ## Command-line script
 
-This package also comes with a command-line script for processing many
-sets of reads at once. Example usage:
+Rifraf.jl also comes with a command-line script for processing many
+sets of reads at once. The `data` directory includes some example data
+for testing this script.
+
+The following command finds a consensus for each FASTQ file that
+matches the glob `input-reads-*.fastq` and writes them to
+`results.fasta`.
 
 ```
 julia ./scripts/rifraf.jl \
-    --reference reference.fasta \
-    --reference-map ref-map.tsv \
+    --reference ./data/references.fasta \
+    --reference-map ./data/ref-map.tsv \
     --phred-cap 30 \
     --ref-errors 8,0.1,0.1,1,1 \
     1,2,2 \
-    "example-sequences-*.fastq" \
-    consensus-seqs.fastq
+    "./data/input-reads-*.fastq" \
+    ./data/consensus-results.fasta
 ```
