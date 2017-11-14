@@ -5,7 +5,7 @@
 Here is a small snippet showing how to use the module.
 
 First, we generate a random 1,200 bp template, along with a reference
-and thirty sequences. We run RIFRAF both without and with the
+and twenty simulated reads. We run RIFRAF both without and with the
 reference and compare the result to the expected template.
 
 ```@repl
@@ -34,8 +34,8 @@ reference = Rifraf.read_fasta("/path/to/reference.fasta")[1]
 result = rifraf(sequences, phreds; reference=reference)
 ```
 
-There are also convenience functions for reading and writing entire
-simulated problems.
+There are also convenience functions for reading and writing the
+output of `sample_sequences`.
 
 ```
 reference, template, t_error, sequences, _, phreds, _, _ = sample_sequences()
@@ -45,12 +45,13 @@ reference, template, t_error, sequences, phreds = Rifraf.read_samples("/path/to/
 
 ## Command-line script
 
-Rifraf.jl also comes with a command-line script for processing many
-sets of reads at once. The `data` directory includes some example data
-for testing this script.
+`scripts/rifraf.jl` is a command-line script for processing many sets
+of reads at once. Julia takes some time to start up, so this script is
+only recommended for long sequences or large numbers of reads.
 
-The following command finds a consensus for each FASTQ file that
-matches the glob `input-reads-*.fastq` and writes them to
+The `data` directory includes some example data for testing this
+script. The following command finds a consensus for each FASTQ file
+that matches the glob `input-reads-*.fastq` and writes them to
 `results.fasta`.
 
 ```
