@@ -34,7 +34,8 @@ The parameters for a RIFRAF run.
 - `ref_indel_mult::Score = 3.0`: multiplier for single indel penalties
   in alignment with the reference
 
-- `min_ref_indel_score::Score = -1.0 * 3^5`: limit for single indel penalty
+- `max_ref_indel_mults::Int = 5`: maximum multiplier increases for
+  single indel penalty
 
 - `ref_error_mult::Float64 = 1.0`: multiplier for estimated reference
   error rate.
@@ -98,10 +99,10 @@ The parameters for a RIFRAF run.
     ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))
 
     # multiplier for single indel penalty
-    ref_indel_mult::Score = 3.0
+    ref_indel_mult::Score = 3
 
     # limit for single indel penalty
-    min_ref_indel_score::Score = -1.0 * 3^5
+    max_ref_indel_mults::Score = 5
 
     # multiplier for estimated reference error rate
     ref_error_mult::Float64 = 1.0
@@ -168,6 +169,7 @@ end
     consensus::DNASeq
     ref_scores::Scores
     ref_error_rate::Float64 = -Inf
+    n_ref_indel_mults::Int = 0
     reference::RifrafSequence
     batch_fixed_size::Int
     batch_size::Int
@@ -854,9 +856,6 @@ function check_params(scores, reference, params)
         if params.ref_indel_mult <= 0.0
             error("ref_indel_mult must be > 0.0")
         end
-        if params.min_ref_indel_score >= 0.0
-            error("min_ref_indel_score must be < 0.0")
-        end
         if (params.ref_scores.mismatch >= 0.0 ||
             params.ref_scores.insertion >= 0.0 ||
             params.ref_scores.deletion >= 0.0 ||
@@ -871,9 +870,8 @@ function check_params(scores, reference, params)
             params.ref_scores.codon_deletion == -Inf)
             error("ref scores cannot be -Inf")
         end
-        if (params.ref_scores.insertion < params.min_ref_indel_score ||
-            params.ref_scores.deletion < params.min_ref_indel_score)
-            error("ref indel scores are less than specified minimum")
+        if (params.max_ref_indel_mults < 0)
+            error("ref_indel_increases must be >= 0")
         end
     end
 
@@ -961,20 +959,23 @@ function finish_stage!(state::RifrafState,
         if !has_single_indels(state.consensus, state.reference)
             consensus_ref = state.consensus
             state.stage = STAGE_REFINE
-        elseif (state.ref_scores.insertion == params.min_ref_indel_score ||
-                state.ref_scores.deletion == params.min_ref_indel_score)
+        elseif (state.n_ref_indel_mults == params.max_ref_indel_mults)
             if params.verbose >= 2
-                println(STDERR, "    NOTE: alignment had single indels but indel scores already minimized.")
+                println(STDERR, "    NOTE: alignment had single indels but reached penalty limit.")
             end
             state.stage = STAGE_REFINE
         else
             state.penalties_increased = true
+            if state.n_ref_indel_mults < params.max_ref_indel_mults
+                state.n_ref_indel_mults += 1
+            else
+                error("Tried to illegally increase n_ref_indel_mults")
+            end
             # TODO: this is not probabilistically correct
+            mult = params.ref_indel_mult ^ state.n_ref_indel_mults
             state.ref_scores = Scores(state.ref_scores.mismatch,
-                                      max(state.ref_scores.insertion * params.ref_indel_mult,
-                                          params.min_ref_indel_score),
-                                      max(state.ref_scores.deletion * params.ref_indel_mult,
-                                          params.min_ref_indel_score),
+                                      state.ref_scores.insertion * mult,
+                                      state.ref_scores.deletion * mult,
                                       state.ref_scores.codon_insertion,
                                       state.ref_scores.codon_deletion)
             state.reference = RifrafSequence(state.reference, state.ref_scores)
