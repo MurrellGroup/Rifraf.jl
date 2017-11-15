@@ -230,30 +230,46 @@ meant to represent a realistic error model.
 
 # Arguments:
 - `nseqs::Int=3`: number of reads to generate
+
 - `len::Int=90`: length of template
+
 - `ref_error_rate::Prob=0.1`: reference error rate
+
 - `ref_errors::ErrorModel=ErrorModel(10, 0, 0, 1, 1)`: reference error
   model
+
 - `error_rate::Prob=0.01`: read error rate
+
 - `alpha::Float64=0.1`: α parameter for beta distribution of
   per-base template error rates.
+
 - `phred_scale::Float64=1.5`: λ parameter for exponential
   distribution of Phred error
+
 - `actual_std::Float64=3.0`: σ^2 for true Gaussian errors in
   the Phred domain
+
 - `reported_std::Float64=1.0`: σ^2 for Gaussian errors in the
   Phred domain
+
 - `seq_errors::ErrorModel=ErrorModel(1, 5, 5)`: sequencing error model
 
 # Returns:
 - `reference::DNASeq`: reference sequence for `template`
+
 - `template::DNASeq`: template sequence
+
 - `t_p::Vector{Prob}`: template error probabilities
+
 - `seqs::Vector{DNASeq}`: simulated reads
+
 - `actual::Vector{Vector{Prob}}`: error probabilities
+
 - `phreds::{Vector{Vector{Phred}}`: Phred values
+
 - `seqbools::Vector{Vector{Bool}}`: `seqbools[i][j]` is `true` if
   `seqs[i][j]` was correctly sequenced from the template
+
 - `tbools::Vector{Vector{Bool}}`: `tbools[i][j]` is `true` if
   `template[j]` was correctly sequenced in `seqs[i]`
 
