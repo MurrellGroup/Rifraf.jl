@@ -1,8 +1,8 @@
 # Examples
 
-## From Julia
+Some examples showing how to use RIFRAF.
 
-Here is a small snippet showing how to use the module.
+## On simulated data
 
 First, we generate a random 1,200 bp template, along with a reference
 and twenty simulated reads. We run RIFRAF both without and with the
@@ -11,7 +11,8 @@ reference and compare the result to the expected template.
 ```@repl
 using Rifraf
 
-reference, template, _, sequences, _, phreds, _, _ = sample_sequences(20, 1200);
+sampled = sample_sequences(20, 1200);
+(reference, template, _, sequences, _, phreds, _, _) = sampled;
 
 result = rifraf(sequences, phreds;
                 params=RifrafParams(batch_fixed_size=3, batch_size=5,
@@ -23,6 +24,8 @@ result = rifraf(sequences, phreds; reference=reference,
 
 result.consensus == template
 ```
+
+## Reading data from FASTQ files
 
 Rifraf.jl also provides a set of convenience functions for reading and
 writing FASTA and FASTQ files. For instance, here is one way to run
@@ -63,4 +66,30 @@ julia ./scripts/rifraf.jl \
     1,2,2 \
     "./data/input-reads-*.fastq" \
     ./data/consensus-results.fasta
+```
+
+## Allowing frameshifts during frame correction
+
+RIFRAF's default parameters penalize frameshift-causing indels
+extremely heavily. If the template really does contain a frame shift
+mutation, it will likely be removed from the result. To detect real
+frameshifts, with a small risk of allowing some spurious ones, the
+penalties for single insertions or deletions must be tuned. For
+example:
+
+
+```@repl
+using Rifraf
+
+sampled = Rifraf.sample_sequences(5, 3001; error_rate=.005);
+(reference, template, _, sequences, _, phreds, _, _) = sampled;
+
+result = rifraf(sequences, phreds; reference=reference);
+length(result.consensus) % 3 == 0
+
+result = rifraf(sequences, phreds; reference=reference,
+                params=RifrafParams(ref_scores=Scores(ErrorModel(10, 1, 1, 1, 1)),
+                                    ref_indel_mult=1.2, max_ref_indel_mults=3));
+length(result.consensus) % 3 == 0
+
 ```

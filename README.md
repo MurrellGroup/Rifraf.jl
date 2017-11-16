@@ -11,3 +11,26 @@ GitHub: [github.com/MurrellGroup/Rifraf.jl](https://github.com/MurrellGroup/Rifr
 A full description of the pipeline has been submitted for
 publication. A link to the journal article will be added here when it
 is available.
+
+Setup
+=====
+
+To install:
+
+```julia
+Pkg.add("Rifraf")
+```
+
+To run the tests:
+
+```julia
+Pkg.test("Rifraf")
+```
+
+To build the documentation:
+
+```bash
+cd docs
+julia make.jl
+mkdocs build
+```
