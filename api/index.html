@@ -387,6 +387,7 @@
 <li><code>reference::DNASeq=DNASeq()</code>: reference for frame correction</li>
 <li><code>params::RifrafParams=RifrafParams()</code></li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/model.jl#L1252-L1272' class='documenter-source'>source</a><br></p>
 <p><a id='Sequence-simulations-1'></a></p>
 <h3 id="sequence-simulations">Sequence simulations</h3>
 <p><a id='Rifraf.sample_sequences' href='#Rifraf.sample_sequences'>#</a>
@@ -421,12 +422,15 @@
 <li><code>seqbools::Vector{Vector{Bool}}</code>: <code>seqbools[i][j]</code> is <code>true</code> if <code>seqs[i][j]</code> was correctly sequenced from the template</li>
 <li><code>tbools::Vector{Vector{Bool}}</code>: <code>tbools[i][j]</code> is <code>true</code> if <code>template[j]</code> was correctly sequenced in <code>seqs[i]</code></li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/sample.jl#L223-L276' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.write_samples' href='#Rifraf.write_samples'>#</a>
 <strong><code>Rifraf.write_samples</code></strong> &mdash; <em>Function</em>.</p>
 <p>Write template into FASTA and sequences into FASTQ.</p>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/sample.jl#L300' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.read_samples' href='#Rifraf.read_samples'>#</a>
 <strong><code>Rifraf.read_samples</code></strong> &mdash; <em>Function</em>.</p>
 <p>Read template from FASTA and sequences from FASTQ.</p>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/sample.jl#L308' class='documenter-source'>source</a><br></p>
 <p><a id='Utility-IO-functions-1'></a></p>
 <h3 id="utility-io-functions">Utility IO functions</h3>
 <p>Rifraf.jl provides some utility functions for reading and writing FASTQ and FASTA files. This functionality uses BioSequences.jl.</p>
@@ -441,6 +445,7 @@
 <ul>
 <li><code>records::Vector{FASTQ.Record}</code></li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/fastxio.jl#L55-L63' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.read_fastq' href='#Rifraf.read_fastq'>#</a>
 <strong><code>Rifraf.read_fastq</code></strong> &mdash; <em>Function</em>.</p>
 <div class="codehilite"><pre><span></span>read_fastq(filename)
@@ -454,6 +459,7 @@
 <li><code>phreds::Vector{Vector{Phred}}</code>: Phred values</li>
 <li><code>names::Vector{String}</code>: sequence names</li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/fastxio.jl#L76-L86' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.write_fastq' href='#Rifraf.write_fastq'>#</a>
 <strong><code>Rifraf.write_fastq</code></strong> &mdash; <em>Function</em>.</p>
 <div class="codehilite"><pre><span></span>write_fastq(filename, seqs, phreds; names)
@@ -468,6 +474,7 @@
 <li><code>phreds</code>: corresponding Phred scores</li>
 <li><code>names::Vector{String}</code>: optional list of corresponding names</li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/fastxio.jl#L100-L111' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.read_fasta_records' href='#Rifraf.read_fasta_records'>#</a>
 <strong><code>Rifraf.read_fasta_records</code></strong> &mdash; <em>Function</em>.</p>
 <div class="codehilite"><pre><span></span>read_fasta_records(filename)
@@ -479,6 +486,7 @@
 <ul>
 <li><code>records::Vector{FASTA.Record}</code></li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/fastxio.jl#L1-L9' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.read_fasta' href='#Rifraf.read_fasta'>#</a>
 <strong><code>Rifraf.read_fasta</code></strong> &mdash; <em>Function</em>.</p>
 <div class="codehilite"><pre><span></span>read_fasta(filename)
@@ -490,6 +498,7 @@
 <ul>
 <li><code>seqs::Vector{T}</code></li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/fastxio.jl#L19-L27' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.write_fasta' href='#Rifraf.write_fasta'>#</a>
 <strong><code>Rifraf.write_fasta</code></strong> &mdash; <em>Function</em>.</p>
 <div class="codehilite"><pre><span></span>write_fasta(filename, seqs; names)
@@ -503,6 +512,7 @@
 <li><code>seqs</code>: sequences to write</li>
 <li><code>names::Vector{String}</code>: optional list of corresponding names</li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/fastxio.jl#L33-L43' class='documenter-source'>source</a><br></p>
 <p><a id='Types-1'></a></p>
 <h2 id="types">Types</h2>
 <p><a id='Rifraf.RifrafParams' href='#Rifraf.RifrafParams'>#</a>
@@ -513,7 +523,7 @@
 <li><code>scores::Scores = Scores(ErrorModel(1.0, 2.0, 2.0, 0.0, 0.0))</code></li>
 <li><code>ref_scores::Scores = Scores(ErrorModel(10.0, 1e-1, 1e-1, 1.0, 1.0))</code></li>
 <li><code>ref_indel_mult::Score = 3.0</code>: multiplier for single indel penalties in alignment with the reference</li>
-<li><code>min_ref_indel_score::Score = -1.0 * 3^5</code>: limit for single indel penalty</li>
+<li><code>max_ref_indel_mults::Int = 5</code>: maximum multiplier increases for single indel penalty</li>
 <li><code>ref_error_mult::Float64 = 1.0</code>: multiplier for estimated reference error rate.</li>
 <li><code>do_init::Bool = true</code>: enable initialization stage</li>
 <li><code>do_frame::Bool = true</code>: enable frame correction stage</li>
@@ -550,6 +560,7 @@
 </ul>
 </li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/model.jl#L26-L96' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.RifrafResult' href='#Rifraf.RifrafResult'>#</a>
 <strong><code>Rifraf.RifrafResult</code></strong> &mdash; <em>Type</em>.</p>
 <div class="codehilite"><pre><span></span>RifrafResult()
@@ -566,6 +577,7 @@
 <li><code>error_probs::EstimatedProbs</code>: estimated per-base probabilities for each position. Only available if <code>params.do_score</code> is <code>true</code>.</li>
 <li><code>aln_error_probs::Vector{Float64}</code>: combined per-base error probabilities. Only available if <code>params.do_score</code> is <code>true</code>.</li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/model.jl#L195-L215' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.ErrorModel' href='#Rifraf.ErrorModel'>#</a>
 <strong><code>Rifraf.ErrorModel</code></strong> &mdash; <em>Type</em>.</p>
 <div class="codehilite"><pre><span></span>ErrorModel(mismatch, insertion, deletion, codon_insertion, codon_deletion)
@@ -582,6 +594,7 @@
 <li><code>codon_insertion::Real</code></li>
 <li><code>codon_deletion::Real</code></li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/errormodel.jl#L1-L18' class='documenter-source'>source</a><br></p>
 <p><a id='Rifraf.Scores' href='#Rifraf.Scores'>#</a>
 <strong><code>Rifraf.Scores</code></strong> &mdash; <em>Type</em>.</p>
 <div class="codehilite"><pre><span></span>Scores(errors; mismatch, insertion, deletion)
@@ -597,6 +610,7 @@
 <li><code>insertion::Real</code>: insertion</li>
 <li><code>deletion::Real</code>: deletion</li>
 </ul>
+<p><a target='_blank' href='https://github.com/MurrellGroup/Rifraf.jl/blob/bd110c3b36f5c619de5be7843c31aa657f5ba025/src/errormodel.jl#L51-L65' class='documenter-source'>source</a><br></p>
                 
                   
                 

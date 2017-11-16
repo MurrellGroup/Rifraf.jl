@@ -241,8 +241,15 @@
     <ul class="md-nav__list" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#from-julia" title="From Julia" class="md-nav__link">
-    From Julia
+  <a href="#on-simulated-data" title="On simulated data" class="md-nav__link">
+    On simulated data
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-data-from-fastq-files" title="Reading data from FASTQ files" class="md-nav__link">
+    Reading data from FASTQ files
   </a>
   
 </li>
@@ -250,6 +257,13 @@
         <li class="md-nav__item">
   <a href="#command-line-script" title="Command-line script" class="md-nav__link">
     Command-line script
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#allowing-frameshifts-during-frame-correction" title="Allowing frameshifts during frame correction" class="md-nav__link">
+    Allowing frameshifts during frame correction
   </a>
   
 </li>
@@ -296,8 +310,15 @@
     <ul class="md-nav__list" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#from-julia" title="From Julia" class="md-nav__link">
-    From Julia
+  <a href="#on-simulated-data" title="On simulated data" class="md-nav__link">
+    On simulated data
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-data-from-fastq-files" title="Reading data from FASTQ files" class="md-nav__link">
+    Reading data from FASTQ files
   </a>
   
 </li>
@@ -305,6 +326,13 @@
         <li class="md-nav__item">
   <a href="#command-line-script" title="Command-line script" class="md-nav__link">
     Command-line script
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#allowing-frameshifts-during-frame-correction" title="Allowing frameshifts during frame correction" class="md-nav__link">
+    Allowing frameshifts during frame correction
   </a>
   
 </li>
@@ -328,21 +356,21 @@
                 
                 <p><a id='Examples-1'></a></p>
 <h1 id="examples">Examples</h1>
-<p><a id='From-Julia-1'></a></p>
-<h2 id="from-julia">From Julia</h2>
-<p>Here is a small snippet showing how to use the module.</p>
+<p>Some examples showing how to use RIFRAF.</p>
+<p><a id='On-simulated-data-1'></a></p>
+<h2 id="on-simulated-data">On simulated data</h2>
 <p>First, we generate a random 1,200 bp template, along with a reference and twenty simulated reads. We run RIFRAF both without and with the reference and compare the result to the expected template.</p>
 <div class="codehilite"><pre><span></span>julia&gt; using Rifraf
 
-julia&gt; reference, template, _, sequences, _, phreds, _, _ = sample_sequences(20, 1200);
+julia&gt; sampled = sample_sequences(20, 1200);
+
+julia&gt; (reference, template, _, sequences, _, phreds, _, _) = sampled;
 
 julia&gt; result = rifraf(sequences, phreds;
                        params=RifrafParams(batch_fixed_size=3, batch_size=5,
                                            verbose=1, max_iters=20));
 iteration 1 : STAGE_INIT : -Inf
-iteration 2 : STAGE_INIT : -88.58358725981145
-iteration 3 : STAGE_INIT : -63.18961439197737
-iteration 4 : STAGE_INIT : -63.17432396607488
+iteration 2 : STAGE_INIT : -66.93546689716547
 done. converged: true
 
 julia&gt; result.consensus == template
@@ -351,13 +379,10 @@ false
 julia&gt; result = rifraf(sequences, phreds; reference=reference,
                        params=RifrafParams(verbose=1, max_iters=20));
 iteration 1 : STAGE_INIT : -Inf
-iteration 2 : STAGE_INIT : -157.4465570164099
-iteration 3 : STAGE_INIT : -123.9754405625568
-iteration 4 : STAGE_FRAME : -123.9754405625568
-iteration 5 : STAGE_FRAME : -278.32350450735805
-iteration 6 : STAGE_FRAME : -278.32350450735805
-iteration 7 : STAGE_FRAME : -278.4120020684729
-iteration 8 : STAGE_REFINE : -278.4120020684729
+iteration 2 : STAGE_INIT : -112.72329868969373
+iteration 3 : STAGE_FRAME : -112.72329868969373
+iteration 4 : STAGE_FRAME : -287.4380940401863
+iteration 5 : STAGE_REFINE : -287.4380940401863
 done. converged: true
 
 julia&gt; result.consensus == template
@@ -365,6 +390,8 @@ true
 </pre></div>
 
 
+<p><a id='Reading-data-from-FASTQ-files-1'></a></p>
+<h2 id="reading-data-from-fastq-files">Reading data from FASTQ files</h2>
 <p>Rifraf.jl also provides a set of convenience functions for reading and writing FASTA and FASTQ files. For instance, here is one way to run RIFRAF on sequences from a file:</p>
 <div class="codehilite"><pre><span></span>sequences, phreds, names = Rifraf.read_fastq(&quot;/path/to/sequences.fastq&quot;)
 reference = Rifraf.read_fasta(&quot;/path/to/reference.fasta&quot;)[1]
@@ -391,6 +418,29 @@ reference, template, t_error, sequences, phreds = Rifraf.read_samples(&quot;/pat
     1,2,2 \
     &quot;./data/input-reads-*.fastq&quot; \
     ./data/consensus-results.fasta
+</pre></div>
+
+
+<p><a id='Allowing-frameshifts-during-frame-correction-1'></a></p>
+<h2 id="allowing-frameshifts-during-frame-correction">Allowing frameshifts during frame correction</h2>
+<p>RIFRAF's default parameters penalize frameshift-causing indels extremely heavily. If the template really does contain a frame shift mutation, it will likely be removed from the result. To detect real frameshifts, with a small risk of allowing some spurious ones, the penalties for single insertions or deletions must be tuned. For example:</p>
+<div class="codehilite"><pre><span></span>julia&gt; using Rifraf
+
+julia&gt; sampled = Rifraf.sample_sequences(5, 3001; error_rate=.005);
+
+julia&gt; (reference, template, _, sequences, _, phreds, _, _) = sampled;
+
+julia&gt; result = rifraf(sequences, phreds; reference=reference);
+
+julia&gt; length(result.consensus) % 3 == 0
+true
+
+julia&gt; result = rifraf(sequences, phreds; reference=reference,
+                       params=RifrafParams(ref_scores=Scores(ErrorModel(10, 1, 1, 1, 1)),
+                                           ref_indel_mult=1.2, max_ref_indel_mults=3));
+
+julia&gt; length(result.consensus) % 3 == 0
+false
 </pre></div>
                 
                   
