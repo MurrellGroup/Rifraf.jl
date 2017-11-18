@@ -310,25 +310,26 @@ function moves_to_aligned_seqs(moves::Vector{Trace},
     return aligned_t, aligned_s
 end
 
-"""Compute index vector mapping from position in `t` to position in
-`s`.
+"""
+    moves_to_indices(moves, tlen, slen)
+
+Compute index vector mapping positions in `t` to positions in `s`.
+
+If a position in `t` is an insertion relative to `s`, it maps to the
+last mapped base in `s` (or to `0`, if it is the first base in `t`).
 
 """
 function moves_to_indices(moves::Vector{Trace},
                           tlen::Int, slen::Int)
-    result = zeros(Int, tlen + 1)
-    i, j = (1, 1)
+    result = Int[]
+    i, j = (0, 0)
     last_j = 0
     for move in moves
+        i, j = offset_forward(move, i, j)
         if j > last_j
-            result[j] = i
+            push!(result, i)
             last_j = j
         end
-        i, j = offset_forward(move, i, j)
-    end
-    if j > last_j
-        result[j] = i
-        last_j = j
     end
     return result
 end

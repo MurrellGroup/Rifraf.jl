@@ -207,6 +207,50 @@ end
         @test t[end-1:end] == DNASequence("TT")
     end
 
+    @testset "moves_to_indices 1" begin
+        template = DNASeq("AAA")
+        seq = DNASeq("AAA")
+        bandwidth = 10
+        log_p = fill(log10(0.1), length(seq))
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        moves = Rifraf.align_moves(template, pseq)
+        indices = Rifraf.moves_to_indices(moves, length(template), length(pseq))
+        @test indices == collect(1:3)
+    end
+
+    @testset "moves_to_indices 2" begin
+        template = DNASeq("AAA")
+        seq = DNASeq("AAAT")
+        bandwidth = 10
+        log_p = fill(log10(0.1), length(seq))
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        moves = Rifraf.align_moves(template, pseq)
+        indices = Rifraf.moves_to_indices(moves, length(template), length(pseq))
+        @test indices == collect(1:3)
+    end
+
+    @testset "moves_to_indices 3" begin
+        template = DNASeq("AAAT")
+        seq = DNASeq("AAA")
+        bandwidth = 10
+        log_p = fill(log10(0.1), length(seq))
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        moves = Rifraf.align_moves(template, pseq)
+        indices = Rifraf.moves_to_indices(moves, length(template), length(pseq))
+        @test indices == [1, 2, 3, 3]
+    end
+
+    @testset "moves_to_indices 4" begin
+        template = DNASeq("TAAA")
+        seq = DNASeq("AAA")
+        bandwidth = 10
+        log_p = fill(log10(0.1), length(seq))
+        pseq = RifrafSequence(seq, log_p, bandwidth, scores)
+        moves = Rifraf.align_moves(template, pseq)
+        indices = Rifraf.moves_to_indices(moves, length(template), length(pseq))
+        @test indices == [0, 1, 2, 3]
+    end
+
     @testset "align and skew" begin
         ref_errors = ErrorModel(10.0, 1e-10, 1e-10, 1.0, 1.0)
         ref_scores = Scores(ref_errors)
