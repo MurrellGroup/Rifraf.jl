@@ -954,10 +954,14 @@ function finish_stage!(state::RifrafState,
             ref_error_log_p = fill(log10(state.ref_error_rate), length(state.reference))
             state.reference = RifrafSequence(state.reference.seq, ref_error_log_p,
                                              params.bandwidth, state.ref_scores)
+
+            # check if we've already converged
+            if !has_single_indels(state.consensus, state.reference)
+                state.converged = true
+            end
         end
     elseif state.stage == STAGE_FRAME
         if !has_single_indels(state.consensus, state.reference)
-            consensus_ref = state.consensus
             state.stage = STAGE_REFINE
         elseif (state.n_ref_indel_mults == params.max_ref_indel_mults)
             if params.verbose >= 2

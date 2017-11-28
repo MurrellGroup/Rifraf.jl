@@ -58,8 +58,8 @@ function RifrafSequence(seq::DNASeq, error_log_p::Vector{LogProb},
         codon_ins_scores = Vector{Score}(length(error_log_p) - 2)
         for i = 2:(length(error_log_p) - 1)
             codon_ins_scores[i - 1] = max(error_log_p[i - 1],
-                                        error_log_p[i],
-                                        error_log_p[i + 1]) + scores.codon_insertion
+                                          error_log_p[i],
+                                          error_log_p[i + 1]) + scores.codon_insertion
         end
     end
     if scores.codon_deletion > -Inf
