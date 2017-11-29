@@ -1,8 +1,7 @@
 Rifraf.jl
 =========
 
-A Julia package that implements the RIFRAF sequence consensus
-algorithm.
+A Julia package that implements the RIFRAF consensus algorithm.
 
 Documentation: [murrellgroup.github.io/Rifraf.jl](https://murrellgroup.github.io/Rifraf.jl/)
 
