@@ -8,7 +8,7 @@ Documentation: [murrellgroup.github.io/Rifraf.jl](https://murrellgroup.github.io
 
 GitHub: [github.com/MurrellGroup/Rifraf.jl](https://github.com/MurrellGroup/Rifraf.jl/)
 
-A full description of the pipeline has been submitted for
+A full description of the method has been submitted for
 publication. A link to the journal article will be added here when it
 is available.
 
